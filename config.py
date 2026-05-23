@@ -43,6 +43,5 @@ DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # ── Wake / session ────────────────────────────────────────────────────────────
-WAKE_WORD         = os.getenv("WAKE_WORD", "pinku")       # software wake-word fallback
-SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "30.0"))  # seconds of silence → sleep
+SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "45.0"))  # seconds of silence before going idle
 LOG_DIR           = os.getenv("LOG_DIR", "logs")

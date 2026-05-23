@@ -184,15 +184,67 @@ def on_detection(event: dict):
     dashboard.push_detection(event)
 
 
+# ── Wake word / session end detection ────────────────────────────────────────
+
+# Wake phrases — must appear at the START of the utterance.
+# Sorted longest-first so "hey pinku" matches before bare "pinku".
+_WAKE_PHRASES = [
+    "hey pinku", "hi pinku", "ok pinku", "okay pinku",
+    "hello pinku", "yo pinku", "pinku",
+]
+
+# End-session phrases — only checked when already in session AND utterance
+# is short (≤ 6 words) to avoid "I said goodbye to a friend" killing the chat.
+_END_PHRASES = {
+    "end chat", "end conversation", "stop listening", "go to sleep",
+    "goodbye pinku", "bye pinku", "bye bye", "that's all",
+    "thats all", "we're done", "were done", "stop",
+    "ok thanks pinku", "thanks pinku", "thank you pinku",
+}
+
+
+def _check_wake(text: str) -> tuple[bool, str]:
+    """
+    Returns (triggered, command).
+
+    triggered=True  if a wake phrase is at the start of the utterance.
+    command         is whatever follows the wake phrase (may be empty).
+
+    Guards against mid-sentence mentions: "I was telling pinku about that"
+    → the wake word is NOT at position 0, so ignored.
+    """
+    t = text.lower().strip()
+    # Strip leading filler words that VAD might catch before the wake word
+    for filler in ("um ", "uh ", "so ", "like ", "well "):
+        if t.startswith(filler):
+            t = t[len(filler):]
+
+    for phrase in _WAKE_PHRASES:        # longest first
+        if t.startswith(phrase):
+            rest = text[text.lower().find(phrase) + len(phrase):].strip(" ,.")
+            return True, rest
+    return False, text
+
+
+def _check_end(text: str) -> bool:
+    """
+    True if this short utterance is a session-end command.
+    Only fires when utterance ≤ 6 words, preventing mid-sentence false positives.
+    """
+    words = text.split()
+    if len(words) > 6:
+        return False
+    t = text.lower().strip().rstrip(".,!?")
+    return t in _END_PHRASES or any(t.startswith(p) for p in _END_PHRASES)
+
+
 # ── Main voice loop ───────────────────────────────────────────────────────────
 
 def _voice_loop(recorder: stt.AudioRecorder):
     """
-    Continuously:
-    1. Wait for an utterance (VAD-gated)
-    2. Transcribe with Whisper
-    3. Route with Ollama → action
-    4. Execute action
+    Idle mode  : only respond when wake phrase heard at start of utterance.
+    Active mode: respond to everything; auto-expire after SESSION_TIMEOUT;
+                 explicit end phrases close the session early.
     """
     last_speech_at = time.time()
 
@@ -201,10 +253,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
             time.sleep(0.2)
             continue
 
-        # Session timeout
+        # ── Session timeout ───────────────────────────────────────────────────
         if _awake.is_set() and time.time() - last_speech_at > config.SESSION_TIMEOUT:
             _awake.clear()
             dashboard.update_status(state="idle")
+            tts.speak("Going quiet.", block=False)
             print("[Pinku] Session timeout → idle")
 
         dashboard.update_status(state="awake" if _awake.is_set() else "idle")
@@ -214,14 +267,41 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue
 
         text = stt.transcribe(pcm)
-        if not text or len(text.split()) < 2:
-            continue  # too short / noise
+        if not text:
+            continue
 
+        # ── Gate: idle mode ───────────────────────────────────────────────────
+        if not _awake.is_set():
+            triggered, command = _check_wake(text)
+            if not triggered:
+                print(f"[Pinku] Idle — ignored: {text!r}")
+                continue
+            # Wake confirmed
+            _awake.set()
+            last_speech_at = time.time()
+            print(f"[Pinku] Wake word → session open (command={command!r})")
+            if not command or len(command.split()) < 2:
+                # Just the wake word alone — beep and wait for next utterance
+                tts.play_beep()
+                dashboard.update_status(state="awake")
+                continue
+            text = command   # use the part after the wake word as the command
+
+        # ── Active session ────────────────────────────────────────────────────
         last_speech_at = time.time()
-        _awake.set()
+
+        # Check for session-end phrase (short utterances only)
+        if _check_end(text):
+            _awake.clear()
+            _session_hist.clear()
+            tts.speak("Okay, bye for now.", block=False)
+            dashboard.update_status(state="idle", last_transcript=text, last_reply="Okay, bye for now.")
+            print("[Pinku] Session ended by user")
+            continue
+
         dashboard.update_status(state="processing", last_transcript=text)
 
-        # Route
+        # ── Route & execute ───────────────────────────────────────────────────
         action = llm.route(text)
         act    = action.get("action", "chat")
         print(f"[Route] action={act!r} text={text!r}")
@@ -239,9 +319,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
         elif act == "scripture":
             _handle_scripture(action)
         elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
-            # Stubs — implement as needed
-            tts.speak(f"Sorry, {act.replace('_',' ')} isn't set up yet.")
-        else:  # "chat" and everything else
+            tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
+        else:
             _handle_chat(action)
 
 

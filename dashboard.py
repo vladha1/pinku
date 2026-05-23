@@ -126,7 +126,7 @@ function setPill(state, muted, speaking) {
     el.className = 'pill-speaking'; el.textContent = 'SPEAKING'; return;
   }
   const map = {
-    idle:       ['pill-idle',       'IDLE'],
+    idle:       ['pill-idle',       "SAY 'PINKU'"],
     awake:      ['pill-awake',      'LISTENING'],
     processing: ['pill-processing', 'THINKING'],
     triggered:  ['pill-processing', 'TRIGGERED'],
