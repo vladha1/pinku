@@ -97,7 +97,7 @@ def camera_snapshot():
         import cv2
         frame = get_frame()
         if frame is None:
-            return ("No camera frame", 503)
+            return ("No camera frame — camera may still be starting up", 503)
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         from flask import make_response
         r = make_response(buf.tobytes())
@@ -106,6 +106,15 @@ def camera_snapshot():
         return r
     except Exception as e:
         return (str(e), 503)
+
+@_app.route("/api/camera/status")
+def camera_status():
+    from flask import jsonify
+    try:
+        from camera import get_status
+        return jsonify(get_status())
+    except Exception as e:
+        return jsonify({"camera": f"error: {e}", "detection": "unknown"})
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
@@ -1118,6 +1127,11 @@ let _camTimer  = null;
 function startCamera() {
   _camActive = true;
   refreshCam();
+  // Show camera + detection status
+  fetch('/api/camera/status').then(r => r.json()).then(s => {
+    const msg = `Camera: ${s.camera || '?'} | Detection: ${s.detection || '?'}`;
+    document.getElementById('cam-offline').textContent = '📷 ' + msg;
+  }).catch(() => {});
 }
 function stopCamera() {
   _camActive = false;
