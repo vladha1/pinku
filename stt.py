@@ -220,14 +220,17 @@ def transcribe(pcm: bytes) -> str:
         beam_size=3,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
-        no_speech_threshold=0.55,       # discard low-confidence segments
-        log_prob_threshold=-0.8,        # drop poor log-prob segments
+        no_speech_threshold=0.55,
+        log_prob_threshold=-0.8,
         compression_ratio_threshold=2.4,
+        # Bias Whisper toward recognising "Pinku" as a proper noun
+        initial_prompt="Pinku is the name of a home AI assistant. Wake word: Pinku.",
     )
 
     segs = list(segments)
     if not segs:
         return ""
+
 
     # Drop if any segment has high no-speech probability
     if any(getattr(s, "no_speech_prob", 0) > 0.55 for s in segs):

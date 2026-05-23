@@ -207,26 +207,39 @@ _END_PHRASES = {
 }
 
 
+import re as _re
+# Catches Whisper mishearings of "Pinku" at the very start of an utterance
+_PINKU_RE = _re.compile(
+    r'^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+|yo\s+)?'
+    r'(pinku|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink)\b[,\s]*',
+    _re.IGNORECASE,
+)
+
 def _check_wake(text: str) -> tuple[bool, str]:
     """
     Returns (triggered, command).
-
-    triggered=True  if a wake phrase is at the start of the utterance.
-    command         is whatever follows the wake phrase (may be empty).
-
-    Guards against mid-sentence mentions: "I was telling pinku about that"
-    → the wake word is NOT at position 0, so ignored.
+    Matches wake word at START of utterance only — mid-sentence ignored.
+    Handles Whisper mishearings via regex (pinko, pink, pingo, etc.).
     """
-    t = text.lower().strip()
-    # Strip leading filler words that VAD might catch before the wake word
-    for filler in ("um ", "uh ", "so ", "like ", "well "):
-        if t.startswith(filler):
+    t = text.strip()
+    # Strip leading filler
+    for filler in ("um ", "uh ", "so ", "like ", "well ", "okay so "):
+        if t.lower().startswith(filler):
             t = t[len(filler):]
 
-    for phrase in _WAKE_PHRASES:        # longest first
-        if t.startswith(phrase):
-            rest = text[text.lower().find(phrase) + len(phrase):].strip(" ,.")
+    # Regex match — catches all Whisper mishearings in one shot
+    m = _PINKU_RE.match(t)
+    if m:
+        rest = t[m.end():].strip(" ,.")
+        return True, rest
+
+    # Exact phrase fallback
+    tl = t.lower()
+    for phrase in _WAKE_PHRASES:
+        if tl.startswith(phrase):
+            rest = t[len(phrase):].strip(" ,.")
             return True, rest
+
     return False, text
 
 
