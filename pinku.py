@@ -377,12 +377,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if not _awake.is_set():
             triggered, command = _check_wake(text)
             if not triggered:
-                _log("info", f"Idle — no wake word in: "{text}"")
+                _log("info", f'Idle — no wake word in: "{text}"')
                 continue
             # Wake confirmed
             _awake.set()
             last_speech_at = time.time()
-            _log("wake", f"Wake word detected! command="{command}"")
+            _log("wake", f'Wake word detected! command="{command}"')
             if not command:
                 # Just the wake word alone — beep and wait for next utterance
                 tts.play_beep()
@@ -409,7 +409,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         action = llm.route(text)
         act    = action.get("action", "chat")
         lang   = action.get("lang", "en")
-        _log("route", f"action={act} lang={lang} — "{text}"")
+        _log("route", f'action={act} lang={lang} — "{text}"')
 
         if act == "ignore":
             _log("info", "LLM classified as noise/ignore — skipping")
@@ -425,7 +425,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         elif act == "scripture":
             _handle_scripture(action)
         elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
-            _log("warn", f"Action "{act}" not yet implemented")
+            _log("warn", f'Action "{act}" not yet implemented')
             tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
         else:
             _handle_chat(action)
