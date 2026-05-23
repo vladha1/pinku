@@ -127,30 +127,45 @@ def camera_status():
 
 @_app.route("/api/camera/request-permission")
 def camera_request_permission():
-    """Trigger macOS camera permission dialog by attempting to open the camera."""
+    """
+    Trigger macOS camera permission dialog by running camera access
+    inside the user's GUI login session (via launchctl asuser),
+    so the permission popup appears on screen / VNC.
+    """
     from flask import jsonify
-    import subprocess, sys
+    import subprocess, sys, os, tempfile
+
     script = (
         "import cv2, time\n"
         "cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)\n"
         "ok = False\n"
-        "for _ in range(20):\n"
+        "for _ in range(30):\n"
         "    ret, _ = cap.read()\n"
         "    if ret: ok = True; break\n"
-        "    time.sleep(0.15)\n"
+        "    time.sleep(0.2)\n"
         "cap.release()\n"
         "print('OK' if ok else 'DENIED')\n"
     )
+    # Write to temp file (launchctl asuser needs a real path)
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
+    tmp.write(script); tmp.flush(); tmp.close()
+
     try:
+        uid = str(os.getuid())
         result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True, text=True, timeout=10,
+            ["launchctl", "asuser", uid, sys.executable, tmp.name],
+            capture_output=True, text=True, timeout=15,
         )
         out = (result.stdout + result.stderr).strip()
         ok  = "OK" in out
-        return jsonify({"ok": ok, "output": out})
+        return jsonify({"ok": ok, "output": out or "(no output — check VNC for popup)"})
     except Exception as e:
         return jsonify({"ok": False, "output": str(e)})
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
