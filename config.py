@@ -15,8 +15,8 @@ WHISPER_DEVICE    = "auto"      # "auto" picks mps on Apple Silicon, cpu otherwi
 WHISPER_LANGUAGE  = None        # None = auto-detect; "en" / "hi" to force
 
 # ── TTS (macOS say) ───────────────────────────────────────────────────────────
-SAY_VOICE_EN = os.getenv("SAY_VOICE_EN", "Ava")        # macOS English voice (neural female)
-SAY_VOICE_HI = os.getenv("SAY_VOICE_HI", "Lekha")     # macOS Indian-English / Hindi voice
+SAY_VOICE_EN = os.getenv("SAY_VOICE_EN", "Samantha")   # macOS English female voice
+SAY_VOICE_HI = os.getenv("SAY_VOICE_HI", "Tara")      # Indian English female voice
 SAY_RATE     = int(os.getenv("SAY_RATE", "185"))        # words per minute
 
 # ── Camera ────────────────────────────────────────────────────────────────────

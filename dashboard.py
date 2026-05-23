@@ -1,5 +1,5 @@
 """
-Web dashboard — SSE-powered, Pinky-style interface.
+Web dashboard — matches Pinky's visual style.
 http://<mac-mini-ip>:5100
 """
 
@@ -22,124 +22,105 @@ HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <title>Pinku</title>
 <style>
-* { box-sizing:border-box; margin:0; padding:0; }
-body { background:#0a0a0a; color:#e0e0e0; font-family:monospace; padding:20px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; color: #e0e0e0; font-family: monospace; padding: 16px; }
+  h1 { color: #00ff88; margin-bottom: 12px; font-size: 1.2rem; }
 
-/* ── Header ── */
-.header { display:flex; align-items:center; gap:16px; margin-bottom:20px; }
-.header h1 { color:#00ff88; font-size:1.4rem; letter-spacing:2px; }
-#status-pill {
-  padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:bold;
-  letter-spacing:1px; transition: all 0.3s;
-}
-.pill-idle    { background:#1a1a1a; color:#555; border:1px solid #333; }
-.pill-awake   { background:#003320; color:#00ff88; border:1px solid #00aa55; }
-.pill-processing { background:#001a33; color:#00aaff; border:1px solid #0055aa; animation: pulse 1s infinite; }
-.pill-muted   { background:#330000; color:#ff4444; border:1px solid #aa0000; }
-.pill-speaking { background:#1a0033; color:#cc88ff; border:1px solid #6600cc; animation: pulse 0.8s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  #stats { display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+          padding: 10px 18px; text-align: center; }
+  .stat .val { font-size: 2rem; font-weight: bold; color: #00ccff; }
+  .stat .lbl { font-size: 0.7rem; color: #888; margin-top: 2px; }
 
-#live-dot { position:fixed; top:20px; right:20px; font-size:0.72rem; color:#333; }
-#live-dot.live { color:#00ff88; }
+  #transcript-box { background: #111; border: 1px solid #222; border-radius: 6px;
+                    padding: 8px 12px; margin-bottom: 16px; min-height: 60px; }
+  .tx-row { font-size: 0.82rem; margin: 3px 0; line-height: 1.5; }
+  .tx-you   { color: #888; }
+  .tx-you   span { color: #555; margin-right: 6px; }
+  .tx-pinku { color: #ccc; }
+  .tx-pinku span { color: #00ff88; margin-right: 6px; }
 
-/* ── Stats ── */
-#stats { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
-.stat {
-  background:#111; border:1px solid #222; border-radius:8px;
-  padding:12px 18px; min-width:110px; text-align:center;
-}
-.stat .val { font-size:1.8rem; font-weight:bold; color:#00ccff; }
-.stat .lbl { font-size:0.65rem; color:#555; margin-top:4px; letter-spacing:1px; }
+  #log { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  #log th { background: #1a1a1a; color: #888; text-align: left;
+             padding: 6px 10px; border-bottom: 1px solid #333;
+             position: sticky; top: 0; }
+  #log td { padding: 5px 10px; border-bottom: 1px solid #1e1e1e; vertical-align: top; }
+  tr:hover td { background: #151515; }
 
-/* ── Transcript / reply ── */
-.bubble-wrap { display:flex; flex-direction:column; gap:8px; margin-bottom:20px; }
-.bubble {
-  padding:10px 14px; border-radius:8px; font-size:0.88rem;
-  min-height:36px; line-height:1.5; transition:all 0.3s;
-}
-.bubble-user  { background:#111; border:1px solid #222; color:#aaa; }
-.bubble-user span  { color:#555; font-size:0.7rem; margin-right:8px; }
-.bubble-pinku { background:#0a1a0a; border:1px solid #1a3a1a; color:#ccc; }
-.bubble-pinku span { color:#00aa55; font-size:0.7rem; margin-right:8px; }
+  .tag { display: inline-block; border-radius: 3px; padding: 1px 6px;
+         font-size: 0.75rem; margin: 1px; }
+  .tag-obj    { background: #2a2200; color: #ffcc00; border: 1px solid #554400; }
+  .tag-person { background: #002233; color: #00ccff; border: 1px solid #005566; }
+  .tag-gest   { background: #002200; color: #00ff88; border: 1px solid #005500; }
+  .tag-state  { background: #1a1a1a; color: #888;    border: 1px solid #333; }
+  .tag-muted  { background: #330000; color: #ff4444; border: 1px solid #660000; }
+  .tag-awake  { background: #002200; color: #00ff88; border: 1px solid #004400; }
+  .tag-speak  { background: #1a0033; color: #cc88ff; border: 1px solid #440066; }
 
-/* ── Detection log ── */
-.section-title { color:#444; font-size:0.7rem; letter-spacing:2px; margin-bottom:8px; }
-.wrap { max-height:calc(100vh - 420px); overflow-y:auto; }
-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
-th { background:#111; color:#555; text-align:left; padding:6px 10px;
-     border-bottom:1px solid #222; position:sticky; top:0; letter-spacing:1px; }
-td { padding:5px 10px; border-bottom:1px solid #161616; vertical-align:top; }
-tr:hover td { background:#111; }
-
-.tag { display:inline-block; border-radius:3px; padding:1px 6px;
-       font-size:0.72rem; margin:1px; }
-.tag-obj    { background:#1a1400; color:#ccaa00; border:1px solid #443300; }
-.tag-person { background:#001522; color:#0099cc; border:1px solid #003355; }
-.tag-gest   { background:#001400; color:#00cc66; border:1px solid #003311; }
+  #status { position: fixed; top: 12px; right: 16px; font-size: 0.75rem; color: #555; }
+  #status.live { color: #00ff88; }
+  .state-tag { position: fixed; top: 10px; right: 80px; }
+  .wrap { max-height: calc(100vh - 220px); overflow-y: auto; }
 </style>
 </head>
 <body>
-
-<div class="header">
-  <h1>PINKU</h1>
-  <div id="status-pill" class="pill-idle">IDLE</div>
-  <span style="color:#333;font-size:0.75rem" id="model-lbl"></span>
-</div>
+<h1>Pinku &nbsp;
+  <span style="font-size:0.75rem;color:#555" id="model-lbl"></span>
+</h1>
 
 <div id="stats">
   <div class="stat"><div class="val" id="s-events">0</div><div class="lbl">EVENTS</div></div>
-  <div class="stat"><div class="val" id="s-persons">0</div><div class="lbl">PERSONS</div></div>
-  <div class="stat"><div class="val" id="s-objects">0</div><div class="lbl">OBJECTS</div></div>
+  <div class="stat"><div class="val" id="s-persons">0</div><div class="lbl">PERSONS SEEN</div></div>
+  <div class="stat"><div class="val" id="s-objects">0</div><div class="lbl">OBJECTS SEEN</div></div>
   <div class="stat"><div class="val" id="s-gestures">0</div><div class="lbl">GESTURES</div></div>
 </div>
 
-<div class="bubble-wrap">
-  <div class="bubble bubble-user"><span>YOU</span><span id="transcript">—</span></div>
-  <div class="bubble bubble-pinku"><span>PINKU</span><span id="reply">—</span></div>
+<div id="transcript-box">
+  <div class="tx-row tx-you"><span>YOU</span><span id="tx-text">—</span></div>
+  <div class="tx-row tx-pinku"><span>PINKU</span><span id="reply-text">—</span></div>
 </div>
 
-<div class="section-title">DETECTION LOG</div>
 <div class="wrap">
-<table>
+<table id="log">
   <thead><tr>
-    <th style="width:150px">TIME</th>
-    <th style="width:55px">PERSONS</th>
-    <th>OBJECTS</th>
-    <th>GESTURES</th>
+    <th style="width:160px">Time</th>
+    <th style="width:60px">Persons</th>
+    <th>Objects</th>
+    <th>Gestures</th>
   </tr></thead>
   <tbody id="tbody"></tbody>
 </table>
 </div>
 
-<div id="live-dot">○ connecting</div>
+<div class="state-tag"><span id="state-tag" class="tag tag-state">IDLE</span></div>
+<div id="status">connecting…</div>
 
 <script>
 let totEvents=0, totPersons=0, totObjects=0, totGestures=0;
 const MAX_ROWS = 200;
 
-function setPill(state, muted, speaking) {
-  const el = document.getElementById('status-pill');
-  if (muted) {
-    el.className = 'pill-muted'; el.textContent = 'MUTED'; return;
+function updateState(d) {
+  const el = document.getElementById('state-tag');
+  if (d.muted) {
+    el.className = 'tag tag-muted'; el.textContent = 'MUTED'; return;
   }
-  if (speaking) {
-    el.className = 'pill-speaking'; el.textContent = 'SPEAKING'; return;
+  if (d.speaking) {
+    el.className = 'tag tag-speak'; el.textContent = '● SPEAKING'; return;
   }
   const map = {
-    idle:       ['pill-idle',       "SAY 'PINKU'"],
-    awake:      ['pill-awake',      'LISTENING'],
-    processing: ['pill-processing', 'THINKING'],
-    triggered:  ['pill-processing', 'TRIGGERED'],
+    idle:       ['tag-state', "SAY 'PINKU'"],
+    awake:      ['tag-awake', '● LISTENING'],
+    processing: ['tag-awake', '● THINKING'],
+    triggered:  ['tag-awake', '● TRIGGERED'],
   };
-  const [cls, lbl] = map[state] || ['pill-idle', state.toUpperCase()];
-  el.className = cls; el.textContent = lbl;
+  const [cls, lbl] = map[d.state] || ['tag-state', d.state.toUpperCase()];
+  el.className = 'tag ' + cls;
+  el.textContent = lbl;
 }
 
 function addRow(e) {
-  totEvents++;
-  totPersons  += e.persons;
-  totObjects  += e.objects.length;
-  totGestures += e.gestures.length;
+  totEvents++; totPersons += e.persons;
+  totObjects += e.objects.length; totGestures += e.gestures.length;
   document.getElementById('s-events').textContent   = totEvents;
   document.getElementById('s-persons').textContent  = totPersons;
   document.getElementById('s-objects').textContent  = totObjects;
@@ -162,30 +143,28 @@ fetch('/api/history').then(r=>r.json()).then(ev => ev.slice().reverse().forEach(
 
 const es = new EventSource('/api/stream');
 es.onopen = () => {
-  document.getElementById('live-dot').textContent = '● live';
-  document.getElementById('live-dot').className = 'live';
+  document.getElementById('status').textContent = '● live';
+  document.getElementById('status').className = 'live';
 };
 es.onmessage = e => {
   const d = JSON.parse(e.data);
   if (d.type === 'status') {
-    setPill(d.state, d.muted, d.speaking);
+    updateState(d);
     if (d.model) document.getElementById('model-lbl').textContent = d.model;
-    if (d.last_transcript) document.getElementById('transcript').textContent = d.last_transcript;
-    if (d.last_reply)      document.getElementById('reply').textContent      = d.last_reply;
+    if (d.last_transcript) document.getElementById('tx-text').textContent = d.last_transcript;
+    if (d.last_reply)      document.getElementById('reply-text').textContent = d.last_reply;
   } else if (d.type === 'detection') {
     addRow(d.event);
   }
 };
 es.onerror = () => {
-  document.getElementById('live-dot').textContent = '○ reconnecting';
-  document.getElementById('live-dot').className = '';
+  document.getElementById('status').textContent = '○ reconnecting…';
+  document.getElementById('status').className = '';
 };
 </script>
 </body>
 </html>"""
 
-
-# ── SSE broadcast ─────────────────────────────────────────────────────────────
 
 _subscribers: list = []
 _sub_lock = threading.Lock()
@@ -206,8 +185,6 @@ def update_status(**kwargs):
 def push_detection(event: dict):
     _push({"type": "detection", "event": event})
 
-
-# ── Routes ────────────────────────────────────────────────────────────────────
 
 @_app.route("/")
 def index():
