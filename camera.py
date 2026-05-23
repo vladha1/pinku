@@ -81,18 +81,27 @@ def _open_camera(preferred_index: int) -> cv2.VideoCapture | None:
         for backend in [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY]:
             try:
                 cap = cv2.VideoCapture(idx, backend)
-                if cap.isOpened():
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_WIDTH)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-                    cap.set(cv2.CAP_PROP_FPS,          CAMERA_FPS)
-                    # Verify we can actually read a frame
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_WIDTH)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+                cap.set(cv2.CAP_PROP_FPS,          CAMERA_FPS)
+                # AVFoundation needs a moment to warm up — try up to 10 frames
+                got_frame = False
+                for _ in range(10):
                     ret, _ = cap.read()
                     if ret:
-                        backend_name = "AVFoundation" if backend == cv2.CAP_AVFOUNDATION else "default"
-                        print(f"[Camera] Opened camera index={idx} backend={backend_name}")
-                        return cap
-                    cap.release()
-            except Exception:
+                        got_frame = True
+                        break
+                    time.sleep(0.1)
+                if got_frame:
+                    backend_name = "AVFoundation" if backend == cv2.CAP_AVFOUNDATION else "default"
+                    print(f"[Camera] Opened camera index={idx} backend={backend_name}")
+                    return cap
+                cap.release()
+            except Exception as e:
+                print(f"[Camera] index={idx} backend={backend}: {e}")
                 pass
 
     return None
