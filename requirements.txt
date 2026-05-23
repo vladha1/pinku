@@ -1,0 +1,26 @@
+# Pinku dependencies — M4 Mac Mini (Apple Silicon / macOS)
+# Install: pip install -r requirements.txt
+#
+# PyTorch with MPS (Metal) — install FIRST via:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   (MPS is included in the standard macOS torch build from pytorch.org)
+
+# ── STT ──────────────────────────────────────────────────────────────────────
+faster-whisper>=1.0.3          # local Whisper inference (MPS / CPU)
+pyaudio>=0.2.14                # mic input
+webrtcvad>=2.0.10              # voice activity detection
+
+# ── Vision / camera ───────────────────────────────────────────────────────────
+ultralytics>=8.2.0             # YOLOv8 (MPS backend via torch)
+mediapipe>=0.10.14             # pose + hand landmark detection
+opencv-python>=4.10.0          # frame capture and processing
+
+# ── Web dashboard ─────────────────────────────────────────────────────────────
+flask>=3.0.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+numpy>=1.26.0
+
+# ── Optional / future ─────────────────────────────────────────────────────────
+# face-recognition             # face ID (requires dlib — brew install cmake first)
+# openai-whisper               # alternative to faster-whisper (slower but official)
