@@ -125,6 +125,33 @@ def camera_status():
     except Exception as e:
         return jsonify({"camera": f"error: {e}", "detection": "unknown"})
 
+@_app.route("/api/camera/request-permission")
+def camera_request_permission():
+    """Trigger macOS camera permission dialog by attempting to open the camera."""
+    from flask import jsonify
+    import subprocess, sys
+    script = (
+        "import cv2, time\n"
+        "cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)\n"
+        "ok = False\n"
+        "for _ in range(20):\n"
+        "    ret, _ = cap.read()\n"
+        "    if ret: ok = True; break\n"
+        "    time.sleep(0.15)\n"
+        "cap.release()\n"
+        "print('OK' if ok else 'DENIED')\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=10,
+        )
+        out = (result.stdout + result.stderr).strip()
+        ok  = "OK" in out
+        return jsonify({"ok": ok, "output": out})
+    except Exception as e:
+        return jsonify({"ok": False, "output": str(e)})
+
 # ── Start ─────────────────────────────────────────────────────────────────────
 
 def start(logger=None, port=DASHBOARD_PORT):
@@ -787,6 +814,11 @@ body {
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-size:0.88rem; color:var(--muted); background:rgba(0,0,0,0.6);
 }
+.cam-toolbar {
+  width:100%; max-width:640px; padding:5px 10px;
+  display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2);
+}
 .cam-detect-feed {
   flex:1; overflow-y:auto; width:100%; max-width:640px; padding:8px 12px;
 }
@@ -966,6 +998,10 @@ body {
   <div class="cam-feed-wrap">
     <img id="cam-img" alt="Camera" style="display:none">
     <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
+  </div>
+  <div class="cam-toolbar">
+    <span id="cam-status-text" style="font-size:0.72rem;color:#64748b">Checking…</span>
+    <button class="log-clear-btn" id="cam-perm-btn" onclick="requestCameraPermission()">🔓 Request Permission</button>
   </div>
   <div class="cam-detect-feed" id="cam-detect-feed"></div>
 </div>
@@ -1154,11 +1190,33 @@ let _camTimer  = null;
 function startCamera() {
   _camActive = true;
   refreshCam();
-  // Show camera + detection status
   fetch('/api/camera/status').then(r => r.json()).then(s => {
     const msg = `Camera: ${s.camera || '?'} | Detection: ${s.detection || '?'}`;
     document.getElementById('cam-offline').textContent = '📷 ' + msg;
+    document.getElementById('cam-status-text').textContent = msg;
   }).catch(() => {});
+}
+
+function requestCameraPermission() {
+  const btn = document.getElementById('cam-perm-btn');
+  btn.textContent = '⏳ Requesting…';
+  btn.disabled = true;
+  addLog('camera', 'Requesting macOS camera permission…', '');
+  fetch('/api/camera/request-permission').then(r => r.json()).then(s => {
+    if (s.ok) {
+      btn.textContent = '✅ Granted!';
+      addLog('camera', 'Camera permission granted — restarting feed', '');
+      document.getElementById('cam-status-text').textContent = 'Permission granted — reloading…';
+      setTimeout(() => { stopCamera(); startCamera(); }, 1000);
+    } else {
+      btn.textContent = '❌ Denied';
+      btn.disabled = false;
+      addLog('error', 'Camera permission denied: ' + (s.output || ''), '');
+      document.getElementById('cam-status-text').textContent =
+        'Permission denied — go to System Settings → Privacy → Camera';
+    }
+    setTimeout(() => { btn.textContent = '🔓 Request Permission'; btn.disabled = false; }, 4000);
+  }).catch(() => { btn.textContent = '🔓 Request Permission'; btn.disabled = false; });
 }
 function stopCamera() {
   _camActive = false;
