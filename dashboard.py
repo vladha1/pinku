@@ -468,244 +468,190 @@ body.state-speaking #status-live { background: var(--pink); }
             <div class="dot"></div>
           </div>
 
-          <!-- ── Character Face (feminine) ── -->
-          <svg id="face-svg" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+          <!-- ── Character Face (Pinky-style exact match) ── -->
+          <svg id="face-svg" viewBox="0 0 200 230" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <!-- Face skin gradient — warm peach -->
-              <radialGradient id="face-grad" cx="45%" cy="35%" r="60%">
-                <stop offset="0%"   stop-color="#fff0e6"/>
-                <stop offset="70%"  stop-color="#fddcbe"/>
-                <stop offset="100%" stop-color="#f5c9a5"/>
+              <!-- Face: warm cream -->
+              <radialGradient id="face-grad" cx="42%" cy="32%" r="58%">
+                <stop offset="0%"   stop-color="#fff5ea"/>
+                <stop offset="65%"  stop-color="#fde0c4"/>
+                <stop offset="100%" stop-color="#f5cba8"/>
               </radialGradient>
-              <!-- Ear gradient -->
-              <radialGradient id="ear-grad" cx="40%" cy="30%" r="65%">
-                <stop offset="0%"   stop-color="#f5aac8"/>
-                <stop offset="100%" stop-color="#d4679a"/>
+              <!-- Ears: pink -->
+              <radialGradient id="ear-grad" cx="38%" cy="28%" r="62%">
+                <stop offset="0%"   stop-color="#f8b8d8"/>
+                <stop offset="100%" stop-color="#d96aa0"/>
               </radialGradient>
+              <!-- Cap/hair: bright pink -->
+              <linearGradient id="cap-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%"   stop-color="#f5a0c8"/>
+                <stop offset="100%" stop-color="#d4508a"/>
+              </linearGradient>
               <!-- Eye white -->
-              <radialGradient id="eye-grad" cx="35%" cy="30%" r="60%">
+              <radialGradient id="eye-grad" cx="32%" cy="28%" r="58%">
                 <stop offset="0%"   stop-color="#ffffff"/>
-                <stop offset="100%" stop-color="#eeeef8"/>
+                <stop offset="100%" stop-color="#e8e8f2"/>
               </radialGradient>
-              <!-- Iris — deep violet -->
-              <radialGradient id="iris-grad" cx="32%" cy="28%" r="58%">
-                <stop offset="0%"   stop-color="#9d7ee8"/>
-                <stop offset="60%"  stop-color="#6340c0"/>
-                <stop offset="100%" stop-color="#3a1f8a"/>
+              <!-- Iris: purple -->
+              <radialGradient id="iris-grad" cx="30%" cy="25%" r="56%">
+                <stop offset="0%"   stop-color="#9878e8"/>
+                <stop offset="55%"  stop-color="#5c35b8"/>
+                <stop offset="100%" stop-color="#321878"/>
               </radialGradient>
-              <!-- Hair gradient -->
-              <radialGradient id="hair-grad" cx="50%" cy="20%" r="70%">
-                <stop offset="0%"   stop-color="#f09dc0"/>
-                <stop offset="100%" stop-color="#c0457a"/>
+              <!-- Mouth disc: pink -->
+              <radialGradient id="mouth-grad" cx="40%" cy="35%" r="60%">
+                <stop offset="0%"   stop-color="#f5a0c0"/>
+                <stop offset="100%" stop-color="#d46090"/>
               </radialGradient>
-              <!-- Lip gradient -->
-              <radialGradient id="lip-grad" cx="50%" cy="30%" r="60%">
-                <stop offset="0%"   stop-color="#f0608a"/>
-                <stop offset="100%" stop-color="#b83060"/>
-              </radialGradient>
-              <!-- Drop shadow -->
-              <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
-                <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000" flood-opacity="0.3"/>
+              <filter id="fsh" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.28"/>
               </filter>
-              <!-- Inner ear shadow -->
-              <filter id="inner-shadow">
-                <feDropShadow dx="1" dy="2" stdDeviation="3" flood-color="#b83060" flood-opacity="0.25"/>
+              <filter id="fsh2" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.2"/>
               </filter>
             </defs>
 
-            <!-- ── Ears (behind face) ── -->
-            <ellipse cx="33" cy="125" rx="23" ry="30" fill="url(#ear-grad)" filter="url(#shadow)"/>
-            <ellipse cx="33" cy="125" rx="13" ry="19" fill="#f9cce0" opacity="0.55"/>
-            <!-- stud earring -->
-            <circle cx="24" cy="130" r="4" fill="#c9b1ff" opacity="0.9"/>
-            <circle cx="24" cy="130" r="2" fill="#fff" opacity="0.7"/>
+            <!-- ── EARS (chunky rounded rectangles, behind face) ── -->
+            <rect x="14" y="88" width="38" height="72" rx="19" fill="url(#ear-grad)" filter="url(#fsh)"/>
+            <rect x="20" y="96" width="24" height="54" rx="12" fill="#f9d0e8" opacity="0.5"/>
 
-            <ellipse cx="167" cy="125" rx="23" ry="30" fill="url(#ear-grad)" filter="url(#shadow)"/>
-            <ellipse cx="167" cy="125" rx="13" ry="19" fill="#f9cce0" opacity="0.55"/>
-            <circle cx="176" cy="130" r="4" fill="#c9b1ff" opacity="0.9"/>
-            <circle cx="176" cy="130" r="2" fill="#fff" opacity="0.7"/>
+            <rect x="148" y="88" width="38" height="72" rx="19" fill="url(#ear-grad)" filter="url(#fsh)"/>
+            <rect x="156" y="96" width="24" height="54" rx="12" fill="#f9d0e8" opacity="0.5"/>
 
-            <!-- ── Hair / top ── -->
-            <!-- Main hair dome -->
-            <ellipse cx="100" cy="34" rx="54" ry="26" fill="url(#hair-grad)" filter="url(#shadow)"/>
-            <!-- Hair sides draping over face edges -->
-            <ellipse cx="52"  cy="68" rx="12" ry="30" fill="#d4679a" opacity="0.85"/>
-            <ellipse cx="148" cy="68" rx="12" ry="30" fill="#d4679a" opacity="0.85"/>
-            <!-- Hair highlight -->
-            <ellipse cx="84" cy="22" rx="28" ry="10" fill="#f9cce0" opacity="0.35"/>
-            <!-- Hair band -->
-            <rect x="56" y="50" width="88" height="9" rx="4.5" fill="#b83060" opacity="0.4"/>
+            <!-- ── HAIR CAP (flat rounded rect on top) ── -->
+            <rect x="56" y="20" width="88" height="30" rx="15" fill="url(#cap-grad)" filter="url(#fsh)"/>
+            <!-- Cap highlight -->
+            <rect x="64" y="23" width="72" height="12" rx="7" fill="#fce0f0" opacity="0.4"/>
 
-            <!-- ── Face body ── -->
-            <rect x="50" y="48" width="100" height="148" rx="42" fill="url(#face-grad)" filter="url(#shadow)"/>
+            <!-- ── FACE BODY (wide, squarish, very rounded) ── -->
+            <rect x="44" y="38" width="112" height="152" rx="44" fill="url(#face-grad)" filter="url(#fsh)"/>
 
-            <!-- ── EYES — sleeping ── -->
+            <!-- ── EYES — SLEEPING ── -->
             <g class="eye-sleep">
-              <!-- Left eye — long curved closed lash line -->
-              <path d="M63 102 Q78 93 93 102" stroke="#4a2860" stroke-width="3.5" fill="none" stroke-linecap="round"/>
-              <!-- lashes on closed line -->
-              <line x1="65"  y1="101" x2="63"  y2="94"  stroke="#4a2860" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="72"  y1="96"  x2="71"  y2="89"  stroke="#4a2860" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="80"  y1="94"  x2="80"  y2="87"  stroke="#4a2860" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="88"  y1="96"  x2="90"  y2="90"  stroke="#4a2860" stroke-width="2"   stroke-linecap="round"/>
+              <!-- Left eye closed — curved line + ticks -->
+              <path d="M66 103 Q80 95 94 103" stroke="#3a1858" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+              <line x1="68"  y1="102" x2="66"  y2="95"  stroke="#3a1858" stroke-width="2"   stroke-linecap="round"/>
+              <line x1="75"  y1="97"  x2="74"  y2="90"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="83"  y1="95"  x2="83"  y2="88"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="91"  y1="97"  x2="93"  y2="91"  stroke="#3a1858" stroke-width="2"   stroke-linecap="round"/>
               <!-- Right eye closed -->
-              <path d="M107 102 Q122 93 137 102" stroke="#4a2860" stroke-width="3.5" fill="none" stroke-linecap="round"/>
-              <line x1="109" y1="101" x2="107" y2="94"  stroke="#4a2860" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="116" y1="96"  x2="115" y2="89"  stroke="#4a2860" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="124" y1="94"  x2="124" y2="87"  stroke="#4a2860" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="132" y1="96"  x2="134" y2="90"  stroke="#4a2860" stroke-width="2"   stroke-linecap="round"/>
+              <path d="M106 103 Q120 95 134 103" stroke="#3a1858" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+              <line x1="108" y1="102" x2="106" y2="95"  stroke="#3a1858" stroke-width="2"   stroke-linecap="round"/>
+              <line x1="115" y1="97"  x2="114" y2="90"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="123" y1="95"  x2="123" y2="88"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="131" y1="97"  x2="133" y2="91"  stroke="#3a1858" stroke-width="2"   stroke-linecap="round"/>
               <!-- ZZZ -->
-              <text x="148" y="75" font-size="9"  fill="#c9b1ff" opacity="0.8" font-weight="700">z</text>
-              <text x="156" y="66" font-size="12" fill="#c9b1ff" opacity="0.5" font-weight="700">z</text>
+              <text x="146" y="74" font-size="9"  fill="#c9b1ff" opacity="0.85" font-weight="700">z</text>
+              <text x="154" y="65" font-size="12" fill="#c9b1ff" opacity="0.5"  font-weight="700">z</text>
             </g>
 
-            <!-- ── EYES — open (normal awake / speaking) ── -->
+            <!-- ── EYES — OPEN (awake / speaking) ── -->
             <g class="eye-open" style="display:none">
-              <!-- LEFT EYE -->
-              <!-- Eye white — almond shape -->
-              <path d="M60 104 Q78 88 96 104 Q78 116 60 104 Z" fill="url(#eye-grad)"/>
-              <!-- Iris -->
-              <circle class="pupil-l" cx="78" cy="104" r="11" fill="url(#iris-grad)"/>
-              <!-- Pupil -->
-              <circle class="pupil-l" cx="78" cy="104" r="5.5" fill="#1a0a3a"/>
+              <!-- LEFT EYE — round white -->
+              <circle cx="80" cy="103" r="20" fill="url(#eye-grad)" filter="url(#fsh2)"/>
+              <!-- Iris + pupil -->
+              <circle class="pupil-l" cx="80" cy="103" r="11" fill="url(#iris-grad)"/>
+              <circle class="pupil-l" cx="80" cy="103" r="5"  fill="#180a38"/>
               <!-- Catchlight -->
-              <circle class="pupil-l-dot" cx="82" cy="100" r="3.5" fill="white"/>
-              <circle cx="75" cy="108" r="1.5" fill="white" opacity="0.4"/>
-              <!-- Upper lid shadow -->
-              <path d="M60 104 Q78 88 96 104" fill="rgba(60,20,80,0.08)"/>
-              <!-- Lash line (upper) — dramatic curved -->
-              <path d="M60 104 Q78 87 96 104" stroke="#2a1040" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <!-- Individual lashes — fanning upward -->
-              <line x1="63"  y1="103" x2="59"  y2="95"  stroke="#2a1040" stroke-width="1.8" stroke-linecap="round"/>
-              <line x1="69"  y1="97"  x2="67"  y2="89"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="77"  y1="94"  x2="77"  y2="86"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="85"  y1="96"  x2="87"  y2="88"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="92"  y1="100" x2="97"  y2="94"  stroke="#2a1040" stroke-width="1.8" stroke-linecap="round"/>
-              <!-- Lower lash (subtle) -->
-              <line x1="65"  y1="108" x2="63"  y2="112" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <line x1="78"  y1="111" x2="78"  y2="115" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <line x1="91"  y1="108" x2="93"  y2="112" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <!-- Eyebrow — arched feminine -->
-              <path d="M58 88 Q78 79 97 86" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <circle class="pupil-l-dot" cx="85" cy="98"  r="4"  fill="white"/>
+              <circle cx="76"  cy="109" r="1.8" fill="white" opacity="0.35"/>
+              <!-- Upper lash ticks (4 short lines fanning upward from top of eye) -->
+              <line x1="64"  y1="95"  x2="61"  y2="87"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="73"  y1="87"  x2="72"  y2="79"  stroke="#3a1858" stroke-width="2.4" stroke-linecap="round"/>
+              <line x1="82"  y1="84"  x2="82"  y2="76"  stroke="#3a1858" stroke-width="2.4" stroke-linecap="round"/>
+              <line x1="91"  y1="86"  x2="94"  y2="79"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <!-- Eyebrow — thin, slightly arched -->
+              <path d="M62 80 Q80 73 98 79" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
 
               <!-- RIGHT EYE -->
-              <path d="M104 104 Q122 88 140 104 Q122 116 104 104 Z" fill="url(#eye-grad)"/>
-              <circle class="pupil-r" cx="122" cy="104" r="11" fill="url(#iris-grad)"/>
-              <circle class="pupil-r" cx="122" cy="104" r="5.5" fill="#1a0a3a"/>
-              <circle class="pupil-r-dot" cx="126" cy="100" r="3.5" fill="white"/>
-              <circle cx="119" cy="108" r="1.5" fill="white" opacity="0.4"/>
-              <path d="M104 104 Q122 87 140 104" fill="rgba(60,20,80,0.08)"/>
-              <path d="M104 104 Q122 87 140 104" stroke="#2a1040" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <line x1="107" y1="103" x2="103" y2="95"  stroke="#2a1040" stroke-width="1.8" stroke-linecap="round"/>
-              <line x1="113" y1="97"  x2="111" y2="89"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="121" y1="94"  x2="121" y2="86"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="129" y1="96"  x2="131" y2="88"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="136" y1="100" x2="141" y2="94"  stroke="#2a1040" stroke-width="1.8" stroke-linecap="round"/>
-              <line x1="109" y1="108" x2="107" y2="112" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <line x1="122" y1="111" x2="122" y2="115" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <line x1="135" y1="108" x2="137" y2="112" stroke="#2a1040" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
-              <!-- Right eyebrow -->
-              <path d="M103 88 Q122 79 141 86" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <circle cx="120" cy="103" r="20" fill="url(#eye-grad)" filter="url(#fsh2)"/>
+              <circle class="pupil-r" cx="120" cy="103" r="11" fill="url(#iris-grad)"/>
+              <circle class="pupil-r" cx="120" cy="103" r="5"  fill="#180a38"/>
+              <circle class="pupil-r-dot" cx="125" cy="98"  r="4"  fill="white"/>
+              <circle cx="116"  cy="109" r="1.8" fill="white" opacity="0.35"/>
+              <line x1="104" y1="95"  x2="101" y2="87"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <line x1="113" y1="87"  x2="112" y2="79"  stroke="#3a1858" stroke-width="2.4" stroke-linecap="round"/>
+              <line x1="122" y1="84"  x2="122" y2="76"  stroke="#3a1858" stroke-width="2.4" stroke-linecap="round"/>
+              <line x1="131" y1="86"  x2="134" y2="79"  stroke="#3a1858" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M102 79 Q120 73 138 80" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
             </g>
 
-            <!-- ── EYES — surprised (wide) ── -->
+            <!-- ── EYES — SURPRISED (wider circles, bigger irises) ── -->
             <g class="eye-surprise" style="display:none">
-              <!-- Left — big round eyes -->
-              <circle cx="78" cy="105" r="17" fill="url(#eye-grad)"/>
-              <circle cx="78" cy="105" r="11" fill="url(#iris-grad)"/>
-              <circle cx="78" cy="105" r="5"  fill="#1a0a3a"/>
-              <circle cx="83" cy="100" r="4"  fill="white"/>
-              <!-- Dramatic lash arc -->
-              <path d="M61 105 Q78 83 95 105" stroke="#2a1040" stroke-width="2.8" fill="none" stroke-linecap="round"/>
-              <line x1="63"  y1="103" x2="58"  y2="93"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="71"  y1="96"  x2="69"  y2="86"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="80"  y1="93"  x2="80"  y2="83"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="89"  y1="95"  x2="92"  y2="86"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <!-- Right -->
-              <circle cx="122" cy="105" r="17" fill="url(#eye-grad)"/>
-              <circle cx="122" cy="105" r="11" fill="url(#iris-grad)"/>
-              <circle cx="122" cy="105" r="5"  fill="#1a0a3a"/>
-              <circle cx="127" cy="100" r="4"  fill="white"/>
-              <path d="M105 105 Q122 83 139 105" stroke="#2a1040" stroke-width="2.8" fill="none" stroke-linecap="round"/>
-              <line x1="107" y1="103" x2="102" y2="93"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <line x1="115" y1="96"  x2="113" y2="86"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="124" y1="93"  x2="124" y2="83"  stroke="#2a1040" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="133" y1="95"  x2="136" y2="86"  stroke="#2a1040" stroke-width="2"   stroke-linecap="round"/>
-              <!-- Raised eyebrows -->
-              <path d="M58 88 Q78 77 97 83" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
-              <path d="M103 83 Q122 77 141 88" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <!-- Left wide -->
+              <circle cx="80" cy="103" r="23" fill="url(#eye-grad)" filter="url(#fsh2)"/>
+              <circle class="pupil-l" cx="80" cy="103" r="13" fill="url(#iris-grad)"/>
+              <circle class="pupil-l" cx="80" cy="103" r="6"  fill="#180a38"/>
+              <circle class="pupil-l-dot" cx="86" cy="97"  r="5"  fill="white"/>
+              <!-- More dramatic lashes -->
+              <line x1="61"  y1="93"  x2="57"  y2="83"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="71"  y1="84"  x2="70"  y2="74"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="81"  y1="81"  x2="81"  y2="71"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="91"  y1="83"  x2="95"  y2="74"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- Raised brow -->
+              <path d="M58 76 Q80 67 102 75" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+              <!-- Right wide -->
+              <circle cx="120" cy="103" r="23" fill="url(#eye-grad)" filter="url(#fsh2)"/>
+              <circle class="pupil-r" cx="120" cy="103" r="13" fill="url(#iris-grad)"/>
+              <circle class="pupil-r" cx="120" cy="103" r="6"  fill="#180a38"/>
+              <circle class="pupil-r-dot" cx="126" cy="97"  r="5"  fill="white"/>
+              <line x1="101" y1="93"  x2="97"  y2="83"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="111" y1="84"  x2="110" y2="74"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="121" y1="81"  x2="121" y2="71"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="131" y1="83"  x2="135" y2="74"  stroke="#3a1858" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M98 75 Q120 67 142 76" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
             </g>
 
-            <!-- ── EYES — squint / muted ── -->
+            <!-- ── EYES — SQUINT / MUTED ── -->
             <g class="eye-squint" style="display:none">
-              <!-- Left eye squeezed shut -->
-              <path d="M62 105 Q78 112 94 105" stroke="#4a2860" stroke-width="4"   fill="none" stroke-linecap="round"/>
-              <path d="M64 101 Q78 107 92 101" stroke="#4a2860" stroke-width="2"   fill="none" stroke-linecap="round" opacity="0.35"/>
-              <!-- X on left -->
-              <line x1="70" y1="97" x2="78" y2="89" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="78" y1="97" x2="70" y2="89" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"/>
-              <!-- Furrowed left brow -->
-              <path d="M60 86 Q78 82 95 87" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
-              <!-- Right eye -->
-              <path d="M106 105 Q122 112 138 105" stroke="#4a2860" stroke-width="4"   fill="none" stroke-linecap="round"/>
-              <path d="M108 101 Q122 107 136 101" stroke="#4a2860" stroke-width="2"   fill="none" stroke-linecap="round" opacity="0.35"/>
-              <line x1="114" y1="97" x2="122" y2="89" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"/>
-              <line x1="122" y1="97" x2="114" y2="89" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"/>
-              <path d="M105 87 Q122 82 140 86" stroke="#8b4a6e" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <path d="M63 105 Q80 114 97 105" stroke="#3a1858" stroke-width="4"   fill="none" stroke-linecap="round"/>
+              <path d="M65 101 Q80 108 95 101" stroke="#3a1858" stroke-width="2"   fill="none" stroke-linecap="round" opacity="0.35"/>
+              <line x1="70" y1="99" x2="79" y2="90" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="79" y1="99" x2="70" y2="90" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- furrowed brow -->
+              <path d="M62 83 Q80 79 97 84" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+              <!-- right -->
+              <path d="M103 105 Q120 114 137 105" stroke="#3a1858" stroke-width="4"   fill="none" stroke-linecap="round"/>
+              <path d="M105 101 Q120 108 135 101" stroke="#3a1858" stroke-width="2"   fill="none" stroke-linecap="round" opacity="0.35"/>
+              <line x1="110" y1="99" x2="119" y2="90" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="119" y1="99" x2="110" y2="90" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M103 84 Q120 79 138 83" stroke="#7a4060" stroke-width="2.8" fill="none" stroke-linecap="round"/>
             </g>
 
-            <!-- ── NOSE (small cute upturned) ── -->
-            <path d="M96 130 Q100 125 104 130" stroke="#d4a090" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
-
-            <!-- ── MOUTH states ── -->
-
-            <!-- mouth-idle: gentle closed smile with Cupid's bow -->
+            <!-- ── MOUTH — IDLE: soft small smile ── -->
             <g class="mouth-idle">
-              <path d="M88 148 Q94 143 100 146 Q106 143 112 148" stroke="url(#lip-grad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <path d="M88 148 Q100 158 112 148" stroke="url(#lip-grad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <!-- Lower lip fill -->
-              <path d="M90 149 Q100 157 110 149 Q100 156 90 149 Z" fill="#f0608a" opacity="0.25"/>
+              <path d="M88 152 Q100 162 112 152" stroke="#d46090" stroke-width="3" fill="none" stroke-linecap="round"/>
             </g>
 
-            <!-- mouth-talk: open with Cupid's bow -->
+            <!-- ── MOUTH — TALK: big round pink disc (signature Pinky look) ── -->
             <g class="mouth-talk" style="display:none">
-              <!-- Upper lip Cupid's bow -->
-              <path d="M86 146 Q92 140 100 144 Q108 140 114 146 L113 160 Q100 166 87 160 Z" fill="url(#lip-grad)"/>
-              <!-- Inner mouth -->
-              <path d="M88 148 L112 148 L111 158 Q100 163 89 158 Z" fill="#7a1535"/>
-              <!-- Tongue hint -->
-              <ellipse id="mouth-oval" cx="100" cy="160" rx="7" ry="4" fill="#f09dc0" opacity="0.8"/>
-              <!-- Upper lip highlight -->
-              <path d="M88 146 Q100 142 112 146" stroke="white" stroke-width="1" fill="none" opacity="0.3" stroke-linecap="round"/>
+              <circle id="mouth-oval" cx="100" cy="155" r="17" fill="url(#mouth-grad)" filter="url(#fsh2)"/>
+              <!-- inner dark -->
+              <circle cx="100" cy="156" r="10" fill="#8a2848" opacity="0.6"/>
+              <!-- highlight -->
+              <ellipse cx="94" cy="150" rx="5" ry="3" fill="white" opacity="0.25"/>
             </g>
 
-            <!-- mouth-hmm: thinking — slight asymmetric press -->
+            <!-- ── MOUTH — HMM: pressed flat line ── -->
             <g class="mouth-hmm" style="display:none">
-              <path d="M87 147 Q94 143 100 146 Q107 143 113 147" stroke="url(#lip-grad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <path d="M88 148 Q100 153 112 148" stroke="url(#lip-grad)" stroke-width="2" fill="none" stroke-linecap="round"/>
-              <!-- Slight dimple right side -->
-              <circle cx="113" cy="148" r="1.5" fill="#d4679a" opacity="0.5"/>
+              <path d="M88 155 Q100 151 112 155" stroke="#d46090" stroke-width="3.5" fill="none" stroke-linecap="round"/>
             </g>
 
-            <!-- mouth-ooh: excited small O -->
+            <!-- ── MOUTH — OOH: medium disc ── -->
             <g class="mouth-ooh" style="display:none">
-              <ellipse cx="100" cy="151" rx="9" ry="11" fill="url(#lip-grad)"/>
-              <ellipse cx="100" cy="152" rx="5.5" ry="7" fill="#7a1535"/>
-              <path d="M93 146 Q100 143 107 146" stroke="white" stroke-width="1" fill="none" opacity="0.3" stroke-linecap="round"/>
+              <circle cx="100" cy="154" r="12" fill="url(#mouth-grad)" filter="url(#fsh2)"/>
+              <circle cx="100" cy="155" r="7"  fill="#8a2848" opacity="0.55"/>
+              <ellipse cx="95" cy="150" rx="3.5" ry="2" fill="white" opacity="0.25"/>
             </g>
 
-            <!-- mouth-muted: straight flat with subtle bow -->
+            <!-- ── MOUTH — MUTED: flat line ── -->
             <g class="mouth-muted" style="display:none">
-              <path d="M88 148 Q94 145 100 147 Q106 145 112 148" stroke="url(#lip-grad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-              <line x1="88" y1="150" x2="112" y2="150" stroke="url(#lip-grad)" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+              <line x1="86" y1="155" x2="114" y2="155" stroke="#d46090" stroke-width="3.5" stroke-linecap="round"/>
             </g>
 
-            <!-- ── Cheek blush ── -->
-            <ellipse cx="60"  cy="122" rx="13" ry="8" fill="#f09dc0" opacity="0.3"/>
-            <ellipse cx="140" cy="122" rx="13" ry="8" fill="#f09dc0" opacity="0.3"/>
-
-            <!-- ── Beauty mark (optional, feminine) ── -->
-            <circle cx="116" cy="138" r="2" fill="#8b4a6e" opacity="0.5"/>
+            <!-- ── CHEEKS ── -->
+            <ellipse cx="60"  cy="122" rx="14" ry="9" fill="#f09dc0" opacity="0.32"/>
+            <ellipse cx="140" cy="122" rx="14" ry="9" fill="#f09dc0" opacity="0.32"/>
           </svg>
           <!-- end face SVG -->
 
@@ -796,16 +742,15 @@ const EXPRESSIONS = {
   detection: ['surprise',   'ooh'],       // person detected — surprised
 };
 
-// Pupil/iris positions per state — almond eye layout
-// pupil-l and pupil-r circles are the iris + pupil (both move together)
+// Pupil/iris positions — round eyes at cx=80/120, cy=103
 const PUPIL_POS = {
-  sleeping:   { lx: 78,  ly: 107, rx: 122, ry: 107 },
-  idle:       { lx: 78,  ly: 107, rx: 122, ry: 107 },
-  awake:      { lx: 78,  ly: 104, rx: 122, ry: 104 },  // centered, alert
-  processing: { lx: 75,  ly: 100, rx: 119, ry: 100 },  // up-left = thinking
-  speaking:   { lx: 78,  ly: 104, rx: 122, ry: 104 },
-  muted:      { lx: 78,  ly: 106, rx: 122, ry: 106 },
-  detection:  { lx: 78,  ly: 105, rx: 122, ry: 105 },
+  sleeping:   { lx: 80,  ly: 106, rx: 120, ry: 106 },
+  idle:       { lx: 80,  ly: 106, rx: 120, ry: 106 },
+  awake:      { lx: 80,  ly: 103, rx: 120, ry: 103 },  // centred, alert
+  processing: { lx: 77,  ly: 99,  rx: 117, ry: 99  },  // up-left = thinking
+  speaking:   { lx: 80,  ly: 103, rx: 120, ry: 103 },
+  muted:      { lx: 80,  ly: 105, rx: 120, ry: 105 },
+  detection:  { lx: 80,  ly: 103, rx: 120, ry: 103 },
 };
 
 function setExpression(state) {
@@ -973,16 +918,15 @@ function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Speaking mouth animation ──────────────────────────────────────────────────
-// Animate the oval mouth size when speaking
+// ── Speaking mouth animation — pulse the big disc radius ─────────────────────
 setInterval(() => {
-  const oval = document.getElementById('mouth-oval');
-  if (!oval) return;
+  const disc = document.getElementById('mouth-oval');
+  if (!disc) return;
   if (document.body.classList.contains('state-speaking')) {
-    const r = 10 + Math.random() * 8;
-    oval.setAttribute('ry', r.toFixed(1));
+    const r = 14 + Math.random() * 6;   // 14–20px radius
+    disc.setAttribute('r', r.toFixed(1));
   }
-}, 150);
+}, 140);
 </script>
 </body>
 </html>

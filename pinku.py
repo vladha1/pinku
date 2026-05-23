@@ -307,9 +307,10 @@ _END_PHRASES = {
 
 import re as _re
 # Catches Whisper mishearings of "Pinku" at the very start of an utterance
+# Also matches Devanagari पिंकू (Hindi wake word)
 _PINKU_RE = _re.compile(
-    r'^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+|yo\s+)?'
-    r'(pinku|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink)\b[,\s]*',
+    r'^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+|yo\s+|अरे\s+|हे\s+)?'
+    r'(pinku|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink|पिंकू|पिंकु|पिंको)\b[,\s।]*',
     _re.IGNORECASE,
 )
 
