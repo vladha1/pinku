@@ -34,8 +34,13 @@ Actions and when to use them:
 - "describe"    → user asked you to look / describe what you see / camera
 - "music_play"  → user wants music played; include "query": "<search>"
 - "music_stop"  → user wants music stopped
-- "scripture"   → user asked about Gita, Ramayana, Patanjali, Upanishads, Vedas, Madhushala
-                  include "topic": "gita"|"ramayana"|"patanjali"|"upanishads"|"vedas"|"madhushala"
+- "scripture"   → user asked about any of:
+                  gita, ramayana, mahabharata, patanjali (yoga sutras), upanishads, vedas,
+                  madhushala, puranas, vedanta, buddhism, philosophy (Indian darshanas),
+                  yoga, ayurveda, meditation, history (Indian history), mythology,
+                  music (raga/tala/classical), poetry (Hindi/Urdu/Sanskrit),
+                  astronomy, mathematics, science, cooking (Indian recipes), language (Sanskrit etymology)
+                  include "topic" with one of the exact keys above (e.g. "gita", "yoga", "music")
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
 - "ignore"      → background noise, unintelligible, or clearly not addressed to Pinku

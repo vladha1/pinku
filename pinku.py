@@ -26,6 +26,7 @@ import config
 import stt
 import tts
 import llm
+import knowledge
 import logger as log_module
 import dashboard
 
@@ -96,44 +97,13 @@ def _handle_describe(action: dict):
 
 
 def _handle_scripture(action: dict):
-    topic = action.get("topic", "gita")
-    tr    = action.get("transcript", "")
-    lang  = action.get("lang", "en")
-    is_hi = lang == "hi"
-
-    _PROMPTS = {
-        "gita": (
-            "You are a Bhagavad Gita scholar. Give the most relevant shloka in Devanagari, "
-            "its meaning in 1-2 sentences, and one crisp insight. Under 80 words after the shloka."
-        ),
-        "ramayana": (
-            "You are a Ramayana scholar. Give the most relevant doha/chaupai in Devanagari, "
-            "its meaning in 1-2 sentences, and one dharmic insight. Under 80 words after the verse."
-        ),
-        "patanjali": (
-            "You are a Patanjali Yoga Sutras scholar. Give the relevant sutra in Devanagari, "
-            "its meaning in 1-2 sentences, and one practical insight. Under 80 words after the sutra."
-        ),
-        "upanishads": (
-            "You are an Upanishad scholar. Give the relevant mantra in Devanagari, "
-            "its meaning in 1-2 sentences, and one Vedantic insight. Under 80 words after the verse."
-        ),
-        "vedas": (
-            "You are a Vedic scholar. Give the relevant mantra in Devanagari, "
-            "its meaning in 1-2 sentences, and one key insight. Under 80 words after the mantra."
-        ),
-        "madhushala": (
-            "You are a Madhushala scholar. Give the relevant rubai in Devanagari Hindi (all 4 lines), "
-            "its meaning in 1-2 sentences, and one line on the deeper metaphor. Under 90 words after the rubai."
-        ),
-    }
-    system = _PROMPTS.get(topic, _PROMPTS["gita"])
-    if is_hi:
-        system += " Respond in Hindi (Devanagari)."
-    reply = llm.chat(tr, system_extra=system)
-    print(f"[Scripture:{topic}] {reply[:80]!r}")
-    dashboard.update_status(last_transcript=tr, last_reply=reply)
-    _speak_reply(reply, is_hi)
+    """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
+    knowledge.handle(
+        action,
+        speak_fn   = _speak_reply,
+        update_fn  = dashboard.update_status,
+        session_hist = _session_hist,
+    )
 
 
 def _handle_mute():
@@ -306,10 +276,12 @@ _END_PHRASES = {
 
 
 import re as _re
-# Catches Whisper mishearings of "Pinku" at the very start of an utterance
-# Also matches Devanagari पिंकू (Hindi wake word)
+# Catches Whisper mishearings of "Pinku" at the very start of an utterance.
+# Handles punctuation in prefix ("Hey, Pinku"), leading dots/spaces Whisper adds,
+# and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE = _re.compile(
-    r'^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+|yo\s+|अरे\s+|हे\s+)?'
+    r'^[.\s]*'                                            # strip leading dots/spaces Whisper adds
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे)[,.\s]+)?'   # optional prefix + any punctuation/space
     r'(pinku|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink|पिंकू|पिंकु|पिंको)\b[,\s।]*',
     _re.IGNORECASE,
 )
@@ -376,13 +348,15 @@ def _voice_loop(recorder: stt.AudioRecorder):
             tts.speak("Going quiet.", block=False)
             print("[Pinku] Session timeout → idle")
 
-        dashboard.update_status(state="awake" if _awake.is_set() else "idle")
-
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
         if pcm is None:
             continue
 
-        text = stt.transcribe(pcm)
+        try:
+            text = stt.transcribe(pcm)
+        except Exception as e:
+            print(f"[STT] transcribe error: {e}")
+            continue
         if not text:
             continue
 
@@ -396,7 +370,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _awake.set()
             last_speech_at = time.time()
             print(f"[Pinku] Wake word → session open (command={command!r})")
-            if not command or len(command.split()) < 2:
+            if not command:
                 # Just the wake word alone — beep and wait for next utterance
                 tts.play_beep()
                 dashboard.update_status(state="awake")
@@ -475,6 +449,12 @@ def main():
     # ── Dashboard ─────────────────────────────────────────────────────────────
     if not args.no_dashboard:
         dashboard.start(logger=_det_logger, port=args.port)
+        # Wire dashboard buttons → pinku actions
+        dashboard.register_action("wake",         _extend_session)
+        dashboard.register_action("mute",         _handle_mute)
+        dashboard.register_action("unmute",       _handle_unmute)
+        dashboard.register_action("stop",         tts.stop_speaking)
+        dashboard.register_action("mute_toggle",  lambda: _handle_unmute() if is_muted() else _handle_mute())
 
     # ── Camera ────────────────────────────────────────────────────────────────
     cam = None

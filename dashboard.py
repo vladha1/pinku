@@ -45,6 +45,14 @@ def push_detection(event: dict):
         _status["detections"] = _status["detections"][-50:]
     _broadcast({"type": "detection", **event})
 
+# ── Action callbacks (registered by pinku.py) ─────────────────────────────────
+
+_actions: dict = {}
+
+def register_action(name: str, fn):
+    """Register a callable that dashboard buttons can invoke."""
+    _actions[name] = fn
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @_app.route("/")
@@ -69,6 +77,35 @@ def stream():
 def api_status():
     from flask import jsonify
     return jsonify(_status)
+
+@_app.route("/api/action", methods=["POST"])
+def api_action():
+    from flask import request, jsonify
+    body = request.get_json(silent=True) or {}
+    name = body.get("action", "")
+    fn   = _actions.get(name)
+    if fn:
+        threading.Thread(target=fn, daemon=True).start()
+        return jsonify({"ok": True, "action": name})
+    return jsonify({"ok": False, "error": f"Unknown action: {name!r}"}), 404
+
+@_app.route("/api/camera.jpg")
+def camera_snapshot():
+    """Current camera frame as JPEG. Returns 503 if camera not active."""
+    try:
+        from camera import get_frame
+        import cv2
+        frame = get_frame()
+        if frame is None:
+            return ("No camera frame", 503)
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        from flask import make_response
+        r = make_response(buf.tobytes())
+        r.headers["Content-Type"]  = "image/jpeg"
+        r.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return r
+    except Exception as e:
+        return (str(e), 503)
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
@@ -173,9 +210,10 @@ body {
   min-width: 40px; min-height: 36px;
 }
 .hdr-btn:hover { background: rgba(255,255,255,0.1); }
-.hdr-btn.stop-btn { border-color: rgba(248,113,113,0.4); color: #f87171; }
-.hdr-btn.mute-btn { border-color: rgba(248,113,113,0.35); }
-.hdr-btn.resume-btn { border-color: rgba(74,222,128,0.4); color: #4ade80; }
+.hdr-btn.stop-btn  { border-color: rgba(248,113,113,0.4); color: #f87171; }
+.hdr-btn.mute-btn  { border-color: rgba(248,113,113,0.35); }
+.hdr-btn.resume-btn{ border-color: rgba(74,222,128,0.4); color: #4ade80; }
+.hdr-btn.active    { background: rgba(192,132,252,0.18); border-color: rgba(192,132,252,0.5); }
 
 /* ── Main area ── */
 .main-area {
@@ -715,6 +753,58 @@ body {
 .msg-time { font-size:0.65rem; color:var(--muted); margin-top:3px; }
 .msg-row.user .msg-time { text-align:right; }
 .day-sep { text-align:center; font-size:0.68rem; color:var(--muted); padding:8px 0; }
+
+/* Camera panel */
+.camera-area {
+  flex:1; display:none; flex-direction:column;
+  align-items:center; overflow:hidden; gap:0;
+}
+.camera-area.open { display:flex; }
+.cam-feed-wrap {
+  position:relative; width:100%; max-width:640px; flex-shrink:0;
+  background:#000; aspect-ratio:4/3; overflow:hidden;
+}
+#cam-img { width:100%; height:100%; object-fit:contain; display:block; }
+.cam-offline {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:0.88rem; color:var(--muted); background:rgba(0,0,0,0.6);
+}
+.cam-detect-feed {
+  flex:1; overflow-y:auto; width:100%; max-width:640px; padding:8px 12px;
+}
+.cam-detect-feed::-webkit-scrollbar { width:3px; }
+.cam-detect-feed::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.det-row {
+  display:flex; align-items:baseline; gap:8px;
+  padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04);
+  font-size:0.78rem; color:var(--muted);
+}
+.det-row .det-time { flex-shrink:0; font-size:0.68rem; color:#444466; }
+.det-row .det-body { flex:1; color:var(--text); }
+.det-chip {
+  display:inline-block; padding:1px 6px; border-radius:6px; font-size:0.7rem;
+  margin:0 2px;
+}
+.det-chip.person { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
+.det-chip.gesture{ background:rgba(192,132,252,0.15); color:#c084fc; border:1px solid rgba(192,132,252,0.3); }
+.det-chip.object { background:rgba(251,191,36,0.13); color:#fbbf24; border:1px solid rgba(251,191,36,0.28); }
+
+/* Log panel */
+.log-area {
+  flex:1; overflow-y:auto; padding:10px 14px; display:none; flex-direction:column; gap:6px;
+}
+.log-area.open { display:flex; }
+.log-area::-webkit-scrollbar { width:3px; }
+.log-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.log-entry {
+  font-size:0.75rem; color:var(--muted); padding:4px 0;
+  border-bottom:1px solid rgba(255,255,255,0.04);
+  display:flex; gap:8px; align-items:baseline;
+}
+.log-entry .log-ts { flex-shrink:0; font-size:0.65rem; color:#333355; }
+.log-entry .log-msg { flex:1; color:#9090b0; }
+.log-entry.pinku-log { color:var(--text); }
+.log-entry.pinku-log .log-msg { color:#c084fc; }
 </style>
 </head>
 <body>
@@ -735,7 +825,8 @@ body {
     </div>
   </div>
   <div class="header-btns">
-    <button class="hdr-btn mute-btn" id="mute-btn" title="Mute">🔇</button>
+    <button class="hdr-btn stop-btn" id="stop-btn" title="Stop speaking">⏹</button>
+    <button class="hdr-btn mute-btn" id="mute-btn" title="Mute / Unmute">🔇</button>
   </div>
 </header>
 
@@ -840,6 +931,18 @@ body {
 <!-- Chat area (hidden by default) -->
 <div class="chat-area" id="chat-area"></div>
 
+<!-- Camera area (hidden by default) -->
+<div class="camera-area" id="camera-area">
+  <div class="cam-feed-wrap">
+    <img id="cam-img" alt="Camera" style="display:none">
+    <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
+  </div>
+  <div class="cam-detect-feed" id="cam-detect-feed"></div>
+</div>
+
+<!-- Log area (hidden by default) -->
+<div class="log-area" id="log-area"></div>
+
 <!-- Bottom nav -->
 <nav class="pinky-nav">
   <button class="pinky-nav-item active" id="nav-home" onclick="showTab('home')">
@@ -848,57 +951,48 @@ body {
   <button class="pinky-nav-item" id="nav-chat" onclick="showTab('chat')">
     <span class="pinky-nav-ic">💬</span>Chat
   </button>
+  <button class="pinky-nav-item" id="nav-cam" onclick="showTab('cam')">
+    <span class="pinky-nav-ic">📷</span>Camera
+  </button>
   <button class="pinky-nav-item" id="nav-log" onclick="showTab('log')">
     <span class="pinky-nav-ic">📋</span>Log
   </button>
 </nav>
 
 <script>
-// ── State mapping: Pinku state → Pinky CSS class ─────────────────────────────
+// ── State mapping ─────────────────────────────────────────────────────────────
 const STATE_CSS = {
-  idle:       'sleeping',
-  sleeping:   'sleeping',
-  awake:      'awake',
-  processing: 'thinking',
-  speaking:   'speaking',
-  muted:      'paused',
-  detection:  'triggered',
+  idle:'sleeping', sleeping:'sleeping', awake:'awake',
+  processing:'thinking', speaking:'speaking', muted:'paused', detection:'triggered',
 };
 const STATE_UI = {
-  sleeping: { icon:'😴', label:'Sleeping',    sub:'Say "Hey Pinku" to wake me' },
-  awake:    { icon:'👂', label:'Listening…',  sub:'Speak freely' },
-  thinking: { icon:'⚡', label:'On it…',      sub:'Running your command' },
-  speaking: { icon:'🗣️', label:'Speaking…',   sub:'Tap 🎙️ to stop' },
-  paused:   { icon:'🔇', label:'Muted',       sub:'Raise hand ✊ or tap mic to resume' },
-  triggered:{ icon:'⚡', label:'On it…',      sub:'Running your command' },
-  listening:{ icon:'👁️', label:'Watching',    sub:'Step into view' },
+  sleeping: { icon:'😴', label:'Sleeping',   sub:'Say "Hey Pinku" to wake me' },
+  awake:    { icon:'👂', label:'Listening…', sub:'Speak freely — or tap 🎙️' },
+  thinking: { icon:'⚡', label:'On it…',     sub:'Processing your request' },
+  speaking: { icon:'🗣️', label:'Speaking…',  sub:'Tap ⏹ to stop' },
+  paused:   { icon:'🔇', label:'Muted',      sub:'Tap mic or show ✊ to unmute' },
+  triggered:{ icon:'⚡', label:'On it…',     sub:'Running your command' },
+  listening:{ icon:'👁️', label:'Watching',   sub:'Step into view' },
 };
 const BUBBLE_STATES = new Set(['thinking','triggered']);
 const BUBBLE_COLOR  = { thinking:'#c084fc', triggered:'#fb923c' };
+const ALL_FACE_CSS  = ['sleeping','awake','listening','active','thinking','triggered','speaking','paused','connecting'];
 
-// All CSS face classes to toggle
-const ALL_FACE_CSS = ['sleeping','awake','listening','active','thinking','triggered','speaking','paused','connecting'];
-
-let _lastTranscript = '', _lastReply = '';
+let _lastStatus = {}, _lastTranscript = '', _lastReply = '';
 let _detectRevertTimer = null;
-let _currentFaceCls = 'sleeping';
 
+// ── Face ─────────────────────────────────────────────────────────────────────
 function setFaceClass(cls) {
   const face = document.getElementById('pinku-face');
   ALL_FACE_CSS.forEach(c => face.classList.remove(c));
   face.classList.add(cls);
-  _currentFaceCls = cls;
 
-  // Status bar class
   const sb = document.getElementById('status-bar');
   ALL_FACE_CSS.forEach(c => sb.classList.remove(c));
   sb.classList.add(cls);
 
-  // Header dot
-  const dot = document.getElementById('hdr-dot');
-  dot.className = 'status-dot ' + cls;
+  document.getElementById('hdr-dot').className = 'status-dot ' + cls;
 
-  // Thought bubble
   const bubble = document.getElementById('thought-bubble');
   if (BUBBLE_STATES.has(cls)) {
     bubble.style.setProperty('--bubble-color', BUBBLE_COLOR[cls] || '#c084fc');
@@ -907,7 +1001,6 @@ function setFaceClass(cls) {
     bubble.classList.remove('visible');
   }
 
-  // Status bar content
   const ui = STATE_UI[cls] || STATE_UI.sleeping;
   document.getElementById('sb-icon').textContent  = ui.icon;
   document.getElementById('sb-icon').className    = 'status-bar-icon ' + cls;
@@ -915,74 +1008,94 @@ function setFaceClass(cls) {
   document.getElementById('sb-sub').textContent   = ui.sub;
 }
 
+// ── Status update from SSE ────────────────────────────────────────────────────
 function applyStatus(data) {
-  const isMuted   = data.muted;
-  const isSpeaking= data.speaking;
-  const rawState  = data.state || 'idle';
+  const isMuted    = data.muted;
+  const isSpeaking = data.speaking;
+  const rawState   = data.state || 'idle';
 
   let faceCls;
-  if (isMuted)    faceCls = 'paused';
+  if (isMuted)         faceCls = 'paused';
   else if (isSpeaking) faceCls = 'speaking';
-  else            faceCls = STATE_CSS[rawState] || 'sleeping';
+  else                 faceCls = STATE_CSS[rawState] || 'sleeping';
 
-  // Don't override a triggered flash that's still running
-  if (_detectRevertTimer && faceCls !== 'triggered') {
-    // let it expire naturally
-  } else {
-    setFaceClass(faceCls);
-  }
+  if (!_detectRevertTimer) setFaceClass(faceCls);
 
-  // Clouds
+  // Question cloud
   if (data.last_transcript && data.last_transcript !== _lastTranscript) {
     _lastTranscript = data.last_transcript;
-    const qc = document.getElementById('q-cloud');
     document.getElementById('q-body').textContent = data.last_transcript;
-    qc.classList.add('has-text');
+    document.getElementById('q-cloud').classList.add('has-text');
+    addLog('you', data.last_transcript);
   }
+  // Reply cloud
   if (data.last_reply && data.last_reply !== _lastReply) {
     _lastReply = data.last_reply;
-    const rc = document.getElementById('r-cloud');
     document.getElementById('r-body').textContent = data.last_reply;
-    rc.classList.add('has-text');
+    document.getElementById('r-cloud').classList.add('has-text');
     addChat(data.last_transcript, data.last_reply);
+    addLog('pinku', data.last_reply);
   }
 
-  // Mute btn
-  document.getElementById('mute-btn').textContent = isMuted ? '▶️' : '🔇';
+  // Mute button icon
+  document.getElementById('mute-btn').textContent = isMuted ? '🎙️' : '🔇';
+  document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
+  document.getElementById('mute-btn').classList.toggle('active', isMuted);
 }
 
+// ── Detection flash ───────────────────────────────────────────────────────────
 function flashDetection(event) {
-  // Brief triggered flash (1.5s)
   setFaceClass('triggered');
   clearTimeout(_detectRevertTimer);
   _detectRevertTimer = setTimeout(() => {
     _detectRevertTimer = null;
-    // Revert to whatever the last status was
     applyStatus(_lastStatus);
   }, 1500);
 
-  // Person badge
-  const badge = document.getElementById('person-badge');
   const persons = event.persons || 0;
   if (persons > 0) {
-    document.getElementById('person-name').textContent = 'Someone here';
+    const badge = document.getElementById('person-badge');
+    document.getElementById('person-name').textContent =
+      persons > 1 ? `${persons} people here` : 'Someone here';
     badge.classList.add('visible');
     clearTimeout(badge._timer);
     badge._timer = setTimeout(() => badge.classList.remove('visible'), 5000);
     document.getElementById('pill-human').classList.add('on');
   }
 
-  addLog(event);
+  addDetectionRow(event);
+  addLog('cam', formatDetEvent(event));
 }
 
-// ── Chat ─────────────────────────────────────────────────────────────────────
+// ── API action helper ─────────────────────────────────────────────────────────
+function apiAction(name) {
+  fetch('/api/action', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action: name}),
+  }).catch(() => {});
+}
+
+// ── Button wiring ─────────────────────────────────────────────────────────────
+document.getElementById('wake-btn').addEventListener('click', () => {
+  apiAction('wake');
+  setFaceClass('awake');
+});
+document.getElementById('stop-btn').addEventListener('click', () => {
+  apiAction('stop');
+});
+document.getElementById('mute-btn').addEventListener('click', () => {
+  apiAction('mute_toggle');
+});
+
+// ── Chat panel ────────────────────────────────────────────────────────────────
 let _chatLastTr = '', _chatLastRe = '';
 function addChat(tr, re) {
   if (!tr && !re) return;
   if (tr === _chatLastTr && re === _chatLastRe) return;
   _chatLastTr = tr; _chatLastRe = re;
   const box = document.getElementById('chat-area');
-  const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   if (tr) {
     const d = document.createElement('div');
     d.className = 'msg-row user';
@@ -998,18 +1111,86 @@ function addChat(tr, re) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ── Log ───────────────────────────────────────────────────────────────────────
-function addLog(event) {
-  // (Future: log panel)
+// ── Camera panel ──────────────────────────────────────────────────────────────
+let _camActive = false;
+let _camTimer  = null;
+
+function startCamera() {
+  _camActive = true;
+  refreshCam();
+}
+function stopCamera() {
+  _camActive = false;
+  clearTimeout(_camTimer);
+}
+function refreshCam() {
+  if (!_camActive) return;
+  const img = document.getElementById('cam-img');
+  const tmp = new Image();
+  tmp.onload = () => {
+    img.src = tmp.src;
+    img.style.display = 'block';
+    document.getElementById('cam-offline').style.display = 'none';
+    _camTimer = setTimeout(refreshCam, 200);   // ~5 fps
+  };
+  tmp.onerror = () => {
+    img.style.display = 'none';
+    document.getElementById('cam-offline').style.display = 'flex';
+    _camTimer = setTimeout(refreshCam, 2000);  // retry slower when offline
+  };
+  tmp.src = '/api/camera.jpg?t=' + Date.now();
+}
+
+function addDetectionRow(event) {
+  const box = document.getElementById('cam-detect-feed');
+  const row = document.createElement('div');
+  row.className = 'det-row';
+  const ts   = (event.timestamp || '').split(' ')[1] || '';
+  let body = '';
+  if (event.persons > 0)
+    body += `<span class="det-chip person">👤 ${event.persons === 1 ? 'person' : event.persons + ' people'}</span>`;
+  (event.gestures || []).forEach(g =>
+    body += `<span class="det-chip gesture">✋ ${g.gesture}</span>`);
+  (event.objects || []).forEach(o =>
+    body += `<span class="det-chip object">${o.label}</span>`);
+  row.innerHTML = `<span class="det-time">${esc(ts)}</span><span class="det-body">${body || 'no detection'}</span>`;
+  box.insertBefore(row, box.firstChild);
+  while (box.children.length > 60) box.removeChild(box.lastChild);
+}
+
+// ── Log panel ─────────────────────────────────────────────────────────────────
+function addLog(who, msg) {
+  const box = document.getElementById('log-area');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry' + (who === 'pinku' ? ' pinku-log' : '');
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const prefix = who === 'you' ? '🎙️' : who === 'pinku' ? '🤖' : '📷';
+  entry.innerHTML = `<span class="log-ts">${now}</span><span class="log-msg">${prefix} ${esc(msg)}</span>`;
+  box.insertBefore(entry, box.firstChild);
+  while (box.children.length > 100) box.removeChild(box.lastChild);
+}
+
+function formatDetEvent(e) {
+  const parts = [];
+  if (e.persons > 0) parts.push(`${e.persons} person${e.persons > 1 ? 's' : ''}`);
+  (e.gestures || []).forEach(g => parts.push(`${g.gesture}`));
+  (e.objects  || []).forEach(o => parts.push(`${o.label}(${o.conf})`));
+  return parts.join(', ') || 'motion';
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
+const _TABS = ['home', 'chat', 'cam', 'log'];
 function showTab(name) {
-  document.getElementById('main-area').style.display  = name === 'home' ? '' : 'none';
-  document.getElementById('chat-area').className = 'chat-area' + (name === 'chat' ? ' open' : '');
-  ['home','chat','log'].forEach(t => {
-    document.getElementById('nav-'+t).classList.toggle('active', t === name);
+  document.getElementById('main-area').style.display   = name === 'home' ? '' : 'none';
+  document.getElementById('chat-area').className       = 'chat-area'   + (name === 'chat' ? ' open' : '');
+  document.getElementById('camera-area').className     = 'camera-area' + (name === 'cam'  ? ' open' : '');
+  document.getElementById('log-area').className        = 'log-area'    + (name === 'log'  ? ' open' : '');
+  _TABS.forEach(t => {
+    const el = document.getElementById('nav-' + t);
+    if (el) el.classList.toggle('active', t === name);
   });
+  if (name === 'cam') startCamera();
+  else                stopCamera();
   if (name === 'chat') {
     const box = document.getElementById('chat-area');
     setTimeout(() => box.scrollTop = box.scrollHeight, 80);
@@ -1017,11 +1198,10 @@ function showTab(name) {
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
-let _lastStatus = {};
 function connect() {
   const es = new EventSource('/api/stream');
   document.getElementById('ws-dot').className = 'ws-dot off';
-  es.onopen = () => document.getElementById('ws-dot').className = 'ws-dot on';
+  es.onopen  = () => document.getElementById('ws-dot').className = 'ws-dot on';
   es.onerror = () => {
     document.getElementById('ws-dot').className = 'ws-dot off';
     setTimeout(connect, 3000);
@@ -1042,7 +1222,7 @@ connect();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 </script>
 </body>
