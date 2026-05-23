@@ -189,23 +189,57 @@ class AudioRecorder:
         return None   # timed out
 
 
+# Whisper hallucinates these phrases on silence — discard them
+_HALLUCINATION_PHRASES = {
+    "thank you", "thanks for watching", "thanks for listening",
+    "you", "bye", "bye bye", "goodbye", "please subscribe",
+    "subtitles by", "www.", ".com", "♪", "...", ". . .",
+    "foreign", "[music]", "[applause]", "[laughter]",
+}
+
+def _is_hallucination(text: str) -> bool:
+    t = text.strip().lower().rstrip(".,!?")
+    if t in _HALLUCINATION_PHRASES:
+        return True
+    if len(t.split()) <= 1:          # single word → almost always noise
+        return True
+    return False
+
+
 def transcribe(pcm: bytes) -> str:
     """
     Transcribe raw 16-bit mono PCM bytes using local Whisper.
-    Returns the cleaned transcript string (may be empty).
+    Returns the cleaned transcript string, or "" if likely hallucination/noise.
     """
     model = _load_whisper()
-    wav   = _pcm_to_wav(pcm)
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
     segments, info = model.transcribe(
         audio,
         language=WHISPER_LANGUAGE,
         beam_size=3,
-        vad_filter=True,            # built-in VAD as post-filter
+        vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
+        no_speech_threshold=0.55,       # discard low-confidence segments
+        log_prob_threshold=-0.8,        # drop poor log-prob segments
+        compression_ratio_threshold=2.4,
     )
-    text = " ".join(s.text.strip() for s in segments).strip()
+
+    segs = list(segments)
+    if not segs:
+        return ""
+
+    # Drop if any segment has high no-speech probability
+    if any(getattr(s, "no_speech_prob", 0) > 0.55 for s in segs):
+        print(f"[STT] Dropped — no_speech_prob too high")
+        return ""
+
+    text = " ".join(s.text.strip() for s in segs).strip()
+
+    if _is_hallucination(text):
+        print(f"[STT] Dropped hallucination: {text!r}")
+        return ""
+
     print(f"[STT] lang={info.language} → {text!r}")
     return text
 

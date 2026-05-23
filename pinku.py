@@ -45,6 +45,12 @@ def is_muted() -> bool:
 
 # ── Action handlers ───────────────────────────────────────────────────────────
 
+def _speak_reply(reply: str, is_hi: bool):
+    dashboard.update_status(speaking=True)
+    tts.speak(reply, prefer_hi=is_hi, block=True)
+    dashboard.update_status(speaking=False, state="awake")
+
+
 def _handle_chat(action: dict):
     tr   = action.get("transcript", "")
     lang = action.get("lang", "en")
@@ -56,8 +62,8 @@ def _handle_chat(action: dict):
     if len(_session_hist) > 12:
         _session_hist[:] = _session_hist[-12:]
     print(f"[Pinku] {reply!r}")
-    tts.speak(reply, prefer_hi=is_hi)
-    dashboard.update_status(state="awake", last_transcript=tr)
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
+    _speak_reply(reply, is_hi)
 
 
 def _handle_time(action: dict):
@@ -68,7 +74,8 @@ def _handle_time(action: dict):
         reply = f"अभी {now.strftime('%-I बजकर %M मिनट')} हैं।"
     else:
         reply = f"It's {now.strftime('%-I:%M %p')}."
-    tts.speak(reply, prefer_hi=(lang == "hi"))
+    dashboard.update_status(last_transcript=action.get("transcript",""), last_reply=reply)
+    _speak_reply(reply, lang == "hi")
 
 
 def _handle_describe(action: dict):
@@ -84,7 +91,8 @@ def _handle_describe(action: dict):
     lang = action.get("lang", "en")
     desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
     print(f"[Vision] {desc!r}")
-    tts.speak(desc, prefer_hi=(lang == "hi"))
+    dashboard.update_status(last_transcript=tr, last_reply=desc)
+    _speak_reply(desc, lang == "hi")
 
 
 def _handle_scripture(action: dict):
@@ -124,7 +132,8 @@ def _handle_scripture(action: dict):
         system += " Respond in Hindi (Devanagari)."
     reply = llm.chat(tr, system_extra=system)
     print(f"[Scripture:{topic}] {reply[:80]!r}")
-    tts.speak(reply, prefer_hi=is_hi)
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
+    _speak_reply(reply, is_hi)
 
 
 def _handle_mute():

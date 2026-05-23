@@ -15,7 +15,7 @@ WHISPER_DEVICE    = "auto"      # "auto" picks mps on Apple Silicon, cpu otherwi
 WHISPER_LANGUAGE  = None        # None = auto-detect; "en" / "hi" to force
 
 # ── TTS (macOS say) ───────────────────────────────────────────────────────────
-SAY_VOICE_EN = os.getenv("SAY_VOICE_EN", "Nicky")      # macOS English voice
+SAY_VOICE_EN = os.getenv("SAY_VOICE_EN", "Ava")        # macOS English voice (neural female)
 SAY_VOICE_HI = os.getenv("SAY_VOICE_HI", "Lekha")     # macOS Indian-English / Hindi voice
 SAY_RATE     = int(os.getenv("SAY_RATE", "185"))        # words per minute
 
@@ -33,8 +33,8 @@ LASER_STARS_MIN = int(os.getenv("LASER_STARS_MIN", "5"))    # ≥ this many dots
 LASER_COOLDOWN  = float(os.getenv("LASER_COOLDOWN", "6.0")) # seconds between laser actions
 
 # ── Voice activity detection ──────────────────────────────────────────────────
-VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "1.2"))  # silence to end utterance
-VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "300"))  # ignore clips shorter than this
+VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "1.5"))  # silence to end utterance
+VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "500"))  # ignore clips shorter than this
 MIC_SAMPLE_RATE   = 16000
 MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
 
