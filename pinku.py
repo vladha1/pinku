@@ -191,6 +191,10 @@ def on_detection(event: dict):
 _WAKE_PHRASES = [
     "hey pinku", "hi pinku", "ok pinku", "okay pinku",
     "hello pinku", "yo pinku", "pinku",
+    # Common Whisper mishearings of "Pinku":
+    "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
+    "hey pink", "hi pink", "ok pink", "pink",
+    "hey pingu", "pingu",
 ]
 
 # End-session phrases — only checked when already in session AND utterance
