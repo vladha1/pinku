@@ -44,27 +44,37 @@ def is_muted() -> bool:
     return _muted.is_set()
 
 
+# ── Logging helper ────────────────────────────────────────────────────────────
+
+def _log(level: str, msg: str):
+    """Print to stdout and stream to dashboard Log tab."""
+    print(f"[{level.upper()}] {msg}")
+    try:
+        dashboard.log_message(level, msg)
+    except Exception:
+        pass
+
+
 # ── Action handlers ───────────────────────────────────────────────────────────
 
 def _speak_reply(reply: str, is_hi: bool):
+    _log("tts", reply[:120])
     dashboard.update_status(speaking=True)
     tts.speak(reply, prefer_hi=is_hi, block=True)
     dashboard.update_status(speaking=False, state="awake")
 
 
 def _handle_chat(action: dict):
-    tr   = action.get("transcript", "")
-    lang = action.get("lang", "en")
+    tr    = action.get("transcript", "")
+    lang  = action.get("lang", "en")
     is_hi = lang == "hi"
-    print(f"[Chat] {tr!r}")
+    _log("chat", f"[{lang}] {tr}")
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
     if len(_session_hist) > 12:
         _session_hist[:] = _session_hist[-12:]
-    print(f"[Pinku] {reply!r}")
     dashboard.update_status(last_transcript=tr, last_reply=reply)
-    _speak_reply(reply, is_hi)
 
 
 def _handle_time(action: dict):
@@ -112,14 +122,14 @@ def _handle_mute():
     tts.stop_speaking()
     tts.play_mute()
     dashboard.update_status(state="idle", muted=True)
-    print("[Pinku] Muted")
+    _log("info", "Muted 🔇")
 
 
 def _handle_unmute():
     _muted.clear()
     tts.play_unmute()
     dashboard.update_status(state="idle", muted=False)
-    print("[Pinku] Unmuted")
+    _log("info", "Unmuted 🎙️")
     _extend_session()
 
 
@@ -127,6 +137,7 @@ def _extend_session():
     """Open a voice session window."""
     _awake.set()
     dashboard.update_status(state="awake")
+    _log("wake", "Session open — listening")
     # Auto-close after SESSION_TIMEOUT seconds of inactivity (handled in listen loop)
 
 
@@ -346,7 +357,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _awake.clear()
             dashboard.update_status(state="idle")
             tts.speak("Going quiet.", block=False)
-            print("[Pinku] Session timeout → idle")
+            _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
 
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
         if pcm is None:
@@ -355,21 +366,23 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             text = stt.transcribe(pcm)
         except Exception as e:
-            print(f"[STT] transcribe error: {e}")
+            _log("error", f"STT error: {e}")
             continue
         if not text:
             continue
+
+        _log("stt", text)
 
         # ── Gate: idle mode ───────────────────────────────────────────────────
         if not _awake.is_set():
             triggered, command = _check_wake(text)
             if not triggered:
-                print(f"[Pinku] Idle — ignored: {text!r}")
+                _log("info", f"Idle — no wake word in: "{text}"")
                 continue
             # Wake confirmed
             _awake.set()
             last_speech_at = time.time()
-            print(f"[Pinku] Wake word → session open (command={command!r})")
+            _log("wake", f"Wake word detected! command="{command}"")
             if not command:
                 # Just the wake word alone — beep and wait for next utterance
                 tts.play_beep()
@@ -384,9 +397,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if _check_end(text):
             _awake.clear()
             _session_hist.clear()
-            tts.speak("Okay, bye for now.", block=False)
-            dashboard.update_status(state="idle", last_transcript=text, last_reply="Okay, bye for now.")
-            print("[Pinku] Session ended by user")
+            reply = "Okay, bye for now."
+            _log("info", "Session ended by user")
+            tts.speak(reply, block=False)
+            dashboard.update_status(state="idle", last_transcript=text, last_reply=reply)
             continue
 
         dashboard.update_status(state="processing", last_transcript=text)
@@ -394,9 +408,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
         # ── Route & execute ───────────────────────────────────────────────────
         action = llm.route(text)
         act    = action.get("action", "chat")
-        print(f"[Route] action={act!r} text={text!r}")
+        lang   = action.get("lang", "en")
+        _log("route", f"action={act} lang={lang} — "{text}"")
 
         if act == "ignore":
+            _log("info", "LLM classified as noise/ignore — skipping")
             continue
         elif act == "mute":
             _handle_mute()
@@ -409,6 +425,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         elif act == "scripture":
             _handle_scripture(action)
         elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
+            _log("warn", f"Action "{act}" not yet implemented")
             tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
         else:
             _handle_chat(action)
@@ -474,6 +491,7 @@ def main():
 
     tts.speak("Pinku ready.", prefer_hi=False)
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
+    _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")
 
     try:
         _voice_loop(recorder)

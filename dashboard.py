@@ -45,6 +45,15 @@ def push_detection(event: dict):
         _status["detections"] = _status["detections"][-50:]
     _broadcast({"type": "detection", **event})
 
+def log_message(level: str, msg: str):
+    """Stream a log line to all dashboard clients (shown in Log tab)."""
+    _broadcast({
+        "type":  "log",
+        "level": level,
+        "msg":   msg,
+        "ts":    time.strftime("%H:%M:%S"),
+    })
+
 # ── Action callbacks (registered by pinku.py) ─────────────────────────────────
 
 _actions: dict = {}
@@ -800,20 +809,32 @@ body {
 
 /* Log panel */
 .log-area {
-  flex:1; overflow-y:auto; padding:10px 14px; display:none; flex-direction:column; gap:6px;
+  flex:1; overflow-y:auto; padding:0; display:none; flex-direction:column;
 }
 .log-area.open { display:flex; }
 .log-area::-webkit-scrollbar { width:3px; }
 .log-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
-.log-entry {
-  font-size:0.75rem; color:var(--muted); padding:4px 0;
-  border-bottom:1px solid rgba(255,255,255,0.04);
-  display:flex; gap:8px; align-items:baseline;
+.log-toolbar {
+  flex-shrink:0; padding:6px 14px; border-bottom:1px solid var(--border);
+  display:flex; justify-content:space-between; align-items:center;
+  background:rgba(0,0,0,0.2); font-size:0.72rem; color:var(--muted);
 }
-.log-entry .log-ts { flex-shrink:0; font-size:0.65rem; color:#333355; }
-.log-entry .log-msg { flex:1; color:#9090b0; }
-.log-entry.pinku-log { color:var(--text); }
-.log-entry.pinku-log .log-msg { color:#c084fc; }
+.log-clear-btn {
+  font-size:0.7rem; padding:2px 8px; border-radius:6px; cursor:pointer;
+  background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--muted);
+}
+.log-clear-btn:hover { background:rgba(255,255,255,0.1); }
+.log-entries { flex:1; overflow-y:auto; padding:6px 14px; display:flex; flex-direction:column; gap:1px; }
+.log-entries::-webkit-scrollbar { width:3px; }
+.log-entries::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.log-entry {
+  font-size:0.73rem; padding:2px 0;
+  border-bottom:1px solid rgba(255,255,255,0.03);
+  display:flex; gap:8px; align-items:baseline;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+.log-entry .log-ts  { flex-shrink:0; font-size:0.63rem; color:#333355; min-width:60px; }
+.log-entry .log-msg { flex:1; word-break:break-word; }
 </style>
 </head>
 <body>
@@ -950,7 +971,13 @@ body {
 </div>
 
 <!-- Log area (hidden by default) -->
-<div class="log-area" id="log-area"></div>
+<div class="log-area" id="log-area">
+  <div class="log-toolbar">
+    <span>Live log — newest first</span>
+    <button class="log-clear-btn" onclick="document.getElementById('log-entries').innerHTML=''">Clear</button>
+  </div>
+  <div class="log-entries" id="log-entries"></div>
+</div>
 
 <!-- Bottom nav -->
 <nav class="pinky-nav">
@@ -1035,7 +1062,7 @@ function applyStatus(data) {
     _lastTranscript = data.last_transcript;
     document.getElementById('q-body').textContent = data.last_transcript;
     document.getElementById('q-cloud').classList.add('has-text');
-    addLog('you', data.last_transcript);
+    addLog('you', data.last_transcript, '');
   }
   // Reply cloud
   if (data.last_reply && data.last_reply !== _lastReply) {
@@ -1043,7 +1070,7 @@ function applyStatus(data) {
     document.getElementById('r-body').textContent = data.last_reply;
     document.getElementById('r-cloud').classList.add('has-text');
     addChat(data.last_transcript, data.last_reply);
-    addLog('pinku', data.last_reply);
+    addLog('pinku', data.last_reply, '');
   }
 
   // Mute button icon
@@ -1073,7 +1100,7 @@ function flashDetection(event) {
   }
 
   addDetectionRow(event);
-  addLog('cam', formatDetEvent(event));
+  addLog('camera', formatDetEvent(event));
 }
 
 // ── API action helper ─────────────────────────────────────────────────────────
@@ -1173,15 +1200,30 @@ function addDetectionRow(event) {
 }
 
 // ── Log panel ─────────────────────────────────────────────────────────────────
-function addLog(who, msg) {
-  const box = document.getElementById('log-area');
+const LOG_ICONS = {
+  stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊',
+  camera:'📷', gesture:'✋', error:'🔴', warn:'🟡',
+  info:'⚪', you:'🧑', pinku:'🤖', cam:'📷',
+};
+const LOG_COLORS = {
+  stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
+  tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
+  warn:'#fbbf24', info:'#64748b', you:'#93c5fd', pinku:'#c084fc', cam:'#67e8f9',
+};
+
+function addLog(level, msg, ts) {
+  const box = document.getElementById('log-entries');
+  if (!box) return;
   const entry = document.createElement('div');
-  entry.className = 'log-entry' + (who === 'pinku' ? ' pinku-log' : '');
-  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  const prefix = who === 'you' ? '🎙️' : who === 'pinku' ? '🤖' : '📷';
-  entry.innerHTML = `<span class="log-ts">${now}</span><span class="log-msg">${prefix} ${esc(msg)}</span>`;
+  entry.className = 'log-entry';
+  const t = ts || new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const icon  = LOG_ICONS[level]  || '⚪';
+  const color = LOG_COLORS[level] || '#64748b';
+  entry.innerHTML =
+    `<span class="log-ts">${esc(t)}</span>` +
+    `<span class="log-msg" style="color:${color}">${icon} ${esc(msg)}</span>`;
   box.insertBefore(entry, box.firstChild);
-  while (box.children.length > 100) box.removeChild(box.lastChild);
+  while (box.children.length > 200) box.removeChild(box.lastChild);
 }
 
 function formatDetEvent(e) {
@@ -1228,6 +1270,8 @@ function connect() {
         applyStatus(data);
       } else if (data.type === 'detection') {
         flashDetection(data);
+      } else if (data.type === 'log') {
+        addLog(data.level || 'info', data.msg || '', data.ts || '');
       }
     } catch(_) {}
   };

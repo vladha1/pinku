@@ -33,8 +33,8 @@ LASER_STARS_MIN = int(os.getenv("LASER_STARS_MIN", "5"))    # ≥ this many dots
 LASER_COOLDOWN  = float(os.getenv("LASER_COOLDOWN", "6.0")) # seconds between laser actions
 
 # ── Voice activity detection ──────────────────────────────────────────────────
-VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "1.5"))  # silence to end utterance
-VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "500"))  # ignore clips shorter than this
+VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
+VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "400"))  # ignore clips shorter than this
 MIC_SAMPLE_RATE   = 16000
 MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
 
