@@ -186,7 +186,7 @@ class CameraDetector:
         global _det_status
         print("[Camera] Starting detection …")
 
-        # Load heavy models — wrap each separately so partial failures are visible
+        # ── YOLO (required) ───────────────────────────────────────────────────
         try:
             from ultralytics import YOLO
             print("[Camera] Loading YOLO …")
@@ -197,28 +197,79 @@ class CameraDetector:
             _det_status = f"error: YOLO {e}"
             return
 
+        # ── MediaPipe Tasks API (optional — Apple Silicon M1/M2/M3/M4) ────────
+        # mediapipe ≥ 0.10 on Apple Silicon dropped the old `solutions` API.
+        # We try the new Tasks API first, then the legacy API, then skip gestures.
+        hand_detector = None
+        pose_detector = None
+
         try:
             import mediapipe as mp
-            mp_pose  = mp.solutions.pose
-            mp_hands = mp.solutions.hands
-            pose  = mp_pose.Pose(min_detection_confidence=0.5,
-                                 min_tracking_confidence=0.5,
-                                 model_complexity=0)
-            hands = mp_hands.Hands(max_num_hands=2,
-                                   min_detection_confidence=0.5,
-                                   min_tracking_confidence=0.5,
-                                   model_complexity=0)
-            print("[Camera] MediaPipe ready")
-        except Exception as e:
-            print(f"[Camera] MediaPipe load failed: {e}")
-            _det_status = f"error: MediaPipe {e}"
-            return
+            from mediapipe.tasks import python as mp_python
+            from mediapipe.tasks.python import vision as mp_vision
 
-        _det_status = "ok"
+            # ── Download task models if needed ────────────────────────────────
+            import urllib.request, os
+
+            _HAND_MODEL = "hand_landmarker.task"
+            _POSE_MODEL = "pose_landmarker_lite.task"
+
+            if not os.path.exists(_HAND_MODEL):
+                print("[Camera] Downloading hand_landmarker.task …")
+                urllib.request.urlretrieve(
+                    "https://storage.googleapis.com/mediapipe-models/"
+                    "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                    _HAND_MODEL,
+                )
+                print("[Camera] hand_landmarker.task downloaded")
+
+            if not os.path.exists(_POSE_MODEL):
+                print("[Camera] Downloading pose_landmarker_lite.task …")
+                urllib.request.urlretrieve(
+                    "https://storage.googleapis.com/mediapipe-models/"
+                    "pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+                    _POSE_MODEL,
+                )
+                print("[Camera] pose_landmarker_lite.task downloaded")
+
+            hand_opts = mp_vision.HandLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=_HAND_MODEL),
+                num_hands=2,
+                min_hand_detection_confidence=0.5,
+                min_hand_presence_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            hand_detector = mp_vision.HandLandmarker.create_from_options(hand_opts)
+
+            pose_opts = mp_vision.PoseLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=_POSE_MODEL),
+                min_pose_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            pose_detector = mp_vision.PoseLandmarker.create_from_options(pose_opts)
+            print("[Camera] MediaPipe Tasks API ready (hand + pose)")
+
+        except Exception as e:
+            # Try legacy solutions API (older mediapipe / non-Apple-Silicon)
+            print(f"[Camera] Tasks API failed ({e}) — trying legacy solutions API …")
+            try:
+                import mediapipe as mp
+                _legacy_pose  = mp.solutions.pose.Pose(
+                    min_detection_confidence=0.5, min_tracking_confidence=0.5, model_complexity=0)
+                _legacy_hands = mp.solutions.hands.Hands(
+                    max_num_hands=2, min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5, model_complexity=0)
+                hand_detector = ("legacy", _legacy_hands)
+                pose_detector = ("legacy", _legacy_pose)
+                print("[Camera] MediaPipe legacy solutions API ready")
+            except Exception as e2:
+                print(f"[Camera] MediaPipe not available ({e2}) — running YOLO-only (no gestures)")
+
+        _det_status = "ok" if hand_detector else "ok (YOLO only — no gestures)"
+        print(f"[Camera] Detection status: {_det_status}")
         last_detect = 0.0
 
         while not self._stop.is_set():
-            # Wait until there's a frame
             frame = get_frame()
             if frame is None:
                 time.sleep(0.1)
@@ -232,23 +283,31 @@ class CameraDetector:
 
             try:
                 self._check_laser(frame)
-                self._run_detection(frame, yolo, pose, hands)
+                self._run_detection(frame, yolo, hand_detector, pose_detector)
             except Exception:
                 print(f"[Camera] Detection error:\n{traceback.format_exc()}")
                 time.sleep(1.0)
 
-        pose.close()
-        hands.close()
+        # Cleanup
+        try:
+            if isinstance(hand_detector, tuple):
+                hand_detector[1].close()
+                pose_detector[1].close()
+            elif hand_detector:
+                hand_detector.close()
+                if pose_detector:
+                    pose_detector.close()
+        except Exception:
+            pass
         print("[Camera] Detection stopped")
 
-    # ── Gesture classifier ────────────────────────────────────────────────────
+    # ── Gesture classifier (works for both Tasks API and legacy landmarks) ────
 
     @staticmethod
-    def _classify_gesture(hand_lm, handedness) -> str:
-        lm   = hand_lm.landmark
+    def _classify_gesture_lm(lm, is_right: bool) -> str:
+        """Classify from a list of 21 landmark objects with .x .y .z"""
         tips = [4, 8, 12, 16, 20]
         pips = [3, 6, 10, 14, 18]
-        is_right = handedness.classification[0].label == "Right"
         extended = [lm[4].x < lm[3].x if is_right else lm[4].x > lm[3].x]
         extended += [lm[t].y < lm[p].y for t, p in zip(tips[1:], pips[1:])]
         th, ix, mi, ri, pi = extended
@@ -261,6 +320,13 @@ class CameraDetector:
         if ix and pi and not mi and not ri:                              return "Rock On"
         if th and pi and not ix and not mi and not ri:                   return "Call Me"
         return "Custom"
+
+    @staticmethod
+    def _classify_gesture(hand_lm, handedness) -> str:
+        """Legacy solutions API wrapper."""
+        lm       = hand_lm.landmark
+        is_right = handedness.classification[0].label == "Right"
+        return CameraDetector._classify_gesture_lm(lm, is_right)
 
     # ── Laser check ───────────────────────────────────────────────────────────
 
@@ -296,13 +362,15 @@ class CameraDetector:
 
     # ── YOLO + MediaPipe detection ────────────────────────────────────────────
 
-    def _run_detection(self, frame, yolo, pose, hands):
+    def _run_detection(self, frame, yolo, hand_detector, pose_detector):
+        import mediapipe as mp
         rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "objects": [], "persons": 0, "gestures": [],
         }
 
+        # ── YOLO ─────────────────────────────────────────────────────────────
         results = yolo(frame, conf=YOLO_CONF, verbose=False)[0]
         for box in results.boxes:
             label = yolo.names[int(box.cls[0])]
@@ -312,17 +380,43 @@ class CameraDetector:
             else:
                 event["objects"].append({"label": label, "conf": conf})
 
-        pose_res = pose.process(rgb)
-        if pose_res.pose_landmarks and event["persons"] == 0:
-            event["persons"] = 1
+        # ── MediaPipe ─────────────────────────────────────────────────────────
+        if hand_detector is not None:
+            is_legacy = isinstance(hand_detector, tuple)
 
-        hand_res = hands.process(rgb)
-        if hand_res.multi_hand_landmarks:
-            for lm, hd in zip(hand_res.multi_hand_landmarks,
-                              hand_res.multi_handedness):
-                g    = self._classify_gesture(lm, hd)
-                side = hd.classification[0].label
-                event["gestures"].append({"hand": side, "gesture": g})
+            if is_legacy:
+                # Legacy solutions API
+                _, legacy_hands = hand_detector
+                _, legacy_pose  = pose_detector
+                pose_res = legacy_pose.process(rgb)
+                if pose_res.pose_landmarks and event["persons"] == 0:
+                    event["persons"] = 1
+                hand_res = legacy_hands.process(rgb)
+                if hand_res.multi_hand_landmarks:
+                    for lm, hd in zip(hand_res.multi_hand_landmarks,
+                                      hand_res.multi_handedness):
+                        g    = self._classify_gesture(lm, hd)
+                        side = hd.classification[0].label
+                        event["gestures"].append({"hand": side, "gesture": g})
+            else:
+                # New Tasks API (mediapipe ≥ 0.10, Apple Silicon)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+                if pose_detector:
+                    pose_res = pose_detector.detect(mp_image)
+                    if pose_res.pose_landmarks and event["persons"] == 0:
+                        event["persons"] = 1
+
+                hand_res = hand_detector.detect(mp_image)
+                for i, lm_list in enumerate(hand_res.hand_landmarks):
+                    try:
+                        hand_info = hand_res.handedness[i]
+                        is_right  = hand_info[0].category_name == "Right"
+                        g    = self._classify_gesture_lm(lm_list, is_right)
+                        side = "Right" if is_right else "Left"
+                        event["gestures"].append({"hand": side, "gesture": g})
+                    except Exception:
+                        pass
 
         snap = (
             event["persons"],
