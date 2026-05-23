@@ -56,7 +56,7 @@ def _handle_chat(action: dict):
     lang = action.get("lang", "en")
     is_hi = lang == "hi"
     print(f"[Chat] {tr!r}")
-    reply = llm.chat(tr, history=_session_hist)
+    reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
     if len(_session_hist) > 12:
@@ -177,11 +177,109 @@ def on_laser_stars(currently_muted: bool):
         _handle_mute()
 
 
+# ── Gesture action map ────────────────────────────────────────────────────────
+#
+# Gestures that trigger Pinku actions (require active session OR override).
+# Cooldown prevents repeat-firing while hand is held.
+_gesture_last_at: dict[str, float] = {}
+_GESTURE_COOLDOWN = 4.0   # seconds between same-gesture actions
+
+_GESTURE_ACTIONS = {
+    # Gesture label   → (requires_session, action_fn_name)
+    "Thumbs Up":      (False, "_gesture_thumbs_up"),
+    "Thumbs Down":    (False, "_gesture_thumbs_down"),
+    "Open Hand":      (False, "_gesture_open_hand"),
+    "Fist":           (False, "_gesture_fist"),
+    "Peace":          (True,  "_gesture_peace"),
+    "Pointing":       (True,  "_gesture_pointing"),
+    "Call Me":        (False, "_gesture_call_me"),
+}
+
+def _gesture_throttle(label: str) -> bool:
+    """Return True if we should fire (not in cooldown)."""
+    now = time.time()
+    if now - _gesture_last_at.get(label, 0) < _GESTURE_COOLDOWN:
+        return False
+    _gesture_last_at[label] = now
+    return True
+
+def _gesture_thumbs_up():
+    """👍 Thumbs Up — wake / positive ack."""
+    if is_muted():
+        return
+    print("[Gesture] 👍 Thumbs Up → wake session")
+    tts.play_beep()
+    _extend_session()
+
+def _gesture_thumbs_down():
+    """👎 Thumbs Down — stop speaking / dismiss."""
+    print("[Gesture] 👎 Thumbs Down → stop speaking")
+    tts.stop_speaking()
+    dashboard.update_status(state="awake" if _awake.is_set() else "idle")
+
+def _gesture_open_hand():
+    """🖐 Open Hand — pause / stop speaking."""
+    print("[Gesture] 🖐 Open Hand → stop speaking")
+    tts.stop_speaking()
+
+def _gesture_fist():
+    """✊ Fist — mute toggle."""
+    print("[Gesture] ✊ Fist → mute toggle")
+    if is_muted():
+        _handle_unmute()
+    else:
+        _handle_mute()
+
+def _gesture_peace():
+    """✌️ Peace — ask what time it is."""
+    print("[Gesture] ✌️ Peace → time")
+    _handle_time({"transcript": "What time is it?", "lang": "en"})
+
+def _gesture_pointing():
+    """☝️ Pointing — describe what camera sees."""
+    print("[Gesture] ☝️ Pointing → describe")
+    _handle_describe({"transcript": "What do you see?", "lang": "en"})
+
+def _gesture_call_me():
+    """🤙 Call Me — unmute + open session."""
+    print("[Gesture] 🤙 Call Me → unmute + wake")
+    if is_muted():
+        _handle_unmute()
+    else:
+        tts.play_beep()
+        _extend_session()
+
+_GESTURE_FN_MAP = {
+    "_gesture_thumbs_up":   _gesture_thumbs_up,
+    "_gesture_thumbs_down": _gesture_thumbs_down,
+    "_gesture_open_hand":   _gesture_open_hand,
+    "_gesture_fist":        _gesture_fist,
+    "_gesture_peace":       _gesture_peace,
+    "_gesture_pointing":    _gesture_pointing,
+    "_gesture_call_me":     _gesture_call_me,
+}
+
+def _dispatch_gestures(event: dict):
+    for g in event.get("gestures", []):
+        label = g.get("gesture", "")
+        if label not in _GESTURE_ACTIONS:
+            continue
+        requires_session, fn_name = _GESTURE_ACTIONS[label]
+        if requires_session and not _awake.is_set():
+            continue
+        if not _gesture_throttle(label):
+            continue
+        fn = _GESTURE_FN_MAP.get(fn_name)
+        if fn:
+            threading.Thread(target=fn, daemon=True).start()
+
+
 # ── Detection callback ────────────────────────────────────────────────────────
 
 def on_detection(event: dict):
     _det_logger.log(event)
     dashboard.push_detection(event)
+    _dispatch_gestures(event)
 
 
 # ── Wake word / session end detection ────────────────────────────────────────

@@ -53,10 +53,17 @@ Examples:
 {"action":"ignore","transcript":"","lang":"en"}
 """
 
-_CHAT_SYSTEM = """\
+_CHAT_SYSTEM_EN = """\
 You are Pinku, a warm and helpful home AI assistant on an M4 Mac Mini.
 Respond naturally and concisely — you are speaking aloud, so keep it under 60 words unless asked to elaborate.
 No markdown, no bullet points. Plain conversational sentences only.
+"""
+
+_CHAT_SYSTEM_HI = """\
+You are Pinku, a warm and helpful home AI assistant on an M4 Mac Mini.
+The user is speaking Hindi. Reply in natural spoken Hindi using Devanagari script.
+Keep it under 60 words unless asked to elaborate. No markdown, no bullet points.
+Plain conversational sentences only. Do not mix English unless the user does.
 """
 
 # ── Low-level Ollama call ─────────────────────────────────────────────────────
@@ -120,12 +127,15 @@ def route(transcript: str) -> dict:
 
 def chat(transcript: str,
          history: list[dict] | None = None,
-         system_extra: str = "") -> str:
+         system_extra: str = "",
+         is_hi: bool = False) -> str:
     """
     Generate a conversational reply.
     history: list of {"role": "user"|"assistant", "content": "..."} dicts.
+    is_hi=True  → use Hindi system prompt so LLM replies in Devanagari.
     """
-    system = _CHAT_SYSTEM + ("\n" + system_extra if system_extra else "")
+    base   = _CHAT_SYSTEM_HI if is_hi else _CHAT_SYSTEM_EN
+    system = base + ("\n" + system_extra if system_extra else "")
     messages: list[dict] = [{"role": "system", "content": system}]
     if history:
         messages.extend(history[-6:])   # last 3 turns for context
