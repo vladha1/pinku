@@ -89,6 +89,7 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("user", tr)
+    tts.play_think()                                          # tick: sending to LLM
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
@@ -118,11 +119,12 @@ def _handle_describe(action: dict):
     if frame is None:
         tts.speak("Camera isn't available right now.")
         return
-    tts.speak("Let me look…")
-    b64  = frame_to_b64(frame)
     tr   = action.get("transcript", "What do you see?")
     lang = action.get("lang", "en")
     _log("user", tr)
+    tts.speak("Let me look…")
+    tts.play_think()
+    b64  = frame_to_b64(frame)
     desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
     print(f"[Vision] {desc!r}")
     dashboard.update_status(last_transcript=tr, last_reply=desc)
@@ -131,6 +133,7 @@ def _handle_describe(action: dict):
 
 def _handle_scripture(action: dict):
     """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
+    tts.play_think()
     knowledge.handle(
         action,
         speak_fn     = _speak_reply,
@@ -245,11 +248,12 @@ def on_detection(event: dict):
         _last_human_at = time.time()
         if not _user_muted.is_set():
             if not _awake.is_set():
-                # Person walked in — open listening session without requiring wake word
+                # Person walked in — open listening session, play entry chime (with cooldown)
                 _last_speech_at = time.time()
                 _awake.set()
                 dashboard.update_status(state="awake")
                 _log("info", "Person in frame — listening")
+                tts.play_beep(entry=True)   # rising 3-note, suppressed if played recently
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = time.time()
@@ -431,6 +435,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _handle_scripture(action)
         elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
             _log("warn", f'Action "{act}" not yet implemented')
+            tts.play_error()
             tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
         else:
             _handle_chat(action)
