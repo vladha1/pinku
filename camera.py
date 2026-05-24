@@ -314,20 +314,42 @@ class CameraDetector:
 
     @staticmethod
     def _classify_gesture_lm(lm, is_right: bool) -> str:
-        """Classify from a list of 21 landmark objects with .x .y .z"""
-        tips = [4, 8, 12, 16, 20]
-        pips = [3, 6, 10, 14, 18]
-        extended = [lm[4].x < lm[3].x if is_right else lm[4].x > lm[3].x]
-        extended += [lm[t].y < lm[p].y for t, p in zip(tips[1:], pips[1:])]
-        th, ix, mi, ri, pi = extended
-        if all(extended):                                                return "Open Hand"
-        if not any(extended):                                            return "Fist"
-        if th and not ix and not mi and not ri and not pi:
-            return "Thumbs Up" if lm[4].y < lm[3].y else "Thumbs Down"
-        if ix and mi and not ri and not pi and not th:                   return "Peace"
-        if ix and not mi and not ri and not pi:                          return "Pointing"
-        if ix and pi and not mi and not ri:                              return "Rock On"
-        if th and pi and not ix and not mi and not ri:                   return "Call Me"
+        """
+        Classify from a list of 21 landmark objects with .x .y .z
+
+        Landmark indices (MediaPipe Hand):
+          0=wrist  4=thumb tip  3=thumb IP  2=thumb MCP
+          5=index MCP  8=index tip
+          9=middle MCP 12=middle tip
+          13=ring MCP  16=ring tip
+          17=pinky MCP 20=pinky tip
+        """
+        # ── Finger extension (tip above its MCP knuckle in image coords) ──────
+        ix = lm[8].y  < lm[5].y
+        mi = lm[12].y < lm[9].y
+        ri = lm[16].y < lm[13].y
+        pi = lm[20].y < lm[17].y
+        no_fingers = not ix and not mi and not ri and not pi
+
+        # ── Thumb: sideways extension (used for Open Hand / Call Me / Fist) ───
+        th_side = lm[4].x < lm[3].x if is_right else lm[4].x > lm[3].x
+
+        # ── Thumbs Up / Down: thumb vertical, all fingers curled ─────────────
+        # Normalise by wrist→middle-MCP distance so it works at any hand size
+        hand_h = abs(lm[0].y - lm[9].y) + 1e-6
+        if no_fingers:
+            if lm[4].y < lm[0].y - hand_h * 0.25:   # tip well ABOVE wrist
+                return "Thumbs Up"
+            if lm[4].y > lm[0].y + hand_h * 0.25:   # tip well BELOW wrist
+                return "Thumbs Down"
+
+        # ── Other gestures ────────────────────────────────────────────────────
+        if ix and mi and ri and pi:                            return "Open Hand"
+        if not ix and not mi and not ri and not pi:            return "Fist"
+        if ix and mi and not ri and not pi:                    return "Peace"
+        if ix and not mi and not ri and not pi:                return "Pointing"
+        if ix and pi and not mi and not ri:                    return "Rock On"
+        if th_side and pi and not ix and not mi and not ri:    return "Call Me"
         return "Custom"
 
     @staticmethod
