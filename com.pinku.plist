@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pinku</string>
+
+    <!-- Use 'open' so Pinku runs inside Terminal.app → inherits camera permission -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/open</string>
+        <string>-a</string>
+        <string>Terminal</string>
+        <string>/Users/vivekladha/pinku/start_pinku.command</string>
+    </array>
+
+    <!-- Start when user logs in -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Wait 10 s after login before launching (let Desktop settle) -->
+    <key>StartInterval</key>
+    <integer>0</integer>
+
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/vivekladha/pinku</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/vivekladha/pinku/logs/launchagent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/vivekladha/pinku/logs/launchagent.err</string>
+</dict>
+</plist>
