@@ -89,7 +89,6 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("user", tr)
-    tts.play_think()                                          # tick: sending to LLM
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
@@ -123,7 +122,6 @@ def _handle_describe(action: dict):
     lang = action.get("lang", "en")
     _log("user", tr)
     tts.speak("Let me look…")
-    tts.play_think()
     b64  = frame_to_b64(frame)
     desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
     print(f"[Vision] {desc!r}")
@@ -133,7 +131,6 @@ def _handle_describe(action: dict):
 
 def _handle_scripture(action: dict):
     """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
-    tts.play_think()
     knowledge.handle(
         action,
         speak_fn     = _speak_reply,
@@ -335,13 +332,113 @@ def _check_end(text: str) -> bool:
     return t in _END_PHRASES or any(t.startswith(p) for p in _END_PHRASES)
 
 
+# ── Action dispatcher (shared by Gemini and fallback paths) ──────────────────
+
+def _dispatch_action(action: dict):
+    """Execute a routed action dict — used by both Gemini and fallback paths."""
+    act  = action.get("action", "chat")
+    lang = action.get("lang", "en")
+    if act == "ignore":
+        _log("info", "Classified as noise/ignore — skipping")
+        return
+    elif act == "mute":
+        _handle_mute()
+    elif act == "unmute":
+        _handle_unmute()
+    elif act == "time":
+        _handle_time(action)
+    elif act == "describe":
+        _handle_describe(action)
+    elif act == "scripture":
+        tts.play_think()
+        _handle_scripture(action)
+    elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
+        _log("warn", f'Action "{act}" not yet implemented')
+        tts.play_error()
+        tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
+    else:
+        _handle_chat(action)
+
+
+def _handle_gemini_result(result: dict):
+    """
+    Process the JSON dict returned by llm.transcribe_and_respond().
+    Gemini has already transcribed + classified + (optionally) generated the reply.
+    """
+    global _last_speech_at
+
+    transcript = result.get("transcript", "").strip()
+    action     = result.get("action", "ignore")
+    reply      = result.get("reply", "").strip()
+    lang       = result.get("lang", "en")
+    is_hi      = lang == "hi"
+
+    if not transcript:
+        return
+
+    _log("stt", transcript)
+
+    if action == "ignore":
+        _log("info", f'Gemini: background noise — "{transcript}"')
+        return
+
+    _last_speech_at = time.time()
+
+    # Session-end check (short utterances only)
+    if _check_end(transcript) and _awake.is_set():
+        _awake.clear()
+        _session_hist.clear()
+        _log("info", "Session ended by user")
+        tts.play_sleep()
+        dashboard.update_status(state="idle", last_transcript=transcript, last_reply="")
+        return
+
+    dashboard.update_status(state="processing", last_transcript=transcript)
+    _log("user", transcript)
+
+    if reply:
+        # Gemini already generated the reply (chat / scripture / knowledge)
+        _log("pinku", reply)
+        _session_hist.append({"role": "user",      "content": transcript})
+        _session_hist.append({"role": "assistant", "content": reply})
+        if len(_session_hist) > 12:
+            _session_hist[:] = _session_hist[-12:]
+        dashboard.update_status(last_transcript=transcript, last_reply=reply)
+        _speak_reply(reply, is_hi)
+    else:
+        # Action needs Python handler (time, mute, describe, etc.)
+        _dispatch_action({"action": action, "lang": lang,
+                          "transcript": transcript, **result})
+
+
+def _fallback_process(pcm: bytes):
+    """
+    Old pipeline: Whisper → Ollama route → handler.
+    Used when Gemini audio transcription is unavailable or fails.
+    """
+    try:
+        text = stt.transcribe(pcm)
+    except Exception as e:
+        _log("error", f"STT fallback error: {e}")
+        return
+    if not text:
+        return
+    _log("stt", f"[whisper] {text}")
+    action = llm.route(text)
+    _log("route", f"[ollama] action={action.get('action')} — \"{text}\"")
+    _dispatch_action(action)
+
+
 # ── Main voice loop ───────────────────────────────────────────────────────────
 
 def _voice_loop(recorder: stt.AudioRecorder):
     """
-    Idle mode  : only respond when wake phrase heard at start of utterance.
-    Active mode: respond to everything; auto-expire after SESSION_TIMEOUT;
-                 explicit end phrases close the session early.
+    When face visible or session active → Gemini handles audio end-to-end
+      (transcription + intent classification + reply in one API call).
+    When idle with no face → Whisper locally for wake word detection only,
+      then Gemini for the actual response.
+
+    Fallback to Whisper + Ollama + Gemini if Gemini audio is unavailable.
     """
     global _last_speech_at
 
@@ -351,7 +448,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue
 
         # ── Session timeout ───────────────────────────────────────────────────
-        # Only time out if the room also appears empty — person present keeps it alive
         if (_awake.is_set()
                 and time.time() - _last_speech_at > config.SESSION_TIMEOUT
                 and not _human_is_present()):
@@ -363,10 +459,23 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if pcm is None:
             continue
 
-        # Discard audio captured while muted (mute may have been triggered mid-capture)
         if is_muted():
             continue
 
+        # ── Gate: Gemini path (face visible or session open) ──────────────────
+        if _human_is_present() or _awake.is_set():
+            dashboard.update_status(state="processing")
+            tts.play_think()
+            result = llm.transcribe_and_respond(pcm, history=_session_hist)
+            if result is not None:
+                _handle_gemini_result(result)
+            else:
+                # Gemini unavailable → fall back to Whisper + Ollama
+                _log("warn", "Gemini audio unavailable — using Whisper fallback")
+                _fallback_process(pcm)
+            continue
+
+        # ── Gate: idle mode — Whisper locally for wake word only ─────────────
         try:
             text = stt.transcribe(pcm)
         except Exception as e:
@@ -376,68 +485,31 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue
 
         _log("stt", text)
+        triggered, command = _check_wake(text)
+        if not triggered:
+            _log("info", f'Idle — no wake word: "{text}"')
+            continue
 
-        # ── Gate: idle mode ───────────────────────────────────────────────────
-        if not _awake.is_set():
-            # Person in frame → no wake word needed (mirrors pinky behaviour)
-            if _human_is_present() and not _user_muted.is_set():
-                _awake.set()
-                _last_speech_at = time.time()
-                _log("info", "Person present — processing without wake word")
-            else:
-                triggered, command = _check_wake(text)
-                if not triggered:
-                    _log("info", f'Idle — no wake word in: "{text}"')
-                    continue
-                # Wake word confirmed
-                _awake.set()
-                _last_speech_at = time.time()
-                _log("wake", f'Wake word detected! command="{command}"')
-                if not command:
-                    tts.play_beep()
-                    dashboard.update_status(state="awake")
-                    continue
-                text = command
-
-        # ── Active session ────────────────────────────────────────────────────
+        # Wake word confirmed
+        _awake.set()
         _last_speech_at = time.time()
+        _log("wake", f'Wake word! command="{command}"')
 
-        # Check for session-end phrase (short utterances only)
-        if _check_end(text):
-            _awake.clear()
-            _session_hist.clear()
-            _log("info", "Session ended by user")
-            tts.play_sleep()   # soft chime instead of spoken goodbye (avoids mic feedback)
-            dashboard.update_status(state="idle", last_transcript=text, last_reply="")
+        if not command:
+            # Just the wake word — beep and wait for next utterance
+            tts.play_beep()
+            dashboard.update_status(state="awake")
             continue
 
-        dashboard.update_status(state="processing", last_transcript=text)
-
-        # ── Route & execute ───────────────────────────────────────────────────
-        action = llm.route(text)
-        act    = action.get("action", "chat")
-        lang   = action.get("lang", "en")
-        _log("route", f'action={act} lang={lang} — "{text}"')
-
-        if act == "ignore":
-            _log("info", "LLM classified as noise/ignore — skipping")
-            continue
-        elif act == "mute":
-            _handle_mute()
-        elif act == "unmute":
-            _handle_unmute()
-        elif act == "time":
-            _handle_time(action)
-        elif act == "describe":
-            _handle_describe(action)
-        elif act == "scripture":
-            _handle_scripture(action)
-        elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
-            _log("warn", f'Action "{act}" not yet implemented')
-            tts.play_error()
-            tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
+        # Wake word + inline command — send audio to Gemini for quality response
+        dashboard.update_status(state="processing")
+        tts.play_think()
+        result = llm.transcribe_and_respond(pcm, history=_session_hist)
+        if result is not None:
+            _handle_gemini_result(result)
         else:
-            _handle_chat(action)
+            # Gemini unavailable → route the Whisper text we already have
+            _fallback_process(pcm)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

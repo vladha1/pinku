@@ -1,10 +1,11 @@
 """
-LLM — dual-backend design:
-  route()   → Ollama (local llama3.2:3b) — fast keyword/intent detection only
-  chat()    → Gemini 2.5 Flash — smart, accurate conversational replies
-  describe_image() → Gemini Vision — camera frame description
+LLM — Gemini-first design:
+  transcribe_and_respond() → Gemini 2.5 Flash audio — transcription + routing + reply in one call
+  route()                  → Ollama local (fallback when Gemini unavailable / idle wake-word path)
+  chat()                   → Gemini 2.5 Flash text — used in fallback path
+  describe_image()         → Gemini Vision
 
-Ollama must be running: `ollama serve`
+Ollama must be running for fallback: `ollama serve`
 Gemini key loaded from .env in the same directory.
 """
 
@@ -98,7 +99,123 @@ Plain conversational sentences only. Do not mix English unless the user does.
 Be precise with facts and numbers.
 """
 
-# ── Ollama (routing only) ─────────────────────────────────────────────────────
+# ── Gemini audio: transcription + routing + reply in one call ─────────────────
+
+_TRANSCRIBE_SYSTEM = """\
+You are Pinku, a home AI assistant in an Indian household. A microphone is always on.
+You will receive a short audio clip from the mic. Do all three steps:
+
+STEP 1 — TRANSCRIBE
+Write the exact spoken words. The speaker may use:
+- Indian English accent
+- Hindi (Devanagari or Roman script)
+- Hinglish (mixed Hindi/English)
+- Indian proper nouns: IPL, Virat Kohli, Sachin Tendulkar, Mumbai Indians, CSK, RCB,
+  Bollywood actors/films, Indian cities, foods, festivals, deities, scripture names
+
+STEP 2 — CLASSIFY
+Is this addressed to you (Pinku / Pinky / Pink / Pingu) or background noise / TV / side-conversation?
+
+STEP 3 — REPLY
+Generate a spoken reply for intents you can answer directly.
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "transcript": "<exact words, or empty string if no clear speech>",
+  "lang": "en" or "hi",
+  "action": "<see list>",
+  "reply": "<spoken response, or empty string>"
+}
+
+ACTION LIST (pick exactly one):
+"ignore"     → background noise, TV, not addressed to Pinku, unintelligible → reply must be ""
+"chat"       → general question/conversation addressed to Pinku → reply REQUIRED (≤60 words, plain sentences)
+"scripture"  → Gita, Ramayana, Mahabharata, Vedas, Upanishads, yoga, meditation, Ayurveda,
+               Indian mythology, history, classical music, poetry, Sanskrit → reply REQUIRED
+"time"       → asked for current time or date → reply: "" (system inserts actual time)
+"weather"    → weather question → reply: ""
+"mute"       → told Pinku to stop / sleep / be quiet → reply: ""
+"unmute"     → told Pinku to wake / start / listen → reply: ""
+"describe"   → asked Pinku to look / describe what it sees → reply: ""
+"music_play" → wants music played → reply: "", add "query": "<search term>" field
+"music_stop" → stop music → reply: ""
+"lights_on"  → lights on → reply: ""
+"lights_off" → lights off → reply: ""
+
+RULES:
+- Not clearly addressed to Pinku? → "ignore"
+- Reply is SPOKEN ALOUD — no bullet points, no markdown, natural sentences only
+- Hindi: Devanagari script in reply, no English unless user mixed it
+- Scripture: include original script verse if relevant, then meaning + one insight
+- Keep replies ≤60 words (scripture/knowledge: ≤100 words)
+"""
+
+
+def transcribe_and_respond(
+    pcm: bytes,
+    history: list[dict] | None = None,
+) -> dict | None:
+    """
+    Send microphone PCM audio to Gemini for transcription + intent + reply in one call.
+    Replaces: Whisper transcription + Ollama routing + Gemini chat.
+
+    Returns dict {transcript, lang, action, reply} or None if Gemini unavailable.
+    Falls back to None so caller can use the old Whisper+Ollama path.
+    """
+    import base64
+    import io
+    import wave as _wave
+
+    if not GEMINI_API_KEY:
+        return None
+
+    # Pack PCM into a WAV buffer
+    buf = io.BytesIO()
+    with _wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)   # must match MIC_SAMPLE_RATE
+        wf.writeframes(pcm)
+    wav_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # Build Gemini contents: recent history + current audio
+    contents: list[dict] = []
+    for turn in (history or [])[-4:]:   # last 2 exchanges for context
+        role = "model" if turn["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
+    contents.append({
+        "role": "user",
+        "parts": [{"inline_data": {"mime_type": "audio/wav", "data": wav_b64}}],
+    })
+
+    try:
+        raw = _gemini_call(contents, temperature=0.2, max_tokens=700,
+                           system=_TRANSCRIBE_SYSTEM)
+        print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
+    except Exception as e:
+        print(f"[LLM] transcribe_and_respond: Gemini failed ({e})")
+        return None
+
+    m = re.search(r'\{.*\}', raw, re.DOTALL)
+    if not m:
+        print(f"[LLM] transcribe_and_respond: no JSON in response: {raw[:80]!r}")
+        return None
+    try:
+        result = json.loads(m.group())
+    except json.JSONDecodeError:
+        print(f"[LLM] transcribe_and_respond: JSON parse error")
+        return None
+
+    result.setdefault("transcript", "")
+    result.setdefault("lang", "en")
+    result.setdefault("action", "ignore")
+    result.setdefault("reply", "")
+    _dashboard_log("llm", f"via {GEMINI_MODEL} (audio) → {result['action']}")
+    print(f"[LLM] transcribed: {result['transcript']!r} → {result['action']}")
+    return result
+
+
+# ── Ollama (routing only — fallback) ──────────────────────────────────────────
 
 def _ollama_call(messages: list[dict], temperature: float = 0.1,
                  max_tokens: int = 200) -> str:
