@@ -34,19 +34,27 @@ import dashboard
 # ── Global state ──────────────────────────────────────────────────────────────
 
 _muted         = threading.Event()   # set = muted (mic disabled)
-_user_muted    = threading.Event()   # set = user manually muted (laser/gesture/button)
+_user_muted    = threading.Event()   # set = user manually muted (gesture/button)
 _awake         = threading.Event()   # set = in active voice session
 _stop_all      = threading.Event()
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _det_logger    = log_module.DetectionLogger()
 
-# Module-level so gesture/laser/dashboard callbacks can reset it,
-# preventing the session from timing out immediately after a non-voice wake.
-_last_speech_at: float = time.time()
+_last_speech_at: float = time.time()   # reset on every utterance / wake / gesture
+_last_human_at:  float = 0.0           # last time camera saw a person in frame
+_camera_enabled: bool  = False         # True once camera starts; enables auto-wake
+
+# How long after last camera person detection before we consider room empty
+_HUMAN_GONE_SEC = 12.0
 
 
 def is_muted() -> bool:
     return _muted.is_set()
+
+
+def _human_is_present() -> bool:
+    """True if camera is running and saw someone within the last _HUMAN_GONE_SEC seconds."""
+    return _camera_enabled and (time.time() - _last_human_at < _HUMAN_GONE_SEC)
 
 
 # ── Logging helper ────────────────────────────────────────────────────────────
@@ -228,10 +236,25 @@ def _dispatch_gestures(event: dict):
 # ── Detection callback ────────────────────────────────────────────────────────
 
 def on_detection(event: dict):
-    """Camera detection callback — logs and dispatches gestures only. Never speaks on person/object detection alone."""
+    """Camera detection callback — auto-wakes on person presence, dispatches gestures."""
+    global _last_human_at, _last_speech_at
     _det_logger.log(event)
     dashboard.push_detection(event)
-    if event.get("gestures"):          # only bother with gesture dispatch when hands are visible
+
+    if event.get("persons", 0) > 0:
+        _last_human_at = time.time()
+        if not _user_muted.is_set():
+            if not _awake.is_set():
+                # Person walked in — open listening session without requiring wake word
+                _last_speech_at = time.time()
+                _awake.set()
+                dashboard.update_status(state="awake")
+                _log("info", "Person in frame — listening")
+            else:
+                # Already awake — keep the inactivity timer alive while person is visible
+                _last_speech_at = time.time()
+
+    if event.get("gestures"):
         _dispatch_gestures(event)
 
 
@@ -325,7 +348,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue
 
         # ── Session timeout ───────────────────────────────────────────────────
-        if _awake.is_set() and time.time() - _last_speech_at > config.SESSION_TIMEOUT:
+        # Only time out if the room also appears empty — person present keeps it alive
+        if (_awake.is_set()
+                and time.time() - _last_speech_at > config.SESSION_TIMEOUT
+                and not _human_is_present()):
             _awake.clear()
             dashboard.update_status(state="idle")
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
@@ -350,20 +376,25 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
         # ── Gate: idle mode ───────────────────────────────────────────────────
         if not _awake.is_set():
-            triggered, command = _check_wake(text)
-            if not triggered:
-                _log("info", f'Idle — no wake word in: "{text}"')
-                continue
-            # Wake confirmed
-            _awake.set()
-            _last_speech_at = time.time()
-            _log("wake", f'Wake word detected! command="{command}"')
-            if not command:
-                # Just the wake word alone — beep and wait for next utterance
-                tts.play_beep()
-                dashboard.update_status(state="awake")
-                continue
-            text = command   # use the part after the wake word as the command
+            # Person in frame → no wake word needed (mirrors pinky behaviour)
+            if _human_is_present() and not _user_muted.is_set():
+                _awake.set()
+                _last_speech_at = time.time()
+                _log("info", "Person present — processing without wake word")
+            else:
+                triggered, command = _check_wake(text)
+                if not triggered:
+                    _log("info", f'Idle — no wake word in: "{text}"')
+                    continue
+                # Wake word confirmed
+                _awake.set()
+                _last_speech_at = time.time()
+                _log("wake", f'Wake word detected! command="{command}"')
+                if not command:
+                    tts.play_beep()
+                    dashboard.update_status(state="awake")
+                    continue
+                text = command
 
         # ── Active session ────────────────────────────────────────────────────
         _last_speech_at = time.time()
@@ -450,9 +481,11 @@ def main():
     # ── Camera ────────────────────────────────────────────────────────────────
     cam = None
     if not args.no_camera:
+        global _camera_enabled
         from camera import CameraDetector
         cam = CameraDetector(on_detection=on_detection)
         cam.start()
+        _camera_enabled = True
 
     # ── Mic ───────────────────────────────────────────────────────────────────
     recorder = stt.AudioRecorder()
