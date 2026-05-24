@@ -1,14 +1,15 @@
 """
-Camera — YOLO object detection + MediaPipe pose/hands + laser wake detection.
+Camera — two local YOLO models, no MediaPipe.
+
+  YOLO_MODEL    (yolov8n.pt)  — person + object detection
+  GESTURE_MODEL               — hand gesture classification (HaGRID dataset)
+                                auto-downloaded from HuggingFace on first run
 
 Runs two background threads:
-  1. Capture thread  — opens camera, reads frames into _last_frame (fast, no heavy libs)
-  2. Detect thread   — runs YOLO + MediaPipe on captured frames every DETECT_EVERY seconds
+  1. Capture thread  — reads frames into _last_frame (fast, no heavy libs)
+  2. Detect thread   — runs both YOLO models every DETECT_EVERY seconds
 
-Separating capture from detection means the live feed works in the dashboard
-even while YOLO is still loading or if MediaPipe fails.
-
-macOS note: uses cv2.CAP_AVFOUNDATION backend; auto-scans indices 0-3 if 0 fails.
+macOS: uses cv2.CAP_AVFOUNDATION backend; auto-scans indices 0-3 if 0 fails.
 """
 
 from __future__ import annotations
@@ -21,15 +22,39 @@ import cv2
 
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
-    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
+    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, GESTURE_MODEL,
 )
+
+# ── HaGRID class → our gesture label ─────────────────────────────────────────
+# Model: keremberke/yolov8n-hand-gesture-recognition (HaGRID dataset)
+_GESTURE_MAP: dict[str, str] = {
+    "like":           "Thumbs Up",
+    "dislike":        "Thumbs Down",
+    "palm":           "Open Hand",
+    "stop":           "Open Hand",
+    "fist":           "Fist",
+    "mute":           "Fist",
+    "peace":          "Peace",
+    "peace_inverted": "Peace",
+    "one":            "Pointing",
+    "call":           "Call Me",
+    "rock":           "Rock On",
+    "ok":             "OK",
+    "two_up":         "Peace",
+    "four":           "Open Hand",
+    "three":          "Custom",
+    "three2":         "Custom",
+    "two_up_inverted":"Custom",
+    "stop_inverted":  "Custom",
+    "no_gesture":     "",          # skip
+}
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _frame_lock  = threading.Lock()
 _last_frame: np.ndarray | None = None
 
-_cam_status  = "starting"   # "starting" | "ok" | "error: <msg>"
-_det_status  = "starting"   # "starting" | "ok" | "error: <msg>"
+_cam_status  = "starting"
+_det_status  = "starting"
 
 
 def get_frame() -> np.ndarray | None:
@@ -42,7 +67,6 @@ def get_status() -> dict:
 
 
 def _push_status():
-    """Push camera status to dashboard SSE stream (best-effort, no import error if dashboard not ready)."""
     try:
         import dashboard
         dashboard.push_camera_status(_cam_status, _det_status)
@@ -51,7 +75,6 @@ def _push_status():
 
 
 def frame_to_b64(frame: np.ndarray) -> str:
-    """Encode a BGR frame as base64 JPEG."""
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
     return base64.b64encode(buf.tobytes()).decode()
 
@@ -59,41 +82,28 @@ def frame_to_b64(frame: np.ndarray) -> str:
 # ── Camera open helper ────────────────────────────────────────────────────────
 
 def _open_camera(preferred_index: int) -> cv2.VideoCapture | None:
-    """
-    Try to open camera, using AVFoundation on macOS.
-    Auto-scans indices 0-3 if the preferred index fails.
-    Returns an open VideoCapture, or None.
-    """
     indices = list(dict.fromkeys([preferred_index, 0, 1, 2, 3]))
-
     for idx in indices:
-        # Try AVFoundation first (macOS native, required for permissions)
         for backend in [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY]:
             try:
                 cap = cv2.VideoCapture(idx, backend)
                 if not cap.isOpened():
-                    cap.release()
-                    continue
+                    cap.release(); continue
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_WIDTH)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
                 cap.set(cv2.CAP_PROP_FPS,          CAMERA_FPS)
-                # AVFoundation needs a moment to warm up — try up to 10 frames
                 got_frame = False
                 for _ in range(10):
                     ret, _ = cap.read()
-                    if ret:
-                        got_frame = True
-                        break
+                    if ret: got_frame = True; break
                     time.sleep(0.1)
                 if got_frame:
-                    backend_name = "AVFoundation" if backend == cv2.CAP_AVFOUNDATION else "default"
-                    print(f"[Camera] Opened camera index={idx} backend={backend_name}")
+                    bname = "AVFoundation" if backend == cv2.CAP_AVFOUNDATION else "default"
+                    print(f"[Camera] Opened camera index={idx} backend={bname}")
                     return cap
                 cap.release()
             except Exception as e:
                 print(f"[Camera] index={idx} backend={backend}: {e}")
-                pass
-
     return None
 
 
@@ -101,17 +111,13 @@ def _open_camera(preferred_index: int) -> cv2.VideoCapture | None:
 
 class CameraDetector:
     """
-    Manages two daemon threads:
-      _capture_thread — reads frames from webcam continuously
-      _detect_thread  — runs YOLO + MediaPipe every DETECT_EVERY seconds
-
-    Callback (called from detect thread):
-      on_detection(event)  — {timestamp, objects, persons, gestures}
+    Two daemon threads: capture + detect.
+    Callback: on_detection(event) — {timestamp, objects, persons, gestures}
     """
 
     def __init__(self, on_detection=None):
-        self.on_detection = on_detection or (lambda e: None)
-        self._stop        = threading.Event()
+        self.on_detection   = on_detection or (lambda e: None)
+        self._stop          = threading.Event()
         self._last_snapshot = None
 
     def start(self):
@@ -129,12 +135,8 @@ class CameraDetector:
 
         cap = _open_camera(CAMERA_INDEX)
         if cap is None:
-            msg = (
-                f"Cannot open any camera (tried indices 0-3 with AVFoundation + default). "
-                f"Check System Settings → Privacy & Security → Camera and grant access to Terminal/Python."
-            )
-            print(f"[Camera] ERROR: {msg}")
-            _cam_status = f"error: no camera found"
+            print("[Camera] ERROR: no camera found — check System Settings → Privacy → Camera")
+            _cam_status = "error: no camera found"
             _push_status()
             return
 
@@ -147,7 +149,7 @@ class CameraDetector:
             if not ret:
                 consec_fail += 1
                 if consec_fail > 30:
-                    print("[Camera] Too many read failures — trying to reopen …")
+                    print("[Camera] Too many failures — reopening …")
                     cap.release()
                     cap = _open_camera(CAMERA_INDEX)
                     if cap is None:
@@ -157,7 +159,6 @@ class CameraDetector:
                     consec_fail = 0
                 time.sleep(0.05)
                 continue
-
             consec_fail = 0
             with _frame_lock:
                 _last_frame = frame.copy()
@@ -171,184 +172,60 @@ class CameraDetector:
         global _det_status
         print("[Camera] Starting detection …")
 
-        # ── YOLO (required) ───────────────────────────────────────────────────
+        # ── Object / person YOLO ──────────────────────────────────────────────
         try:
             from ultralytics import YOLO
-            print("[Camera] Loading YOLO …")
+            print(f"[Camera] Loading object model {YOLO_MODEL} …")
             yolo = YOLO(YOLO_MODEL)
-            print("[Camera] YOLO ready")
+            print("[Camera] Object YOLO ready")
         except Exception as e:
-            print(f"[Camera] YOLO load failed: {e}")
-            _det_status = f"error: YOLO {e}"
+            print(f"[Camera] Object YOLO failed: {e}")
+            _det_status = f"error: {e}"
             _push_status()
             return
 
-        # ── MediaPipe Tasks API (optional — Apple Silicon M1/M2/M3/M4) ────────
-        # mediapipe ≥ 0.10 on Apple Silicon dropped the old `solutions` API.
-        # We try the new Tasks API first, then the legacy API, then skip gestures.
-        hand_detector = None
-        pose_detector = None
-
+        # ── Gesture YOLO (HaGRID) ─────────────────────────────────────────────
+        gesture_model = None
         try:
-            import mediapipe as mp
-            from mediapipe.tasks import python as mp_python
-            from mediapipe.tasks.python import vision as mp_vision
-
-            # ── Download task models if needed ────────────────────────────────
-            import urllib.request, os
-
-            _HAND_MODEL = "hand_landmarker.task"
-            _POSE_MODEL = "pose_landmarker_lite.task"
-
-            if not os.path.exists(_HAND_MODEL):
-                print("[Camera] Downloading hand_landmarker.task …")
-                urllib.request.urlretrieve(
-                    "https://storage.googleapis.com/mediapipe-models/"
-                    "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                    _HAND_MODEL,
-                )
-                print("[Camera] hand_landmarker.task downloaded")
-
-            if not os.path.exists(_POSE_MODEL):
-                print("[Camera] Downloading pose_landmarker_lite.task …")
-                urllib.request.urlretrieve(
-                    "https://storage.googleapis.com/mediapipe-models/"
-                    "pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-                    _POSE_MODEL,
-                )
-                print("[Camera] pose_landmarker_lite.task downloaded")
-
-            hand_opts = mp_vision.HandLandmarkerOptions(
-                base_options=mp_python.BaseOptions(model_asset_path=_HAND_MODEL),
-                num_hands=2,
-                min_hand_detection_confidence=0.5,
-                min_hand_presence_confidence=0.5,
-                min_tracking_confidence=0.5,
-            )
-            hand_detector = mp_vision.HandLandmarker.create_from_options(hand_opts)
-
-            pose_opts = mp_vision.PoseLandmarkerOptions(
-                base_options=mp_python.BaseOptions(model_asset_path=_POSE_MODEL),
-                min_pose_detection_confidence=0.5,
-                min_tracking_confidence=0.5,
-            )
-            pose_detector = mp_vision.PoseLandmarker.create_from_options(pose_opts)
-            print("[Camera] MediaPipe Tasks API ready (hand + pose)")
-
+            print(f"[Camera] Loading gesture model {GESTURE_MODEL} …")
+            gesture_model = YOLO(GESTURE_MODEL)
+            print(f"[Camera] Gesture YOLO ready — classes: {list(gesture_model.names.values())}")
         except Exception as e:
-            # Try legacy solutions API (older mediapipe / non-Apple-Silicon)
-            print(f"[Camera] Tasks API failed ({e}) — trying legacy solutions API …")
-            try:
-                import mediapipe as mp
-                _legacy_pose  = mp.solutions.pose.Pose(
-                    min_detection_confidence=0.5, min_tracking_confidence=0.5, model_complexity=0)
-                _legacy_hands = mp.solutions.hands.Hands(
-                    max_num_hands=2, min_detection_confidence=0.5,
-                    min_tracking_confidence=0.5, model_complexity=0)
-                hand_detector = ("legacy", _legacy_hands)
-                pose_detector = ("legacy", _legacy_pose)
-                print("[Camera] MediaPipe legacy solutions API ready")
-            except Exception as e2:
-                print(f"[Camera] MediaPipe not available ({e2}) — running YOLO-only (no gestures)")
+            print(f"[Camera] Gesture YOLO not available ({e}) — running without gesture detection")
 
-        _det_status = "ok" if hand_detector else "ok (YOLO only — no gestures)"
+        _det_status = "ok" if gesture_model else "ok (no gesture model)"
         print(f"[Camera] Detection status: {_det_status}")
         _push_status()
-        last_detect = 0.0
 
+        last_detect = 0.0
         while not self._stop.is_set():
             frame = get_frame()
             if frame is None:
-                time.sleep(0.1)
-                continue
+                time.sleep(0.1); continue
 
             now = time.time()
             if now - last_detect < DETECT_EVERY:
-                time.sleep(0.05)
-                continue
+                time.sleep(0.05); continue
             last_detect = now
 
             try:
-                self._run_detection(frame, yolo, hand_detector, pose_detector)
+                self._run_detection(frame, yolo, gesture_model)
             except Exception:
                 print(f"[Camera] Detection error:\n{traceback.format_exc()}")
                 time.sleep(1.0)
 
-        # Cleanup
-        try:
-            if isinstance(hand_detector, tuple):
-                hand_detector[1].close()
-                pose_detector[1].close()
-            elif hand_detector:
-                hand_detector.close()
-                if pose_detector:
-                    pose_detector.close()
-        except Exception:
-            pass
         print("[Camera] Detection stopped")
 
-    # ── Gesture classifier (works for both Tasks API and legacy landmarks) ────
+    # ── Combined detection ────────────────────────────────────────────────────
 
-    @staticmethod
-    def _classify_gesture_lm(lm, is_right: bool) -> str:
-        """
-        Classify from a list of 21 landmark objects with .x .y .z
-
-        Landmark indices (MediaPipe Hand):
-          0=wrist  4=thumb tip  3=thumb IP  2=thumb MCP
-          5=index MCP  8=index tip
-          9=middle MCP 12=middle tip
-          13=ring MCP  16=ring tip
-          17=pinky MCP 20=pinky tip
-        """
-        # ── Finger extension (tip above its MCP knuckle in image coords) ──────
-        ix = lm[8].y  < lm[5].y
-        mi = lm[12].y < lm[9].y
-        ri = lm[16].y < lm[13].y
-        pi = lm[20].y < lm[17].y
-        no_fingers = not ix and not mi and not ri and not pi
-
-        # ── Thumb: sideways extension (used for Open Hand / Call Me / Fist) ───
-        th_side = lm[4].x < lm[3].x if is_right else lm[4].x > lm[3].x
-
-        # ── Thumbs Up / Down: thumb vertical, all fingers curled ─────────────
-        # Normalise by wrist→middle-MCP distance so it works at any hand size
-        hand_h = abs(lm[0].y - lm[9].y) + 1e-6
-        if no_fingers:
-            if lm[4].y < lm[0].y - hand_h * 0.25:   # tip well ABOVE wrist
-                return "Thumbs Up"
-            if lm[4].y > lm[0].y + hand_h * 0.25:   # tip well BELOW wrist
-                return "Thumbs Down"
-
-        # ── Other gestures ────────────────────────────────────────────────────
-        if ix and mi and ri and pi:                            return "Open Hand"
-        if not ix and not mi and not ri and not pi:            return "Fist"
-        if ix and mi and not ri and not pi:                    return "Peace"
-        if ix and not mi and not ri and not pi:                return "Pointing"
-        if ix and pi and not mi and not ri:                    return "Rock On"
-        if th_side and pi and not ix and not mi and not ri:    return "Call Me"
-        return "Custom"
-
-    @staticmethod
-    def _classify_gesture(hand_lm, handedness) -> str:
-        """Legacy solutions API wrapper."""
-        lm       = hand_lm.landmark
-        is_right = handedness.classification[0].label == "Right"
-        return CameraDetector._classify_gesture_lm(lm, is_right)
-
-    # ── YOLO + MediaPipe detection ────────────────────────────────────────────
-
-    def _run_detection(self, frame, yolo, hand_detector, pose_detector):
-        import mediapipe as mp
-        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    def _run_detection(self, frame, yolo, gesture_model):
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "objects": [], "persons": 0, "gestures": [],
         }
 
-        # ── YOLO ─────────────────────────────────────────────────────────────
-        results = yolo(frame, conf=YOLO_CONF, verbose=False)[0]
-        for box in results.boxes:
+        # ── Object / person detection ─────────────────────────────────────────
+        for box in yolo(frame, conf=YOLO_CONF, verbose=False)[0].boxes:
             label = yolo.names[int(box.cls[0])]
             conf  = round(float(box.conf[0]), 2)
             if label in YOLO_IGNORE:
@@ -358,48 +235,20 @@ class CameraDetector:
             else:
                 event["objects"].append({"label": label, "conf": conf})
 
-        # ── MediaPipe ─────────────────────────────────────────────────────────
-        if hand_detector is not None:
-            is_legacy = isinstance(hand_detector, tuple)
+        # ── Gesture detection ─────────────────────────────────────────────────
+        if gesture_model is not None:
+            for box in gesture_model(frame, conf=0.55, verbose=False)[0].boxes:
+                raw = gesture_model.names[int(box.cls[0])]
+                label = _GESTURE_MAP.get(raw, "")
+                if label and label != "Custom":
+                    conf = round(float(box.conf[0]), 2)
+                    event["gestures"].append({"gesture": label, "conf": conf, "raw": raw})
 
-            if is_legacy:
-                # Legacy solutions API
-                _, legacy_hands = hand_detector
-                _, legacy_pose  = pose_detector
-                pose_res = legacy_pose.process(rgb)
-                if pose_res.pose_landmarks and event["persons"] == 0:
-                    event["persons"] = 1
-                hand_res = legacy_hands.process(rgb)
-                if hand_res.multi_hand_landmarks:
-                    for lm, hd in zip(hand_res.multi_hand_landmarks,
-                                      hand_res.multi_handedness):
-                        g    = self._classify_gesture(lm, hd)
-                        side = hd.classification[0].label
-                        event["gestures"].append({"hand": side, "gesture": g})
-            else:
-                # New Tasks API (mediapipe ≥ 0.10, Apple Silicon)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-
-                if pose_detector:
-                    pose_res = pose_detector.detect(mp_image)
-                    if pose_res.pose_landmarks and event["persons"] == 0:
-                        event["persons"] = 1
-
-                hand_res = hand_detector.detect(mp_image)
-                for i, lm_list in enumerate(hand_res.hand_landmarks):
-                    try:
-                        hand_info = hand_res.handedness[i]
-                        is_right  = hand_info[0].category_name == "Right"
-                        g    = self._classify_gesture_lm(lm_list, is_right)
-                        side = "Right" if is_right else "Left"
-                        event["gestures"].append({"hand": side, "gesture": g})
-                    except Exception:
-                        pass
-
+        # ── Dedup — only fire callback when scene changes ─────────────────────
         snap = (
             event["persons"],
             tuple(sorted(o["label"] for o in event["objects"])),
-            tuple(sorted(f"{g['hand']}:{g['gesture']}" for g in event["gestures"])),
+            tuple(sorted(g["gesture"] for g in event["gestures"])),
         )
         has_det = event["objects"] or event["persons"] or event["gestures"]
         if has_det and snap != self._last_snapshot:
