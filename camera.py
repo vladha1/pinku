@@ -195,7 +195,13 @@ class CameraDetector:
             )
             if not os.path.exists(_GESTURE_FILE):
                 print(f"[Camera] Downloading gesture model → {_GESTURE_FILE} …")
-                urllib.request.urlretrieve(_GESTURE_URL, _GESTURE_FILE)
+                req = urllib.request.Request(
+                    _GESTURE_URL,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp, \
+                     open(_GESTURE_FILE, "wb") as f:
+                    f.write(resp.read())
                 print(f"[Camera] Gesture model downloaded")
             print(f"[Camera] Loading gesture model …")
             gesture_model = YOLO(_GESTURE_FILE)
