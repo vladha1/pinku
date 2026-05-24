@@ -356,7 +356,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if _awake.is_set() and time.time() - _last_speech_at > config.SESSION_TIMEOUT:
             _awake.clear()
             dashboard.update_status(state="idle")
-            tts.play_sleep()   # soft chime instead of "Going quiet" (avoids mic feedback)
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
 
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
