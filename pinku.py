@@ -199,9 +199,9 @@ def _gesture_thumbs_down():
     dashboard.update_status(state="awake" if _awake.is_set() else "idle")
 
 def _gesture_open_hand():
-    """🖐 Open Hand — pause / stop speaking."""
-    print("[Gesture] 🖐 Open Hand → stop speaking")
-    tts.stop_speaking()
+    """🖐 Open Hand / Wave — play a friendly chime only, no words."""
+    print("[Gesture] 🖐 Wave → chime")
+    tts.play_beep()
 
 def _gesture_fist():
     """✊ Fist — mute toggle."""
@@ -258,9 +258,11 @@ def _dispatch_gestures(event: dict):
 # ── Detection callback ────────────────────────────────────────────────────────
 
 def on_detection(event: dict):
+    """Camera detection callback — logs and dispatches gestures only. Never speaks on person/object detection alone."""
     _det_logger.log(event)
     dashboard.push_detection(event)
-    _dispatch_gestures(event)
+    if event.get("gestures"):          # only bother with gesture dispatch when hands are visible
+        _dispatch_gestures(event)
 
 
 # ── Wake word / session end detection ────────────────────────────────────────
