@@ -39,6 +39,12 @@ def update_status(**kwargs):
     _status.update(kwargs)
     _broadcast({"type": "status", **_status})
 
+def push_camera_status(camera: str, detection: str):
+    """Called by camera.py whenever its status changes (ok / error / starting)."""
+    _status["cam_status"]   = camera
+    _status["det_status"]   = detection
+    _broadcast({"type": "status", **_status})
+
 def push_detection(event: dict):
     _status["detections"].append(event)
     if len(_status["detections"]) > 50:
@@ -74,7 +80,16 @@ def stream():
     with _clients_lock:
         _clients.append(q)
     def gen():
-        yield f"data: {json.dumps({'type':'status',**_status})}\n\n"
+        # Merge live camera status into initial push so reconnecting clients
+        # immediately see the real camera state without waiting for a tab switch.
+        try:
+            from camera import get_status as _cam_get_status
+            cs = _cam_get_status()
+            init = {"type": "status", **_status,
+                    "cam_status": cs["camera"], "det_status": cs["detection"]}
+        except Exception:
+            init = {"type": "status", **_status}
+        yield f"data: {json.dumps(init)}\n\n"
         while True:
             time.sleep(0.05)
             while q:
@@ -1128,6 +1143,17 @@ function applyStatus(data) {
   document.getElementById('mute-btn').textContent = isMuted ? '🎙️' : '🔇';
   document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
   document.getElementById('mute-btn').classList.toggle('active', isMuted);
+
+  // Camera status (included in initial SSE push and whenever camera.py changes state)
+  if (data.cam_status !== undefined || data.det_status !== undefined) {
+    const camTxt = data.cam_status || '?';
+    const detTxt = data.det_status || '?';
+    const msg = `Camera: ${camTxt} | Detection: ${detTxt}`;
+    const offlineEl = document.getElementById('cam-offline');
+    const statusEl  = document.getElementById('cam-status-text');
+    if (offlineEl) offlineEl.textContent = '📷 ' + msg;
+    if (statusEl)  statusEl.textContent  = msg;
+  }
 }
 
 // ── Detection flash ───────────────────────────────────────────────────────────

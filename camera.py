@@ -42,6 +42,15 @@ def get_status() -> dict:
     return {"camera": _cam_status, "detection": _det_status}
 
 
+def _push_status():
+    """Push camera status to dashboard SSE stream (best-effort, no import error if dashboard not ready)."""
+    try:
+        import dashboard
+        dashboard.push_camera_status(_cam_status, _det_status)
+    except Exception:
+        pass
+
+
 def frame_to_b64(frame: np.ndarray) -> str:
     """Encode a BGR frame as base64 JPEG."""
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
@@ -162,9 +171,11 @@ class CameraDetector:
             )
             print(f"[Camera] ERROR: {msg}")
             _cam_status = f"error: no camera found"
+            _push_status()
             return
 
         _cam_status = "ok"
+        _push_status()
         consec_fail = 0
 
         while not self._stop.is_set():
@@ -177,6 +188,7 @@ class CameraDetector:
                     cap = _open_camera(CAMERA_INDEX)
                     if cap is None:
                         _cam_status = "error: camera disconnected"
+                        _push_status()
                         break
                     consec_fail = 0
                 time.sleep(0.05)
@@ -204,6 +216,7 @@ class CameraDetector:
         except Exception as e:
             print(f"[Camera] YOLO load failed: {e}")
             _det_status = f"error: YOLO {e}"
+            _push_status()
             return
 
         # ── MediaPipe Tasks API (optional — Apple Silicon M1/M2/M3/M4) ────────
@@ -276,6 +289,7 @@ class CameraDetector:
 
         _det_status = "ok" if hand_detector else "ok (YOLO only — no gestures)"
         print(f"[Camera] Detection status: {_det_status}")
+        _push_status()
         last_detect = 0.0
 
         while not self._stop.is_set():
