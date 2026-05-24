@@ -22,7 +22,7 @@ import cv2
 
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
-    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, GESTURE_MODEL,
+    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
 )
 
 # ── HaGRID class → our gesture label ─────────────────────────────────────────
@@ -187,8 +187,18 @@ class CameraDetector:
         # ── Gesture YOLO (HaGRID) ─────────────────────────────────────────────
         gesture_model = None
         try:
-            print(f"[Camera] Loading gesture model {GESTURE_MODEL} …")
-            gesture_model = YOLO(GESTURE_MODEL)
+            import os, urllib.request
+            _GESTURE_FILE = "gesture_yolo.pt"
+            _GESTURE_URL  = (
+                "https://huggingface.co/keremberke/yolov8n-hand-gesture-recognition"
+                "/resolve/main/best.pt"
+            )
+            if not os.path.exists(_GESTURE_FILE):
+                print(f"[Camera] Downloading gesture model → {_GESTURE_FILE} …")
+                urllib.request.urlretrieve(_GESTURE_URL, _GESTURE_FILE)
+                print(f"[Camera] Gesture model downloaded")
+            print(f"[Camera] Loading gesture model …")
+            gesture_model = YOLO(_GESTURE_FILE)
             print(f"[Camera] Gesture YOLO ready — classes: {list(gesture_model.names.values())}")
         except Exception as e:
             print(f"[Camera] Gesture YOLO not available ({e}) — running without gesture detection")
