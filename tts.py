@@ -17,7 +17,7 @@ import asyncio
 from config import SAY_VOICE_EN, SAY_VOICE_HI, SAY_RATE
 
 # Edge-TTS voice names  (override via env EDGE_VOICE_EN / EDGE_VOICE_HI)
-EDGE_VOICE_EN = os.getenv("EDGE_VOICE_EN", "en-IN-NeerjaNeural")  # Indian English female
+EDGE_VOICE_EN = os.getenv("EDGE_VOICE_EN", "hi-IN-SwaraNeural")   # Swara for both EN and HI
 EDGE_VOICE_HI = os.getenv("EDGE_VOICE_HI", "hi-IN-SwaraNeural")  # Hindi neural female
 
 _speak_lock    = threading.Lock()
