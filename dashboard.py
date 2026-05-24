@@ -1177,7 +1177,12 @@ function flashDetection(event) {
   }
 
   addDetectionRow(event);
-  addLog('camera', formatDetEvent(event));
+  // Only write to the Log tab when a gesture is recognised — routine
+  // person/object detections are already shown in the Camera tab feed.
+  const gestures = event.gestures || [];
+  if (gestures.length > 0) {
+    addLog('gesture', '✋ ' + gestures.map(g => g.gesture).join(', '));
+  }
 }
 
 // ── API action helper ─────────────────────────────────────────────────────────

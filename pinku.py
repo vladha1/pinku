@@ -39,6 +39,10 @@ _stop_all      = threading.Event()
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _det_logger    = log_module.DetectionLogger()
 
+# Module-level so gesture/laser/dashboard callbacks can reset it,
+# preventing the session from timing out immediately after a non-voice wake.
+_last_speech_at: float = time.time()
+
 
 def is_muted() -> bool:
     return _muted.is_set()
@@ -136,11 +140,13 @@ def _handle_unmute():
 
 
 def _extend_session():
-    """Open a voice session window."""
+    """Open a voice session window — resets the inactivity timer and plays a wake chime."""
+    global _last_speech_at
+    __last_speech_at = time.time()   # reset so session doesn't time out immediately
     _awake.set()
+    tts.play_beep()                 # chime: Pinku is awake and listening
     dashboard.update_status(state="awake")
     _log("wake", "Session open — listening")
-    # Auto-close after SESSION_TIMEOUT seconds of inactivity (handled in listen loop)
 
 
 # ── Laser callbacks ───────────────────────────────────────────────────────────
@@ -148,8 +154,7 @@ def _extend_session():
 def on_laser_wake():
     if is_muted():
         return
-    tts.play_beep()
-    _extend_session()
+    _extend_session()   # chime handled inside _extend_session
     print("[Laser] Wake → listening")
 
 
@@ -191,8 +196,7 @@ def _gesture_thumbs_up():
     if is_muted():
         return
     print("[Gesture] 👍 Thumbs Up → wake session")
-    tts.play_beep()
-    _extend_session()
+    _extend_session()   # chime handled inside _extend_session
 
 def _gesture_thumbs_down():
     """👎 Thumbs Down — stop speaking / dismiss."""
@@ -229,8 +233,7 @@ def _gesture_call_me():
     if is_muted():
         _handle_unmute()
     else:
-        tts.play_beep()
-        _extend_session()
+        _extend_session()   # chime handled inside _extend_session
 
 _GESTURE_FN_MAP = {
     "_gesture_thumbs_up":   _gesture_thumbs_up,
@@ -349,7 +352,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
     Active mode: respond to everything; auto-expire after SESSION_TIMEOUT;
                  explicit end phrases close the session early.
     """
-    last_speech_at = time.time()
+    global _last_speech_at
 
     while not _stop_all.is_set():
         if is_muted():
@@ -357,10 +360,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue
 
         # ── Session timeout ───────────────────────────────────────────────────
-        if _awake.is_set() and time.time() - last_speech_at > config.SESSION_TIMEOUT:
+        if _awake.is_set() and time.time() - _last_speech_at > config.SESSION_TIMEOUT:
             _awake.clear()
             dashboard.update_status(state="idle")
-            tts.speak("Going quiet.", block=False)
+            tts.play_sleep()   # soft chime instead of "Going quiet" (avoids mic feedback)
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
 
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
@@ -385,7 +388,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 continue
             # Wake confirmed
             _awake.set()
-            last_speech_at = time.time()
+            _last_speech_at = time.time()
             _log("wake", f'Wake word detected! command="{command}"')
             if not command:
                 # Just the wake word alone — beep and wait for next utterance
@@ -395,16 +398,15 @@ def _voice_loop(recorder: stt.AudioRecorder):
             text = command   # use the part after the wake word as the command
 
         # ── Active session ────────────────────────────────────────────────────
-        last_speech_at = time.time()
+        _last_speech_at = time.time()
 
         # Check for session-end phrase (short utterances only)
         if _check_end(text):
             _awake.clear()
             _session_hist.clear()
-            reply = "Okay, bye for now."
             _log("info", "Session ended by user")
-            tts.speak(reply, block=False)
-            dashboard.update_status(state="idle", last_transcript=text, last_reply=reply)
+            tts.play_sleep()   # soft chime instead of spoken goodbye (avoids mic feedback)
+            dashboard.update_status(state="idle", last_transcript=text, last_reply="")
             continue
 
         dashboard.update_status(state="processing", last_transcript=text)

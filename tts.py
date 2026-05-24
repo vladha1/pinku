@@ -134,3 +134,9 @@ def play_mute():
 def play_unmute():
     subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def play_sleep():
+    """Soft low tone when Pinku goes idle / quiet."""
+    subprocess.Popen(["afplay", "/System/Library/Sounds/Blow.aiff"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
