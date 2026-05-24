@@ -64,7 +64,7 @@ def _log(level: str, msg: str):
 
 def _speak_reply(reply: str, is_hi: bool):
     global _last_speech_at
-    _log("tts", reply[:120])
+    _log("pinku", reply)
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
     tts.speak(reply, prefer_hi=is_hi, block=True)
@@ -80,7 +80,7 @@ def _handle_chat(action: dict):
     tr    = action.get("transcript", "")
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
-    _log("chat", f"[{lang}] {tr}")
+    _log("user", tr)
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
@@ -94,6 +94,7 @@ def _handle_time(action: dict):
     from datetime import datetime
     now  = datetime.now()
     lang = action.get("lang", "en")
+    _log("user", action.get("transcript", ""))
     if lang == "hi":
         reply = f"अभी {now.strftime('%-I बजकर %M मिनट')} हैं।"
     else:
@@ -113,6 +114,7 @@ def _handle_describe(action: dict):
     b64  = frame_to_b64(frame)
     tr   = action.get("transcript", "What do you see?")
     lang = action.get("lang", "en")
+    _log("user", tr)
     desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
     print(f"[Vision] {desc!r}")
     dashboard.update_status(last_transcript=tr, last_reply=desc)
@@ -123,9 +125,10 @@ def _handle_scripture(action: dict):
     """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
     knowledge.handle(
         action,
-        speak_fn   = _speak_reply,
-        update_fn  = dashboard.update_status,
+        speak_fn     = _speak_reply,
+        update_fn    = dashboard.update_status,
         session_hist = _session_hist,
+        log_fn       = _log,
     )
 
 

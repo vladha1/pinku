@@ -244,7 +244,8 @@ def resolve_topic(raw: str) -> str:
 
 # ── Public handler ────────────────────────────────────────────────────────────
 
-def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = None) -> str:
+def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = None,
+           log_fn=None) -> str:
     """
     Handle a knowledge request.
 
@@ -252,10 +253,13 @@ def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = N
     speak_fn    : callable(text, is_hi)  — TTS
     update_fn   : callable(**kwargs)     — dashboard.update_status (optional)
     session_hist: LLM conversation history (optional)
+    log_fn      : callable(level, msg)   — dashboard log (optional, e.g. pinku._log)
 
     Returns the reply string.
     """
     import llm as _llm
+
+    _log = log_fn or (lambda level, msg: print(f"[{level.upper()}] {msg}"))
 
     topic  = resolve_topic(action.get("topic", ""))
     tr     = action.get("transcript", "")
@@ -267,9 +271,10 @@ def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = N
     if is_hi:
         system += " Respond entirely in Hindi using Devanagari script."
 
-    print(f"[Knowledge:{topic}] {info['name']} — {tr[:60]!r}")
+    _log("user",   tr)
+    _log("source", info["name"])
     reply  = _llm.chat(tr, system_extra=system, history=session_hist, is_hi=is_hi)
-    print(f"[Knowledge:{topic}] reply: {reply[:80]!r}")
+    _log("pinku",  reply)
 
     if update_fn:
         update_fn(last_transcript=tr, last_reply=reply)
