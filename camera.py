@@ -187,23 +187,19 @@ class CameraDetector:
         # ── Gesture YOLO (HaGRID) ─────────────────────────────────────────────
         gesture_model = None
         try:
-            import os, urllib.request
+            from huggingface_hub import hf_hub_download
+            import os
             _GESTURE_FILE = "gesture_yolo.pt"
-            _GESTURE_URL  = (
-                "https://huggingface.co/keremberke/yolov8n-hand-gesture-recognition"
-                "/resolve/main/best.pt"
-            )
             if not os.path.exists(_GESTURE_FILE):
-                print(f"[Camera] Downloading gesture model → {_GESTURE_FILE} …")
-                req = urllib.request.Request(
-                    _GESTURE_URL,
-                    headers={"User-Agent": "Mozilla/5.0"},
+                print("[Camera] Downloading gesture model from HuggingFace …")
+                src = hf_hub_download(
+                    repo_id="keremberke/yolov8n-hand-gesture-recognition",
+                    filename="best.pt",
                 )
-                with urllib.request.urlopen(req, timeout=60) as resp, \
-                     open(_GESTURE_FILE, "wb") as f:
-                    f.write(resp.read())
-                print(f"[Camera] Gesture model downloaded")
-            print(f"[Camera] Loading gesture model …")
+                import shutil
+                shutil.copy(src, _GESTURE_FILE)
+                print("[Camera] Gesture model downloaded")
+            print("[Camera] Loading gesture model …")
             gesture_model = YOLO(_GESTURE_FILE)
             print(f"[Camera] Gesture YOLO ready — classes: {list(gesture_model.names.values())}")
         except Exception as e:
