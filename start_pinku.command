@@ -1,22 +1,23 @@
 #!/bin/bash
-# Double-click this in Finder (VNC) to start Pinku inside Terminal.app.
-# Terminal.app has camera permission → python3 inherits it as child process.
-# Watchdog loop: auto-restarts Pinku if it crashes.
+# One clean entry point for Pinku.
+# Safe to run multiple times — kills any previous instance first.
 
 cd "$(dirname "$0")"
+
+# Kill any existing Pinku processes to avoid echoing/duplicate instances
+pkill -f pinku.py 2>/dev/null && echo "Stopped previous Pinku instance." || true
+sleep 1
+
 echo "============================================"
-echo "  Pinku watchdog (camera via Terminal.app)  "
+echo "  Pinku starting (camera via Terminal.app)  "
+echo "  Close this window to stop Pinku.          "
 echo "============================================"
-echo "  Close this window to stop Pinku."
-echo ""
 
 while true; do
     echo "$(date '+%H:%M:%S')  Starting Pinku..."
     .venv/bin/python3 pinku.py
     EXIT=$?
     echo ""
-    echo "$(date '+%H:%M:%S')  Pinku exited (code $EXIT). Restarting in 5 s..."
-    echo "  (Close this window to stop)"
+    echo "$(date '+%H:%M:%S')  Pinku exited (code $EXIT). Restarting in 5s..."
     sleep 5
-    echo ""
 done
