@@ -222,13 +222,6 @@ def _is_hallucination(text: str) -> bool:
     # Pinku's own TTS output being picked up by mic
     if any(phrase in t for phrase in ("going quiet", "going quite", "pinku ready", "okay bye")):
         return True
-    # Hindi hallucinations: random syllables that don't form real words
-    # Heuristic: all-caps-like chunks or very short word average (< 3 chars/word)
-    words = t.split()
-    if len(words) >= 3:
-        avg_word_len = sum(len(w) for w in words) / len(words)
-        if avg_word_len < 3.5:   # random syllables tend to be very short
-            return True
     return False
 
 

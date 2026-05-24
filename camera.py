@@ -1,15 +1,15 @@
 """
-Camera — two local YOLO models, no MediaPipe.
+Camera — YOLO pose + OpenCV hand gesture classification.
 
-  YOLO_MODEL    (yolov8n.pt)  — person + object detection
-  GESTURE_MODEL               — hand gesture classification (HaGRID dataset)
-                                auto-downloaded from HuggingFace on first run
+  YOLO_MODEL       (yolov8n.pt)       — person + object detection
+  yolov8n-pose.pt                     — body pose (wrist/shoulder positions)
+  Hand gesture CV                     — skin mask + convexity defects on wrist crop
 
-Runs two background threads:
-  1. Capture thread  — reads frames into _last_frame (fast, no heavy libs)
-  2. Detect thread   — runs both YOLO models every DETECT_EVERY seconds
+Gestures detected:
+  Open Hand   — 4+ finger gaps (wave / open palm) → wake
+  Fist        — closed hand, high solidity         → sleep / mute
 
-macOS: uses cv2.CAP_AVFOUNDATION backend; auto-scans indices 0-3 if 0 fails.
+macOS: cv2.CAP_AVFOUNDATION backend, auto-scans indices 0-3.
 """
 
 from __future__ import annotations
@@ -25,21 +25,18 @@ from config import (
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
 )
 
-# ── Pose keypoint indices (COCO 17-point) ─────────────────────────────────────
-# 0:nose  5:l-shoulder 6:r-shoulder  7:l-elbow  8:r-elbow
-# 9:l-wrist 10:r-wrist 11:l-hip 12:r-hip
-_KP_NOSE    = 0
-_KP_L_SHO   = 5;  _KP_R_SHO   = 6
-_KP_L_ELB   = 7;  _KP_R_ELB   = 8
-_KP_L_WRI   = 9;  _KP_R_WRI   = 10
-_KP_L_HIP   = 11; _KP_R_HIP   = 12
+# ── COCO 17-point pose keypoint indices ───────────────────────────────────────
+_KP_NOSE  = 0
+_KP_L_SHO = 5;  _KP_R_SHO = 6
+_KP_L_ELB = 7;  _KP_R_ELB = 8
+_KP_L_WRI = 9;  _KP_R_WRI = 10
+_KP_L_HIP = 11; _KP_R_HIP = 12
 
 # ── Shared state ──────────────────────────────────────────────────────────────
-_frame_lock  = threading.Lock()
+_frame_lock = threading.Lock()
 _last_frame: np.ndarray | None = None
-
-_cam_status  = "starting"
-_det_status  = "starting"
+_cam_status = "starting"
+_det_status = "starting"
 
 
 def get_frame() -> np.ndarray | None:
@@ -92,7 +89,74 @@ def _open_camera(preferred_index: int) -> cv2.VideoCapture | None:
     return None
 
 
-# ── Detection thread ──────────────────────────────────────────────────────────
+# ── Hand gesture via skin mask + convexity defects ────────────────────────────
+
+def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
+    """
+    Crop a region around the wrist (wx, wy) and classify the hand gesture
+    using skin segmentation + convex hull analysis.
+
+    Returns gesture label or None if hand not clearly visible.
+    """
+    h, w = frame.shape[:2]
+    sz  = max(90, int(h * 0.22))       # crop ~22% of frame height
+    x1  = max(0, int(wx) - sz // 2)
+    y1  = max(0, int(wy) - sz // 2)
+    x2  = min(w, x1 + sz)
+    y2  = min(h, y1 + sz)
+    roi = frame[y1:y2, x1:x2]
+    if roi.shape[0] < 30 or roi.shape[1] < 30:
+        return None
+
+    # ── Skin mask in YCrCb (robust across skin tones + indoor lighting) ───────
+    ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
+    mask  = cv2.inRange(ycrcb,
+                        np.array([0,  133,  77], np.uint8),
+                        np.array([255, 173, 127], np.uint8))
+    k    = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k)
+    mask = cv2.dilate(mask, k, iterations=1)
+
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None
+    cnt  = max(cnts, key=cv2.contourArea)
+    area = cv2.contourArea(cnt)
+    # Must cover at least 8% of crop — filters out noise
+    if area < roi.shape[0] * roi.shape[1] * 0.08:
+        return None
+
+    # ── Convex hull + defects ─────────────────────────────────────────────────
+    hull_idx = cv2.convexHull(cnt, returnPoints=False)
+    if len(hull_idx) < 3:
+        return None
+    hull_pts = cv2.convexHull(cnt)
+    hull_area = cv2.contourArea(hull_pts)
+    if hull_area < 1:
+        return None
+    solidity = area / hull_area      # 1.0 = perfectly convex (fist)
+
+    defects = cv2.convexityDefects(cnt, hull_idx)
+    n_gaps  = 0
+    if defects is not None:
+        for d in defects:
+            _, _, _, depth = d[0]
+            # depth is in 8.8 fixed-point → divide by 256 for pixels
+            if depth / 256.0 > sz * 0.08:   # gap > 8% of crop size
+                n_gaps += 1
+
+    # ── Classify ──────────────────────────────────────────────────────────────
+    if n_gaps >= 4:
+        return "Open Hand"
+
+    if n_gaps == 0 and solidity > 0.80:
+        return "Fist"
+
+    return None
+
+
+# ── Detection class ───────────────────────────────────────────────────────────
 
 class CameraDetector:
     """
@@ -117,13 +181,11 @@ class CameraDetector:
     def _capture_loop(self):
         global _last_frame, _cam_status
         print("[Camera] Starting capture …")
-
         cap = _open_camera(CAMERA_INDEX)
         if cap is None:
-            print("[Camera] ERROR: no camera found — check System Settings → Privacy → Camera")
+            print("[Camera] ERROR: no camera found")
             _cam_status = "error: no camera found"
-            _push_status()
-            return
+            _push_status(); return
 
         _cam_status = "ok"
         _push_status()
@@ -134,16 +196,13 @@ class CameraDetector:
             if not ret:
                 consec_fail += 1
                 if consec_fail > 30:
-                    print("[Camera] Too many failures — reopening …")
                     cap.release()
                     cap = _open_camera(CAMERA_INDEX)
                     if cap is None:
                         _cam_status = "error: camera disconnected"
-                        _push_status()
-                        break
+                        _push_status(); break
                     consec_fail = 0
-                time.sleep(0.05)
-                continue
+                time.sleep(0.05); continue
             consec_fail = 0
             with _frame_lock:
                 _last_frame = frame.copy()
@@ -157,31 +216,23 @@ class CameraDetector:
         global _det_status
         print("[Camera] Starting detection …")
 
-        # ── Object / person YOLO ──────────────────────────────────────────────
         try:
             from ultralytics import YOLO
             print(f"[Camera] Loading object model {YOLO_MODEL} …")
             yolo = YOLO(YOLO_MODEL)
             print("[Camera] Object YOLO ready")
         except Exception as e:
-            print(f"[Camera] Object YOLO failed: {e}")
-            _det_status = f"error: {e}"
-            _push_status()
-            return
+            _det_status = f"error: {e}"; _push_status(); return
 
-        # ── Gesture YOLO (HaGRID) ─────────────────────────────────────────────
-        # ── Pose YOLO for gesture detection ───────────────────────────────────
-        # yolov8n-pose.pt is an official ultralytics model — auto-downloads
-        # from GitHub, no authentication required.
         pose_model = None
         try:
             print("[Camera] Loading pose model yolov8n-pose.pt …")
             pose_model = YOLO("yolov8n-pose.pt")
-            print("[Camera] Pose YOLO ready — gesture detection from wrist/shoulder keypoints")
+            print("[Camera] Pose YOLO ready")
         except Exception as e:
-            print(f"[Camera] Pose YOLO not available ({e}) — no gesture detection")
+            print(f"[Camera] Pose model unavailable ({e})")
 
-        _det_status = "ok" if pose_model else "ok (no gesture model)"
+        _det_status = "ok" if pose_model else "ok (no pose model)"
         print(f"[Camera] Detection status: {_det_status}")
         _push_status()
 
@@ -190,12 +241,10 @@ class CameraDetector:
             frame = get_frame()
             if frame is None:
                 time.sleep(0.1); continue
-
             now = time.time()
             if now - last_detect < DETECT_EVERY:
                 time.sleep(0.05); continue
             last_detect = now
-
             try:
                 self._run_detection(frame, yolo, pose_model)
             except Exception:
@@ -204,40 +253,16 @@ class CameraDetector:
 
         print("[Camera] Detection stopped")
 
-    # ── Gesture from pose keypoints ───────────────────────────────────────────
-
-    @staticmethod
-    def _gesture_from_pose(kps) -> str | None:
-        """
-        Classify a gesture from 17 COCO pose keypoints.
-        kps: array of shape (17, 3) — [x, y, confidence] per keypoint.
-
-        Pose only gives wrist position — not finger data — so we only
-        detect what's actually reliable: arm raised = Open Hand (wake).
-        """
-        def vis(i): return kps[i][2] > 0.3
-        def y(i):   return kps[i][1]   # increases downward
-
-        if not (vis(_KP_L_SHO) or vis(_KP_R_SHO)):
-            return None   # shoulders not visible — can't classify
-
-        l_raised = vis(_KP_L_WRI) and vis(_KP_L_SHO) and y(_KP_L_WRI) < y(_KP_L_SHO)
-        r_raised = vis(_KP_R_WRI) and vis(_KP_R_SHO) and y(_KP_R_WRI) < y(_KP_R_SHO)
-
-        if l_raised or r_raised:
-            return "Open Hand"   # arm raised = wave = wake Pinku
-
-        return None
-
     # ── Combined detection ────────────────────────────────────────────────────
 
     def _run_detection(self, frame, yolo, pose_model):
+        h = frame.shape[0]
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "objects": [], "persons": 0, "gestures": [],
         }
 
-        # ── Object / person detection ─────────────────────────────────────────
+        # ── Object / person (YOLO) ────────────────────────────────────────────
         for box in yolo(frame, conf=YOLO_CONF, verbose=False)[0].boxes:
             label = yolo.names[int(box.cls[0])]
             conf  = round(float(box.conf[0]), 2)
@@ -248,19 +273,34 @@ class CameraDetector:
             else:
                 event["objects"].append({"label": label, "conf": conf})
 
-        # ── Pose / gesture detection ──────────────────────────────────────────
+        # ── Pose + hand gesture ───────────────────────────────────────────────
         if pose_model is not None:
             pose_res = pose_model(frame, conf=0.5, verbose=False)[0]
             if pose_res.keypoints is not None:
-                for kps in pose_res.keypoints.data:   # one set of kps per person
-                    kps_np = kps.cpu().numpy()
-                    if event["persons"] == 0:
-                        event["persons"] = 1          # pose confirms a person
-                    gesture = self._gesture_from_pose(kps_np)
-                    if gesture:
-                        event["gestures"].append({"gesture": gesture})
+                for kps in pose_res.keypoints.data:
+                    kps_np = kps.cpu().numpy()   # (17, 3)
 
-        # ── Dedup — only fire callback when scene changes ─────────────────────
+                    if event["persons"] == 0:
+                        event["persons"] = 1
+
+                    def vis(i): return kps_np[i][2] > 0.3
+                    def kx(i):  return float(kps_np[i][0])
+                    def ky(i):  return float(kps_np[i][1])
+
+                    # Check each visible wrist
+                    for wri, sho in [(_KP_R_WRI, _KP_R_SHO), (_KP_L_WRI, _KP_L_SHO)]:
+                        if not vis(wri):
+                            continue
+                        # Classify hand shape at this wrist
+                        gesture = _classify_hand(frame, kx(wri), ky(wri))
+                        if gesture:
+                            # Upgrade Open Hand to Thumbs Up if arm is fully raised
+                            if gesture == "Open Hand" and vis(sho) and ky(wri) < ky(sho):
+                                gesture = "Open Hand"   # arm raised + open palm
+                            event["gestures"].append({"gesture": gesture})
+                            break   # one gesture per frame is enough
+
+        # ── Dedup ─────────────────────────────────────────────────────────────
         snap = (
             event["persons"],
             tuple(sorted(o["label"] for o in event["objects"])),

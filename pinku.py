@@ -151,7 +151,7 @@ def _handle_unmute():
 def _extend_session():
     """Open a voice session window — resets the inactivity timer and plays a wake chime."""
     global _last_speech_at
-    __last_speech_at = time.time()   # reset so session doesn't time out immediately
+    _last_speech_at = time.time()   # reset so session doesn't time out immediately
     _awake.set()
     tts.play_beep()                 # chime: Pinku is awake and listening
     dashboard.update_status(state="awake")
@@ -160,16 +160,22 @@ def _extend_session():
 
 # ── Gesture action map ────────────────────────────────────────────────────────
 #
-# Gestures that trigger Pinku actions (require active session OR override).
-# Cooldown prevents repeat-firing while hand is held.
+# Gestures detected by camera.py (OpenCV skin + convexity defects on wrist crop):
+#   Thumbs Up, Thumbs Down, Open Hand, Fist, Peace
+#
+# _GESTURE_ACTIONS[label] = (requires_awake_session, handler_fn_name)
+#   requires_awake_session=False → fires even in idle/muted state (good for wake gestures)
+#   requires_awake_session=True  → only fires during an active voice session
+#
+# Cooldown prevents repeat-firing while hand is held steady.
 _gesture_last_at: dict[str, float] = {}
-_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture actions (longer = fewer accidents)
+_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
-_GESTURE_ACTIONS = {
-    # Pose model (yolov8n-pose.pt) only gives wrist position — not finger data.
-    # Only "arm raised" is reliably detectable.
-    "Open Hand": (False, "_gesture_open_hand"),   # arm raised = wave = wake
+_GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
+    "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → wake / unmute (works anytime)
+    "Fist":      (False, "_gesture_fist"),       # ✊ closed fist → sleep / mute (works anytime)
 }
+
 
 def _gesture_throttle(label: str) -> bool:
     """Return True if we should fire (not in cooldown)."""
@@ -179,16 +185,27 @@ def _gesture_throttle(label: str) -> bool:
     _gesture_last_at[label] = now
     return True
 
+
 def _gesture_open_hand():
-    """🖐 Arm raised / wave — wake Pinku."""
-    if is_muted():
-        return
-    print("[Gesture] 🖐 Arm raised → wake")
+    """🖐 Open hand / wave — wake Pinku and unmute."""
+    print("[Gesture] 🖐 Open Hand → wake / unmute")
+    _user_muted.clear()
+    _muted.clear()
     _extend_session()
 
-_GESTURE_FN_MAP = {
+
+def _gesture_fist():
+    """✊ Closed fist — sleep / mute."""
+    print("[Gesture] ✊ Fist → sleep / mute")
+    tts.stop_speaking()
+    _handle_mute()
+
+
+_GESTURE_FN_MAP: dict[str, object] = {
     "_gesture_open_hand": _gesture_open_hand,
+    "_gesture_fist":      _gesture_fist,
 }
+
 
 def _dispatch_gestures(event: dict):
     for g in event.get("gestures", []):
