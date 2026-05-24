@@ -491,9 +491,10 @@ def main():
     recorder = stt.AudioRecorder()
     recorder.start()
 
-    tts.speak("Pinku ready.", prefer_hi=False)
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
     _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")
+    time.sleep(2.0)   # let mic settle before speaking so startup chime isn't heard as wake word
+    tts.play_beep()   # simple chime instead of spoken "Pinku ready" (avoids mic feedback loop)
 
     try:
         _voice_loop(recorder)
