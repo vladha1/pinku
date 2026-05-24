@@ -60,7 +60,9 @@ def _log(level: str, msg: str):
 def _speak_reply(reply: str, is_hi: bool):
     _log("tts", reply[:120])
     dashboard.update_status(speaking=True)
+    _muted.set()                          # silence mic while speaking to prevent feedback
     tts.speak(reply, prefer_hi=is_hi, block=True)
+    _muted.clear()                        # re-enable mic after speaking
     dashboard.update_status(speaking=False, state="awake")
 
 
