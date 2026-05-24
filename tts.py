@@ -1,21 +1,36 @@
 """
-TTS — macOS `say` command wrapper.
+TTS — edge-tts (neural, natural-sounding) with macOS `say` fallback.
 
-Primary: subprocess `say` (zero-dependency, built-in on macOS).
-The `say` command uses the system's Neural TTS voices which are high-quality
-on M4 Mac Mini (Nicky, Ava, Samantha, Lekha for Indian-English/Hindi).
+Primary:  edge-tts  → Microsoft neural voices streamed to a temp file → afplay
+Fallback: macOS `say` (robotic but always available)
 
-List available voices: `say -v ?`
+Install: pip install edge-tts
+List voices: python3 -m edge_tts --list-voices
 """
 
 import subprocess
 import threading
+import tempfile
+import os
 import re
+import asyncio
 from config import SAY_VOICE_EN, SAY_VOICE_HI, SAY_RATE
+
+# Edge-TTS voice names  (override via env EDGE_VOICE_EN / EDGE_VOICE_HI)
+EDGE_VOICE_EN = os.getenv("EDGE_VOICE_EN", "en-US-AriaNeural")   # warm, natural female
+EDGE_VOICE_HI = os.getenv("EDGE_VOICE_HI", "hi-IN-SwaraNeural")  # Hindi neural female
 
 _speak_lock    = threading.Lock()
 _current_proc: subprocess.Popen | None = None
 _speaking      = False
+
+# Detect edge-tts availability once at import time
+try:
+    import edge_tts as _edge_tts
+    _EDGE_AVAILABLE = True
+except ImportError:
+    _EDGE_AVAILABLE = False
+    print("[TTS] edge-tts not installed — using macOS say (install: pip install edge-tts)")
 
 
 def _is_hindi(text: str) -> bool:
@@ -35,33 +50,67 @@ def is_speaking() -> bool:
     return _speaking
 
 
+def _speak_edge(text: str, voice: str):
+    """Generate audio with edge-tts and play with afplay."""
+    global _current_proc, _speaking
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    tmp.close()
+    try:
+        async def _gen():
+            comm = _edge_tts.Communicate(text, voice)
+            await comm.save(tmp.name)
+        asyncio.run(_gen())
+        _current_proc = subprocess.Popen(
+            ["afplay", tmp.name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _current_proc.wait()
+    except Exception as e:
+        print(f"[TTS] edge-tts error: {e} — falling back to say")
+        _speak_say(text, SAY_VOICE_HI if _is_hindi(text) else SAY_VOICE_EN)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
+def _speak_say(text: str, voice: str):
+    """macOS say fallback."""
+    global _current_proc
+    try:
+        _current_proc = subprocess.Popen(
+            ["say", "-v", voice, "-r", str(SAY_RATE), text],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _current_proc.wait()
+    except Exception as e:
+        print(f"[TTS] say error: {e}")
+
+
 def speak(text: str, prefer_hi: bool = False, block: bool = False):
     """
-    Speak text via macOS `say`.
+    Speak text via edge-tts (neural) or macOS say (fallback).
 
-    prefer_hi=True  → use Hindi/Indian-English voice (Lekha)
+    prefer_hi=True  → use Hindi voice
     block=True      → wait until done before returning
     """
     if not text or not text.strip():
         return
 
     def _run():
-        global _current_proc, _speaking
-        stop_speaking()           # interrupt anything in progress
-        voice = SAY_VOICE_HI if (prefer_hi or _is_hindi(text)) else SAY_VOICE_EN
+        global _speaking
+        stop_speaking()
+        is_hi = prefer_hi or _is_hindi(text)
         with _speak_lock:
             _speaking = True
             try:
-                _current_proc = subprocess.Popen(
-                    ["say", "-v", voice, "-r", str(SAY_RATE), text],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                _current_proc.wait()
-            except FileNotFoundError:
-                print("[TTS] ERROR: `say` not found — are you on macOS?")
-            except Exception as e:
-                print(f"[TTS] error: {e}")
+                if _EDGE_AVAILABLE:
+                    voice = EDGE_VOICE_HI if is_hi else EDGE_VOICE_EN
+                    _speak_edge(text, voice)
+                else:
+                    voice = SAY_VOICE_HI if is_hi else SAY_VOICE_EN
+                    _speak_say(text, voice)
             finally:
                 _speaking = False
 
