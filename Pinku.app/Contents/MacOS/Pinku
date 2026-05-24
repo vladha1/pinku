@@ -1,0 +1,5 @@
+#!/bin/bash
+# Pinku.app executable — runs inside a proper macOS app bundle
+# so macOS grants camera TCC permission to "Pinku" not to Terminal/python3.
+cd /Users/vivekladha/pinku
+exec .venv/bin/python3 pinku.py
