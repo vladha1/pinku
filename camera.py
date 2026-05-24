@@ -211,41 +211,21 @@ class CameraDetector:
         """
         Classify a gesture from 17 COCO pose keypoints.
         kps: array of shape (17, 3) — [x, y, confidence] per keypoint.
-        Returns a gesture label or None.
+
+        Pose only gives wrist position — not finger data — so we only
+        detect what's actually reliable: arm raised = Open Hand (wake).
         """
-        def vis(i):
-            return kps[i][2] > 0.3   # keypoint visible?
-        def y(i):
-            return kps[i][1]         # y coordinate (increases downward)
-        def x(i):
-            return kps[i][0]
+        def vis(i): return kps[i][2] > 0.3
+        def y(i):   return kps[i][1]   # increases downward
 
         if not (vis(_KP_L_SHO) or vis(_KP_R_SHO)):
-            return None   # can't see shoulders → can't classify
+            return None   # shoulders not visible — can't classify
 
         l_raised = vis(_KP_L_WRI) and vis(_KP_L_SHO) and y(_KP_L_WRI) < y(_KP_L_SHO)
         r_raised = vis(_KP_R_WRI) and vis(_KP_R_SHO) and y(_KP_R_WRI) < y(_KP_R_SHO)
 
-        if l_raised and r_raised:
-            return "Open Hand"    # both arms up → wave / open hand
-
-        # Single arm raised — check which side and how high
-        for raised, wri, sho, elb, hip in [
-            (r_raised, _KP_R_WRI, _KP_R_SHO, _KP_R_ELB, _KP_R_HIP),
-            (l_raised, _KP_L_WRI, _KP_L_SHO, _KP_L_ELB, _KP_L_HIP),
-        ]:
-            if not raised:
-                continue
-            # Wrist above nose → full arm raise = Thumbs Up
-            if vis(_KP_NOSE) and y(wri) < y(_KP_NOSE):
-                return "Thumbs Up"
-            # Wrist between shoulder and nose → mid-raise = Open Hand / wave
-            return "Open Hand"
-
-        # Wrist well below hip → arm dangling low = Thumbs Down
-        for wri, hip in [(_KP_R_WRI, _KP_R_HIP), (_KP_L_WRI, _KP_L_HIP)]:
-            if vis(wri) and vis(hip) and y(wri) > y(hip) + 40:
-                return "Thumbs Down"
+        if l_raised or r_raised:
+            return "Open Hand"   # arm raised = wave = wake Pinku
 
         return None
 
