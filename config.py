@@ -25,8 +25,8 @@ CAMERA_WIDTH  = int(os.getenv("CAMERA_WIDTH",  "640"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "480"))
 CAMERA_FPS    = int(os.getenv("CAMERA_FPS",    "30"))
 YOLO_MODEL    = os.getenv("YOLO_MODEL", "yolov8n.pt")  # nano; swap to yolov8s for better accuracy
-YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))
-DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "2.0"))  # seconds between detection cycles
+YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.55"))    # raised to reduce false positives
+DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
 
 # ── Laser detection ───────────────────────────────────────────────────────────
 LASER_STARS_MIN = int(os.getenv("LASER_STARS_MIN", "5"))    # ≥ this many dots = star field
@@ -43,5 +43,5 @@ DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # ── Wake / session ────────────────────────────────────────────────────────────
-SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "45.0"))  # seconds of silence before going idle
+SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "30.0"))  # seconds of silence before going idle
 LOG_DIR           = os.getenv("LOG_DIR", "logs")

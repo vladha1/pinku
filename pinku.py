@@ -163,14 +163,14 @@ def on_laser_stars(currently_muted: bool):
 # Gestures that trigger Pinku actions (require active session OR override).
 # Cooldown prevents repeat-firing while hand is held.
 _gesture_last_at: dict[str, float] = {}
-_GESTURE_COOLDOWN = 4.0   # seconds between same-gesture actions
+_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture actions (longer = fewer accidents)
 
 _GESTURE_ACTIONS = {
     # Gesture label   → (requires_session, action_fn_name)
     "Thumbs Up":      (False, "_gesture_thumbs_up"),
     "Thumbs Down":    (False, "_gesture_thumbs_down"),
     "Open Hand":      (False, "_gesture_open_hand"),
-    "Fist":           (False, "_gesture_fist"),
+    "Fist":           (True,  "_gesture_fist"),    # require session — avoids accidental mute
     "Peace":          (True,  "_gesture_peace"),
     "Pointing":       (True,  "_gesture_pointing"),
     "Call Me":        (False, "_gesture_call_me"),

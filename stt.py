@@ -192,11 +192,14 @@ class AudioRecorder:
 # ── Hallucination filter ──────────────────────────────────────────────────────
 # Whisper hallucinates these on silence / background noise — discard them.
 _HALLUCINATION_EXACT = {
-    "thank you", "thanks for watching", "thanks for listening",
+    "thank you", "thank you very much", "thanks very much",
+    "thanks for watching", "thanks for listening",
     "you", "bye", "bye bye", "goodbye", "please subscribe",
     "subtitles by", "foreign", "thanks", "okay", "ok",
     "[music]", "[applause]", "[laughter]", "[noise]", "[silence]",
     "♪", "...", ". . .", "www.", ".com",
+    "have a great day", "have a good day", "you're welcome",
+    "it was a pleasure", "feel free to ask",
     # Whisper echoing its own prompt
     "pinku is the name of a home ai assistant",
     "the ai assistant is the name of a home ai assistant",
