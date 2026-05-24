@@ -189,48 +189,71 @@ class AudioRecorder:
         return None   # timed out
 
 
-# Whisper hallucinates these phrases on silence — discard them
-_HALLUCINATION_PHRASES = {
+# ── Hallucination filter ──────────────────────────────────────────────────────
+# Whisper hallucinates these on silence / background noise — discard them.
+_HALLUCINATION_EXACT = {
     "thank you", "thanks for watching", "thanks for listening",
     "you", "bye", "bye bye", "goodbye", "please subscribe",
-    "subtitles by", "www.", ".com", "♪", "...", ". . .",
-    "foreign", "[music]", "[applause]", "[laughter]",
+    "subtitles by", "foreign", "thanks", "okay", "ok",
+    "[music]", "[applause]", "[laughter]", "[noise]", "[silence]",
+    "♪", "...", ". . .", "www.", ".com",
+    # Whisper echoing its own prompt
+    "pinku is the name of a home ai assistant",
+    "the ai assistant is the name of a home ai assistant",
+    "wake word pinku", "pinku",
 }
+
+_HALLUCINATION_STARTS = (
+    "subtitles", "transcript", "captions", "this video",
+    "thanks for", "thank you for", "please like",
+)
 
 def _is_hallucination(text: str) -> bool:
     t = text.strip().lower().rstrip(".,!?")
-    if t in _HALLUCINATION_PHRASES:
+    if t in _HALLUCINATION_EXACT:
         return True
-    if len(t.split()) <= 1:          # single word → almost always noise
+    if any(t.startswith(p) for p in _HALLUCINATION_STARTS):
+        return True
+    if len(t.split()) <= 1:     # single word → almost always noise
         return True
     return False
+
+
+# Only accept Hindi and English — everything else is a hallucination on this device
+_ALLOWED_LANGUAGES = {"en", "hi"}
 
 
 def transcribe(pcm: bytes) -> str:
     """
     Transcribe raw 16-bit mono PCM bytes using local Whisper.
     Returns the cleaned transcript string, or "" if likely hallucination/noise.
+    Silently drops any language other than English or Hindi.
     """
     model = _load_whisper()
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
     segments, info = model.transcribe(
         audio,
-        language=WHISPER_LANGUAGE,
+        language=WHISPER_LANGUAGE,   # None = auto-detect; set "en" or "hi" to force
         beam_size=3,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
         no_speech_threshold=0.55,
         log_prob_threshold=-0.8,
         compression_ratio_threshold=2.4,
-        # Bias Whisper toward recognising "Pinku" as a proper noun
-        initial_prompt="Pinku is the name of a home AI assistant. Wake word: Pinku.",
+        # Short prompt to bias wake-word recognition — do NOT include full sentences
+        # (Whisper sometimes echoes long prompts as hallucinations)
+        initial_prompt="Pinku.",
     )
 
     segs = list(segments)
     if not segs:
         return ""
 
+    # Drop non-English / non-Hindi (Portuguese, Spanish etc. = hallucination here)
+    if info.language not in _ALLOWED_LANGUAGES:
+        print(f"[STT] Dropped — language={info.language!r} (only en/hi accepted)")
+        return ""
 
     # Drop if any segment has high no-speech probability
     if any(getattr(s, "no_speech_prob", 0) > 0.55 for s in segs):
