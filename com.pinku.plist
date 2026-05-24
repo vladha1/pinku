@@ -5,7 +5,12 @@
     <key>Label</key>
     <string>com.pinku</string>
 
-    <!-- Use 'open' so Pinku runs inside Terminal.app → inherits camera permission -->
+    <!--
+      Opens start_pinku.command in Terminal.app at login.
+      Terminal.app has camera permission → Pinku inherits it.
+      The .command file contains a watchdog loop so Pinku auto-restarts on crash.
+      'open' returns immediately; launchd runs it once at login (RunAtLoad).
+    -->
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/open</string>
@@ -14,24 +19,12 @@
         <string>/Users/vivekladha/pinku/start_pinku.command</string>
     </array>
 
-    <!-- Start when user logs in -->
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Wait 10 s after login before launching (let Desktop settle) -->
-    <key>StartInterval</key>
-    <integer>0</integer>
-
-    <key>ThrottleInterval</key>
-    <integer>15</integer>
-
-    <key>WorkingDirectory</key>
-    <string>/Users/vivekladha/pinku</string>
-
-    <key>StandardOutPath</key>
-    <string>/Users/vivekladha/pinku/logs/launchagent.log</string>
-
-    <key>StandardErrorPath</key>
-    <string>/Users/vivekladha/pinku/logs/launchagent.err</string>
+    <!-- Do NOT use KeepAlive — 'open' exits immediately and KeepAlive would
+         spam new Terminal windows every few seconds. -->
+    <key>KeepAlive</key>
+    <false/>
 </dict>
 </plist>
