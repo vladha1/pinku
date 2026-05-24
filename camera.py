@@ -25,29 +25,14 @@ from config import (
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
 )
 
-# ── HaGRID class → our gesture label ─────────────────────────────────────────
-# Model: keremberke/yolov8n-hand-gesture-recognition (HaGRID dataset)
-_GESTURE_MAP: dict[str, str] = {
-    "like":           "Thumbs Up",
-    "dislike":        "Thumbs Down",
-    "palm":           "Open Hand",
-    "stop":           "Open Hand",
-    "fist":           "Fist",
-    "mute":           "Fist",
-    "peace":          "Peace",
-    "peace_inverted": "Peace",
-    "one":            "Pointing",
-    "call":           "Call Me",
-    "rock":           "Rock On",
-    "ok":             "OK",
-    "two_up":         "Peace",
-    "four":           "Open Hand",
-    "three":          "Custom",
-    "three2":         "Custom",
-    "two_up_inverted":"Custom",
-    "stop_inverted":  "Custom",
-    "no_gesture":     "",          # skip
-}
+# ── Pose keypoint indices (COCO 17-point) ─────────────────────────────────────
+# 0:nose  5:l-shoulder 6:r-shoulder  7:l-elbow  8:r-elbow
+# 9:l-wrist 10:r-wrist 11:l-hip 12:r-hip
+_KP_NOSE    = 0
+_KP_L_SHO   = 5;  _KP_R_SHO   = 6
+_KP_L_ELB   = 7;  _KP_R_ELB   = 8
+_KP_L_WRI   = 9;  _KP_R_WRI   = 10
+_KP_L_HIP   = 11; _KP_R_HIP   = 12
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _frame_lock  = threading.Lock()
@@ -185,27 +170,18 @@ class CameraDetector:
             return
 
         # ── Gesture YOLO (HaGRID) ─────────────────────────────────────────────
-        gesture_model = None
+        # ── Pose YOLO for gesture detection ───────────────────────────────────
+        # yolov8n-pose.pt is an official ultralytics model — auto-downloads
+        # from GitHub, no authentication required.
+        pose_model = None
         try:
-            from huggingface_hub import hf_hub_download
-            import os
-            _GESTURE_FILE = "gesture_yolo.pt"
-            if not os.path.exists(_GESTURE_FILE):
-                print("[Camera] Downloading gesture model from HuggingFace …")
-                src = hf_hub_download(
-                    repo_id="keremberke/yolov8n-hand-gesture-recognition",
-                    filename="best.pt",
-                )
-                import shutil
-                shutil.copy(src, _GESTURE_FILE)
-                print("[Camera] Gesture model downloaded")
-            print("[Camera] Loading gesture model …")
-            gesture_model = YOLO(_GESTURE_FILE)
-            print(f"[Camera] Gesture YOLO ready — classes: {list(gesture_model.names.values())}")
+            print("[Camera] Loading pose model yolov8n-pose.pt …")
+            pose_model = YOLO("yolov8n-pose.pt")
+            print("[Camera] Pose YOLO ready — gesture detection from wrist/shoulder keypoints")
         except Exception as e:
-            print(f"[Camera] Gesture YOLO not available ({e}) — running without gesture detection")
+            print(f"[Camera] Pose YOLO not available ({e}) — no gesture detection")
 
-        _det_status = "ok" if gesture_model else "ok (no gesture model)"
+        _det_status = "ok" if pose_model else "ok (no gesture model)"
         print(f"[Camera] Detection status: {_det_status}")
         _push_status()
 
@@ -221,16 +197,61 @@ class CameraDetector:
             last_detect = now
 
             try:
-                self._run_detection(frame, yolo, gesture_model)
+                self._run_detection(frame, yolo, pose_model)
             except Exception:
                 print(f"[Camera] Detection error:\n{traceback.format_exc()}")
                 time.sleep(1.0)
 
         print("[Camera] Detection stopped")
 
+    # ── Gesture from pose keypoints ───────────────────────────────────────────
+
+    @staticmethod
+    def _gesture_from_pose(kps) -> str | None:
+        """
+        Classify a gesture from 17 COCO pose keypoints.
+        kps: array of shape (17, 3) — [x, y, confidence] per keypoint.
+        Returns a gesture label or None.
+        """
+        def vis(i):
+            return kps[i][2] > 0.3   # keypoint visible?
+        def y(i):
+            return kps[i][1]         # y coordinate (increases downward)
+        def x(i):
+            return kps[i][0]
+
+        if not (vis(_KP_L_SHO) or vis(_KP_R_SHO)):
+            return None   # can't see shoulders → can't classify
+
+        l_raised = vis(_KP_L_WRI) and vis(_KP_L_SHO) and y(_KP_L_WRI) < y(_KP_L_SHO)
+        r_raised = vis(_KP_R_WRI) and vis(_KP_R_SHO) and y(_KP_R_WRI) < y(_KP_R_SHO)
+
+        if l_raised and r_raised:
+            return "Open Hand"    # both arms up → wave / open hand
+
+        # Single arm raised — check which side and how high
+        for raised, wri, sho, elb, hip in [
+            (r_raised, _KP_R_WRI, _KP_R_SHO, _KP_R_ELB, _KP_R_HIP),
+            (l_raised, _KP_L_WRI, _KP_L_SHO, _KP_L_ELB, _KP_L_HIP),
+        ]:
+            if not raised:
+                continue
+            # Wrist above nose → full arm raise = Thumbs Up
+            if vis(_KP_NOSE) and y(wri) < y(_KP_NOSE):
+                return "Thumbs Up"
+            # Wrist between shoulder and nose → mid-raise = Open Hand / wave
+            return "Open Hand"
+
+        # Wrist well below hip → arm dangling low = Thumbs Down
+        for wri, hip in [(_KP_R_WRI, _KP_R_HIP), (_KP_L_WRI, _KP_L_HIP)]:
+            if vis(wri) and vis(hip) and y(wri) > y(hip) + 40:
+                return "Thumbs Down"
+
+        return None
+
     # ── Combined detection ────────────────────────────────────────────────────
 
-    def _run_detection(self, frame, yolo, gesture_model):
+    def _run_detection(self, frame, yolo, pose_model):
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "objects": [], "persons": 0, "gestures": [],
@@ -247,14 +268,17 @@ class CameraDetector:
             else:
                 event["objects"].append({"label": label, "conf": conf})
 
-        # ── Gesture detection ─────────────────────────────────────────────────
-        if gesture_model is not None:
-            for box in gesture_model(frame, conf=0.55, verbose=False)[0].boxes:
-                raw = gesture_model.names[int(box.cls[0])]
-                label = _GESTURE_MAP.get(raw, "")
-                if label and label != "Custom":
-                    conf = round(float(box.conf[0]), 2)
-                    event["gestures"].append({"gesture": label, "conf": conf, "raw": raw})
+        # ── Pose / gesture detection ──────────────────────────────────────────
+        if pose_model is not None:
+            pose_res = pose_model(frame, conf=0.5, verbose=False)[0]
+            if pose_res.keypoints is not None:
+                for kps in pose_res.keypoints.data:   # one set of kps per person
+                    kps_np = kps.cpu().numpy()
+                    if event["persons"] == 0:
+                        event["persons"] = 1          # pose confirms a person
+                    gesture = self._gesture_from_pose(kps_np)
+                    if gesture:
+                        event["gestures"].append({"gesture": gesture})
 
         # ── Dedup — only fire callback when scene changes ─────────────────────
         snap = (
