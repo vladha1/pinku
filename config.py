@@ -25,7 +25,7 @@ CAMERA_WIDTH  = int(os.getenv("CAMERA_WIDTH",  "640"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "480"))
 CAMERA_FPS    = int(os.getenv("CAMERA_FPS",    "30"))
 YOLO_MODEL    = os.getenv("YOLO_MODEL", "yolov8n.pt")  # nano; swap to yolov8s for better accuracy
-YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.55"))    # raised to reduce false positives
+YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))    # kite handled by YOLO_IGNORE instead
 YOLO_IGNORE   = set(os.getenv("YOLO_IGNORE", "kite,ceiling fan").split(","))  # objects to ignore (false positives in this room)
 DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
 
