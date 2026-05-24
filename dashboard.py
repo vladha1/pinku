@@ -187,6 +187,11 @@ def camera_request_permission():
 def start(logger=None, port=DASHBOARD_PORT):
     global _logger
     _logger = logger
+
+    # Silence Flask/werkzeug per-request logs (camera.jpg polls at 5 fps = noise)
+    import logging
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
     t = threading.Thread(
         target=lambda: _app.run(host=DASHBOARD_HOST, port=port,
                                 debug=False, use_reloader=False, threaded=True),
