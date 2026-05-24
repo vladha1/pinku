@@ -41,6 +41,16 @@ GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.5-flash").strip(
 if not GEMINI_API_KEY:
     print("[LLM] WARNING: GEMINI_API_KEY not set — chat will fall back to Ollama")
 
+# ── Dashboard log helper (lazy import to avoid circular dependency) ───────────
+
+def _dashboard_log(level: str, msg: str):
+    try:
+        import dashboard
+        dashboard.log_message(level, msg)
+    except Exception:
+        pass
+
+
 # ── System prompts ────────────────────────────────────────────────────────────
 
 _ROUTE_SYSTEM = """\
@@ -202,9 +212,11 @@ def chat(transcript: str,
     try:
         reply = _gemini_call(contents, temperature=0.9, max_tokens=400, system=system)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
+        _dashboard_log("llm", f"via {GEMINI_MODEL}")
         return reply
     except Exception as e:
         print(f"[LLM] Gemini chat failed ({e}) — falling back to Ollama")
+        _dashboard_log("llm", f"Gemini unavailable — using Ollama ({OLLAMA_MODEL})")
         # Fallback: Ollama
         msgs = [{"role": "system", "content": system}]
         if history:
@@ -232,9 +244,12 @@ def describe_image(image_b64: str, question: str = "", is_hi: bool = False) -> s
         ],
     }]
     try:
-        return _gemini_call(contents, temperature=0.5, max_tokens=200)
+        result = _gemini_call(contents, temperature=0.5, max_tokens=200)
+        _dashboard_log("llm", f"vision via {GEMINI_MODEL}")
+        return result
     except Exception as e:
         print(f"[LLM] Gemini vision failed ({e}) — trying Ollama llava")
+        _dashboard_log("llm", "Gemini vision unavailable — using Ollama llava")
         # Fallback to local llava
         payload = json.dumps({
             "model": "llava:7b",
