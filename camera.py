@@ -1,8 +1,8 @@
 """
 Camera — YOLO pose + OpenCV hand gesture classification.
 
-  YOLO_MODEL       (yolov8n.pt)       — person + object detection
-  yolov8n-pose.pt                     — body pose (wrist/shoulder positions)
+  YOLO_MODEL       (yolov8n.pt)       — object detection (persons counted via face only)
+  yolov8n-pose.pt                     — body pose; nose keypoint = face present
   Hand gesture CV                     — skin mask + convexity defects on wrist crop
 
 Gestures detected:
@@ -261,30 +261,35 @@ class CameraDetector:
             "objects": [], "persons": 0, "gestures": [],
         }
 
-        # ── Object / person (YOLO) ────────────────────────────────────────────
+        # ── Object detection (YOLO) — persons counted separately via face ────────
+        yolo_person_seen = False
         for box in yolo(frame, conf=YOLO_CONF, verbose=False)[0].boxes:
             label = yolo.names[int(box.cls[0])]
             conf  = round(float(box.conf[0]), 2)
             if label in YOLO_IGNORE:
                 continue
             if label == "person":
-                event["persons"] += 1
+                yolo_person_seen = True   # used as fallback only if pose model absent
             else:
                 event["objects"].append({"label": label, "conf": conf})
 
-        # ── Pose + hand gesture ───────────────────────────────────────────────
+        # ── Pose + face detection + hand gesture ──────────────────────────────
+        # Person is only counted when the nose keypoint (face) is visible —
+        # much more reliable than YOLO "person" which fires on partial bodies.
+        # Falls back to YOLO person count if pose model not loaded.
         if pose_model is not None:
             pose_res = pose_model(frame, conf=0.5, verbose=False)[0]
             if pose_res.keypoints is not None:
                 for kps in pose_res.keypoints.data:
                     kps_np = kps.cpu().numpy()   # (17, 3)
 
-                    if event["persons"] == 0:
-                        event["persons"] = 1
-
                     def vis(i): return kps_np[i][2] > 0.3
                     def kx(i):  return float(kps_np[i][0])
                     def ky(i):  return float(kps_np[i][1])
+
+                    # Only count as present if face (nose) is visible
+                    if vis(_KP_NOSE):
+                        event["persons"] += 1
 
                     # Check each visible wrist
                     for wri, sho in [(_KP_R_WRI, _KP_R_SHO), (_KP_L_WRI, _KP_L_SHO)]:
@@ -298,6 +303,11 @@ class CameraDetector:
                                 gesture = "Open Hand"   # arm raised + open palm
                             event["gestures"].append({"gesture": gesture})
                             break   # one gesture per frame is enough
+
+        else:
+            # No pose model — fall back to YOLO person detection
+            if yolo_person_seen:
+                event["persons"] = 1
 
         # ── Dedup ─────────────────────────────────────────────────────────────
         snap = (
