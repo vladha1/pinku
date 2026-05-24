@@ -1133,7 +1133,6 @@ function applyStatus(data) {
     _lastTranscript = data.last_transcript;
     document.getElementById('q-body').textContent = data.last_transcript;
     document.getElementById('q-cloud').classList.add('has-text');
-    addLog('you', data.last_transcript, '');
   }
   // Reply cloud
   if (data.last_reply && data.last_reply !== _lastReply) {
@@ -1141,7 +1140,6 @@ function applyStatus(data) {
     document.getElementById('r-body').textContent = data.last_reply;
     document.getElementById('r-cloud').classList.add('has-text');
     addChat(data.last_transcript, data.last_reply);
-    addLog('pinku', data.last_reply, '');
   }
 
   // Mute button icon
@@ -1313,11 +1311,13 @@ const LOG_ICONS = {
   stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊',
   camera:'📷', gesture:'✋', error:'🔴', warn:'🟡',
   info:'⚪', you:'🧑', pinku:'🤖', cam:'📷',
+  user:'🧑', source:'📖', llm:'🤖',
 };
 const LOG_COLORS = {
   stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
   tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
   warn:'#fbbf24', info:'#64748b', you:'#93c5fd', pinku:'#c084fc', cam:'#67e8f9',
+  user:'#93c5fd', source:'#86efac', llm:'#64748b',
 };
 
 function addLog(level, msg, ts) {

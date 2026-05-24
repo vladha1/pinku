@@ -249,7 +249,7 @@ def transcribe(pcm: bytes) -> str:
         compression_ratio_threshold=2.4,
         # Short prompt to bias wake-word recognition — do NOT include full sentences
         # (Whisper sometimes echoes long prompts as hallucinations)
-        initial_prompt="Pinku.",
+        initial_prompt="Pinku. IPL cricket match score. Virat Kohli. Mumbai Indians. CSK.",
     )
 
     segs = list(segments)
