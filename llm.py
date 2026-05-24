@@ -1,31 +1,52 @@
 """
-LLM — Ollama client for local inference.
-
-Two modes:
-  route(transcript) → structured JSON action dict
-  chat(transcript, context) → plain text reply
+LLM — dual-backend design:
+  route()   → Ollama (local llama3.2:3b) — fast keyword/intent detection only
+  chat()    → Gemini 2.5 Flash — smart, accurate conversational replies
+  describe_image() → Gemini Vision — camera frame description
 
 Ollama must be running: `ollama serve`
-Pull a model first: `ollama pull llama3.2:3b`
-
-The routing prompt mirrors Pinky's Gemini router but targets a smaller
-local model — keep the JSON schema simple and actions explicit.
+Gemini key loaded from .env in the same directory.
 """
 
 from __future__ import annotations
 import json
+import os
 import re
 import urllib.request
 import urllib.error
+from pathlib import Path
 from config import OLLAMA_URL, OLLAMA_MODEL
 
-# ── Routing schema ────────────────────────────────────────────────────────────
+# ── Load .env ─────────────────────────────────────────────────────────────────
+# Simple parser — avoids dependency on python-dotenv
+def _load_env(path: Path):
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k and k not in os.environ:   # don't override real env vars
+            os.environ[k] = v
+
+_load_env(Path(__file__).parent / ".env")
+
+# ── Gemini config ─────────────────────────────────────────────────────────────
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+
+if not GEMINI_API_KEY:
+    print("[LLM] WARNING: GEMINI_API_KEY not set — chat will fall back to Ollama")
+
+# ── System prompts ────────────────────────────────────────────────────────────
 
 _ROUTE_SYSTEM = """\
-You are Pinku, a home AI assistant running on an M4 Mac Mini.
-Given a voice transcript, return ONLY a JSON object with the action to take.
+You are Pinku, a home AI assistant. Given a voice transcript, return ONLY a JSON object.
 
-Actions and when to use them:
+Actions:
 - "chat"        → general conversation, questions, anything not listed below
 - "time"        → user asked what time or date it is
 - "weather"     → user asked about weather
@@ -34,56 +55,48 @@ Actions and when to use them:
 - "describe"    → user asked you to look / describe what you see / camera
 - "music_play"  → user wants music played; include "query": "<search>"
 - "music_stop"  → user wants music stopped
-- "scripture"   → user asked about any of:
-                  gita, ramayana, mahabharata, patanjali (yoga sutras), upanishads, vedas,
-                  madhushala, puranas, vedanta, buddhism, philosophy (Indian darshanas),
-                  yoga, ayurveda, meditation, history (Indian history), mythology,
-                  music (raga/tala/classical), poetry (Hindi/Urdu/Sanskrit),
-                  astronomy, mathematics, science, cooking (Indian recipes), language (Sanskrit etymology)
-                  include "topic" with one of the exact keys above (e.g. "gita", "yoga", "music")
+- "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
+                  Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
-- "ignore"      → background noise, unintelligible, or clearly not addressed to Pinku
+- "ignore"      → background noise, unintelligible, not addressed to Pinku
 
 Rules:
 - Return ONLY valid JSON, no explanation, no markdown.
-- Include "transcript" field with the user's exact words.
-- Include "lang": "en" or "lang": "hi" based on the language spoken.
+- Include "transcript" with the user's exact words.
+- Include "lang": "en" or "lang": "hi" based on language spoken.
 
 Examples:
 {"action":"chat","transcript":"what is the capital of France","lang":"en"}
 {"action":"time","transcript":"what time is it","lang":"en"}
 {"action":"scripture","topic":"gita","transcript":"what does the Gita say about fear","lang":"en"}
-{"action":"music_play","query":"raag bhairav","transcript":"play raag bhairav","lang":"hi"}
 {"action":"ignore","transcript":"","lang":"en"}
 """
 
 _CHAT_SYSTEM_EN = """\
-You are Pinku, a warm and helpful home AI assistant on an M4 Mac Mini.
-Respond naturally and concisely — you are speaking aloud, so keep it under 60 words unless asked to elaborate.
+You are Pinku, a warm helpful home AI assistant on an M4 Mac Mini.
+Respond naturally and concisely — you are speaking aloud, so keep replies under 60 words unless asked to elaborate.
 No markdown, no bullet points. Plain conversational sentences only.
+Be precise with facts and numbers.
 """
 
 _CHAT_SYSTEM_HI = """\
-You are Pinku, a warm and helpful home AI assistant on an M4 Mac Mini.
+You are Pinku, a warm helpful home AI assistant on an M4 Mac Mini.
 The user is speaking Hindi. Reply in natural spoken Hindi using Devanagari script.
-Keep it under 60 words unless asked to elaborate. No markdown, no bullet points.
+Keep replies under 60 words unless asked to elaborate. No markdown, no bullet points.
 Plain conversational sentences only. Do not mix English unless the user does.
+Be precise with facts and numbers.
 """
 
-# ── Low-level Ollama call ─────────────────────────────────────────────────────
+# ── Ollama (routing only) ─────────────────────────────────────────────────────
 
-def _call(messages: list[dict], temperature: float = 0.7,
-          max_tokens: int = 512, stream: bool = False) -> str:
-    """POST to Ollama /api/chat and return the assistant content string."""
+def _ollama_call(messages: list[dict], temperature: float = 0.1,
+                 max_tokens: int = 200) -> str:
     payload = json.dumps({
-        "model":   OLLAMA_MODEL,
+        "model":    OLLAMA_MODEL,
         "messages": messages,
-        "stream":  stream,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
+        "stream":   False,
+        "options":  {"temperature": temperature, "num_predict": max_tokens},
     }).encode()
     req = urllib.request.Request(
         f"{OLLAMA_URL}/api/chat",
@@ -91,39 +104,76 @@ def _call(messages: list[dict], temperature: float = 0.7,
         headers={"Content-Type": "application/json"},
     )
     try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())["message"]["content"].strip()
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Ollama not reachable ({e})") from e
+
+
+# ── Gemini (chat + vision) ────────────────────────────────────────────────────
+
+def _gemini_call(contents: list[dict], temperature: float = 0.9,
+                 max_tokens: int = 400, system: str = "") -> str:
+    """POST to Gemini generateContent REST API."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
+
+    body: dict = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature":    temperature,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
+
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
-        return data["message"]["content"].strip()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except urllib.error.URLError as e:
-        raise RuntimeError(
-            f"Ollama not reachable at {OLLAMA_URL} — is `ollama serve` running? ({e})"
-        ) from e
+        raise RuntimeError(f"Gemini unreachable ({e})") from e
+    except (KeyError, IndexError) as e:
+        raise RuntimeError(f"Gemini unexpected response: {e}") from e
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def route(transcript: str) -> dict:
     """
-    Route a voice transcript to a structured action dict.
-    Always returns a dict with at least {"action": "...", "transcript": "..."}.
+    Route via local Ollama — fast, no network, just keyword classification.
+    Always returns {"action": "...", "transcript": "...", "lang": "..."}.
     """
     if not transcript.strip():
         return {"action": "ignore", "transcript": ""}
 
     messages = [
-        {"role": "system",    "content": _ROUTE_SYSTEM},
-        {"role": "user",      "content": transcript},
+        {"role": "system", "content": _ROUTE_SYSTEM},
+        {"role": "user",   "content": transcript},
     ]
-    raw = _call(messages, temperature=0.1, max_tokens=200)
+    try:
+        raw = _ollama_call(messages, temperature=0.1, max_tokens=200)
+    except Exception as e:
+        print(f"[LLM] route error: {e} — defaulting to chat")
+        return {"action": "chat", "transcript": transcript, "lang": "en"}
 
-    # Extract JSON — model might wrap it in backticks
     m = re.search(r'\{.*\}', raw, re.DOTALL)
     if not m:
-        print(f"[LLM] route: no JSON in response: {raw!r}")
+        print(f"[LLM] route: no JSON in: {raw!r}")
         return {"action": "chat", "transcript": transcript, "lang": "en"}
     try:
         result = json.loads(m.group())
         result.setdefault("transcript", transcript)
+        result.setdefault("lang", "en")
         return result
     except json.JSONDecodeError:
         print(f"[LLM] route: JSON parse error: {raw!r}")
@@ -135,51 +185,72 @@ def chat(transcript: str,
          system_extra: str = "",
          is_hi: bool = False) -> str:
     """
-    Generate a conversational reply.
+    Generate a reply via Gemini 2.5 Flash.
+    Falls back to Ollama if Gemini is unavailable.
     history: list of {"role": "user"|"assistant", "content": "..."} dicts.
-    is_hi=True  → use Hindi system prompt so LLM replies in Devanagari.
     """
     base   = _CHAT_SYSTEM_HI if is_hi else _CHAT_SYSTEM_EN
     system = base + ("\n" + system_extra if system_extra else "")
-    messages: list[dict] = [{"role": "system", "content": system}]
-    if history:
-        messages.extend(history[-6:])   # last 3 turns for context
-    messages.append({"role": "user", "content": transcript})
-    return _call(messages, temperature=0.75, max_tokens=300)
+
+    # Build Gemini contents list from history + current turn
+    contents: list[dict] = []
+    for turn in (history or [])[-6:]:   # last 3 back-and-forth turns
+        role = "model" if turn["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": transcript}]})
+
+    try:
+        reply = _gemini_call(contents, temperature=0.9, max_tokens=400, system=system)
+        print(f"[LLM] Gemini reply: {reply[:80]!r}")
+        return reply
+    except Exception as e:
+        print(f"[LLM] Gemini chat failed ({e}) — falling back to Ollama")
+        # Fallback: Ollama
+        msgs = [{"role": "system", "content": system}]
+        if history:
+            msgs.extend(history[-6:])
+        msgs.append({"role": "user", "content": transcript})
+        try:
+            return _ollama_call(msgs, temperature=0.75, max_tokens=300)
+        except Exception as e2:
+            return f"Sorry, I couldn't reach either AI right now. ({e2})"
 
 
 def describe_image(image_b64: str, question: str = "", is_hi: bool = False) -> str:
     """
-    Send a base64-encoded JPEG to a vision-capable Ollama model.
-    Requires: `ollama pull llava` or `ollama pull moondream`
-
-    Falls back gracefully if the model doesn't support vision.
+    Send a base64 JPEG to Gemini Vision and return a description.
+    Falls back to Ollama llava if Gemini unavailable.
     """
-    vision_model = "llava:7b"   # or "moondream" for lighter
-    lang_note = " Reply in Hindi." if is_hi else ""
-    prompt = (question or "Describe what you see in this image briefly.") + lang_note
+    lang_note = " Reply in Hindi (Devanagari)." if is_hi else ""
+    prompt    = (question or "Describe what you see briefly.") + lang_note
 
-    payload = json.dumps({
-        "model":  vision_model,
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-            "images": [image_b64],
-        }],
-        "stream": False,
-        "options": {"temperature": 0.5, "num_predict": 200},
-    }).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/chat",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"text": prompt},
+            {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}},
+        ],
+    }]
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.loads(r.read())
-        return data["message"]["content"].strip()
+        return _gemini_call(contents, temperature=0.5, max_tokens=200)
     except Exception as e:
-        return f"[Vision error: {e}]"
+        print(f"[LLM] Gemini vision failed ({e}) — trying Ollama llava")
+        # Fallback to local llava
+        payload = json.dumps({
+            "model": "llava:7b",
+            "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+            "stream": False,
+            "options": {"temperature": 0.5, "num_predict": 200},
+        }).encode()
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat", data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())["message"]["content"].strip()
+        except Exception as e2:
+            return f"[Vision error: {e2}]"
 
 
 def models_available() -> list[str]:
