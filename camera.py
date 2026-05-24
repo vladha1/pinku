@@ -147,11 +147,10 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
                 n_gaps += 1
 
     # ── Classify ──────────────────────────────────────────────────────────────
+    # Only report Open Hand — a clearly open palm with 4+ finger gaps.
+    # Fist is too common a false positive (normal resting hand = zero gaps, high solidity).
     if n_gaps >= 4:
         return "Open Hand"
-
-    if n_gaps == 0 and solidity > 0.80:
-        return "Fist"
 
     return None
 

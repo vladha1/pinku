@@ -187,7 +187,7 @@ _GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → wake / unmute (works anytime)
-    "Fist":      (False, "_gesture_fist"),       # ✊ closed fist → sleep / mute (works anytime)
+    # Fist removed — too many false positives from normal resting hand position
 }
 
 
@@ -217,7 +217,6 @@ def _gesture_fist():
 
 _GESTURE_FN_MAP: dict[str, object] = {
     "_gesture_open_hand": _gesture_open_hand,
-    "_gesture_fist":      _gesture_fist,
 }
 
 
