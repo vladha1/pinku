@@ -21,7 +21,7 @@ import cv2
 
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
-    YOLO_MODEL, YOLO_CONF, DETECT_EVERY,
+    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
     LASER_STARS_MIN, LASER_COOLDOWN,
 )
 
@@ -406,6 +406,8 @@ class CameraDetector:
         for box in results.boxes:
             label = yolo.names[int(box.cls[0])]
             conf  = round(float(box.conf[0]), 2)
+            if label in YOLO_IGNORE:
+                continue
             if label == "person":
                 event["persons"] += 1
             else:
