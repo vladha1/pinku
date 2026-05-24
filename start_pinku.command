@@ -22,10 +22,9 @@ echo "============================================"
 
 while true; do
     echo "$(date '+%H:%M:%S')  Starting Pinku..."
-    # Suppress TF/MediaPipe clearcut uploader spam
     export TF_CPP_MIN_LOG_LEVEL=3
     export GRPC_VERBOSITY=ERROR
-    .venv/bin/python3 pinku.py 2> >(grep -v "portable_clearcut\|clearcut_uploader\|Source Location" >&2)
+    .venv/bin/python3 pinku.py
     EXIT=$?
     echo ""
     echo "$(date '+%H:%M:%S')  Pinku exited (code $EXIT). Restarting in 5s..."
