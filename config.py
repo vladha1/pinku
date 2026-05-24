@@ -31,7 +31,7 @@ DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detec
 
 # ── Laser detection ───────────────────────────────────────────────────────────
 LASER_STARS_MIN = int(os.getenv("LASER_STARS_MIN", "5"))    # ≥ this many dots = star field
-LASER_COOLDOWN  = float(os.getenv("LASER_COOLDOWN", "6.0")) # seconds between laser actions
+LASER_COOLDOWN  = float(os.getenv("LASER_COOLDOWN", "30.0")) # seconds between laser actions (raised — laser was waking too often)
 
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
