@@ -158,22 +158,6 @@ def _extend_session():
     _log("wake", "Session open — listening")
 
 
-# ── Laser callbacks ───────────────────────────────────────────────────────────
-
-def on_laser_wake():
-    if is_muted():
-        return
-    _extend_session()   # chime handled inside _extend_session
-    print("[Laser] Wake → listening")
-
-
-def on_laser_stars(currently_muted: bool):
-    if currently_muted:
-        _handle_unmute()
-    else:
-        _handle_mute()
-
-
 # ── Gesture action map ────────────────────────────────────────────────────────
 #
 # Gestures that trigger Pinku actions (require active session OR override).
@@ -496,12 +480,7 @@ def main():
     cam = None
     if not args.no_camera:
         from camera import CameraDetector
-        cam = CameraDetector(
-            on_detection=on_detection,
-            on_laser_wake=on_laser_wake,
-            on_laser_stars=on_laser_stars,
-            is_muted_fn=is_muted,
-        )
+        cam = CameraDetector(on_detection=on_detection)
         cam.start()
 
     # ── Mic ───────────────────────────────────────────────────────────────────

@@ -22,7 +22,6 @@ import cv2
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
-    LASER_STARS_MIN, LASER_SINGLE_MIN, LASER_COOLDOWN,
 )
 
 # ── Shared state ──────────────────────────────────────────────────────────────
@@ -55,24 +54,6 @@ def frame_to_b64(frame: np.ndarray) -> str:
     """Encode a BGR frame as base64 JPEG."""
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
     return base64.b64encode(buf.tobytes()).decode()
-
-
-# ── Laser dot counter ─────────────────────────────────────────────────────────
-
-def _laser_dot_count(frame: np.ndarray) -> int:
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    k   = np.ones((3, 3), dtype=np.uint8)
-    mask_grn = cv2.inRange(hsv,
-                           np.array([40,  80, 170], dtype=np.uint8),
-                           np.array([85, 255, 255], dtype=np.uint8))
-    mask_grn = cv2.morphologyEx(mask_grn, cv2.MORPH_OPEN, k)
-    mask_hot = cv2.inRange(hsv,
-                           np.array([0,   0, 245], dtype=np.uint8),
-                           np.array([180, 80, 255], dtype=np.uint8))
-    mask_hot = cv2.morphologyEx(mask_hot, cv2.MORPH_OPEN, k)
-    combined = cv2.bitwise_or(mask_grn, mask_hot)
-    cnts, _  = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    return len([c for c in cnts if 2 <= cv2.contourArea(c) <= 120])
 
 
 # ── Camera open helper ────────────────────────────────────────────────────────
@@ -124,30 +105,13 @@ class CameraDetector:
       _capture_thread — reads frames from webcam continuously
       _detect_thread  — runs YOLO + MediaPipe every DETECT_EVERY seconds
 
-    Callbacks (called from detect thread):
-      on_detection(event)    — {timestamp, objects, persons, gestures}
-      on_laser_wake()        — single laser dot (rising edge)
-      on_laser_stars(muted)  — star field detected
+    Callback (called from detect thread):
+      on_detection(event)  — {timestamp, objects, persons, gestures}
     """
 
-    def __init__(self,
-                 on_detection=None,
-                 on_laser_wake=None,
-                 on_laser_stars=None,
-                 is_muted_fn=None):
-        self.on_detection   = on_detection   or (lambda e: None)
-        self.on_laser_wake  = on_laser_wake  or (lambda: None)
-        self.on_laser_stars = on_laser_stars or (lambda muted: None)
-        self.is_muted_fn    = is_muted_fn    or (lambda: False)
-
-        self._stop = threading.Event()
-
-        # Laser state
-        self._laser_trigger_at      = 0.0
-        self._laser_consec          = 0
-        self._laser_dot_was_present = False
-
-        # Dedup
+    def __init__(self, on_detection=None):
+        self.on_detection = on_detection or (lambda e: None)
+        self._stop        = threading.Event()
         self._last_snapshot = None
 
     def start(self):
@@ -305,7 +269,6 @@ class CameraDetector:
             last_detect = now
 
             try:
-                self._check_laser(frame)
                 self._run_detection(frame, yolo, hand_detector, pose_detector)
             except Exception:
                 print(f"[Camera] Detection error:\n{traceback.format_exc()}")
@@ -372,41 +335,6 @@ class CameraDetector:
         lm       = hand_lm.landmark
         is_right = handedness.classification[0].label == "Right"
         return CameraDetector._classify_gesture_lm(lm, is_right)
-
-    # ── Laser check ───────────────────────────────────────────────────────────
-
-    def _check_laser(self, frame: np.ndarray):
-        dot_count = _laser_dot_count(frame)
-        if dot_count == 0:
-            self._laser_consec          = 0
-            self._laser_dot_was_present = False
-            return
-
-        self._laser_consec += 1
-        is_star = dot_count >= LASER_STARS_MIN
-
-        if is_star and self._laser_consec < 2:
-            return
-        if not is_star:
-            # Require minimum dot count to avoid false positives from room LEDs
-            if dot_count < LASER_SINGLE_MIN:
-                return
-            if self._laser_dot_was_present:
-                return
-            self._laser_dot_was_present = True
-
-        if time.time() - self._laser_trigger_at < LASER_COOLDOWN:
-            return
-
-        self._laser_trigger_at = time.time()
-        self._laser_consec     = 0
-
-        if is_star:
-            print(f"[Laser] Star field ({dot_count} dots) → mute toggle")
-            self.on_laser_stars(self.is_muted_fn())
-        else:
-            print(f"[Laser] Single dot ({dot_count}) → wake")
-            self.on_laser_wake()
 
     # ── YOLO + MediaPipe detection ────────────────────────────────────────────
 

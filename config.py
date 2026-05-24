@@ -29,11 +29,6 @@ YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))    # kite handled by YOLO_
 YOLO_IGNORE   = set(os.getenv("YOLO_IGNORE", "kite,ceiling fan").split(","))  # objects to ignore (false positives in this room)
 DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
 
-# ── Laser detection ───────────────────────────────────────────────────────────
-LASER_STARS_MIN    = int(os.getenv("LASER_STARS_MIN",    "5"))     # ≥ this many dots = star field (mute toggle)
-LASER_SINGLE_MIN   = int(os.getenv("LASER_SINGLE_MIN",   "2"))     # min dots to count as a single-dot wake (raise to disable false positives)
-LASER_COOLDOWN     = float(os.getenv("LASER_COOLDOWN",   "120.0")) # seconds between laser actions (raised — LEDs in room cause false positives)
-
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
 VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "400"))  # ignore clips shorter than this
