@@ -34,6 +34,7 @@ import dashboard
 # ── Global state ──────────────────────────────────────────────────────────────
 
 _muted         = threading.Event()   # set = muted (mic disabled)
+_user_muted    = threading.Event()   # set = user manually muted (laser/gesture/button)
 _awake         = threading.Event()   # set = in active voice session
 _stop_all      = threading.Event()
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
@@ -62,12 +63,17 @@ def _log(level: str, msg: str):
 # ── Action handlers ───────────────────────────────────────────────────────────
 
 def _speak_reply(reply: str, is_hi: bool):
+    global _last_speech_at
     _log("tts", reply[:120])
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
     tts.speak(reply, prefer_hi=is_hi, block=True)
-    _muted.clear()                        # re-enable mic after speaking
-    dashboard.update_status(speaking=False, state="awake")
+    # Only clear mic mute if the user hasn't manually muted — don't override their intent
+    if not _user_muted.is_set():
+        _muted.clear()
+    # Reset inactivity timer from end of reply so user has the full window to respond
+    _last_speech_at = time.time()
+    dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
 
 def _handle_chat(action: dict):
@@ -81,6 +87,7 @@ def _handle_chat(action: dict):
     if len(_session_hist) > 12:
         _session_hist[:] = _session_hist[-12:]
     dashboard.update_status(last_transcript=tr, last_reply=reply)
+    _speak_reply(reply, is_hi)   # ← speak the answer
 
 
 def _handle_time(action: dict):
@@ -123,6 +130,7 @@ def _handle_scripture(action: dict):
 
 
 def _handle_mute():
+    _user_muted.set()    # track user intent separately from speaking-mute
     _muted.set()
     _awake.clear()
     tts.stop_speaking()
@@ -132,6 +140,7 @@ def _handle_mute():
 
 
 def _handle_unmute():
+    _user_muted.clear()
     _muted.clear()
     tts.play_unmute()
     dashboard.update_status(state="idle", muted=False)
@@ -368,6 +377,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
         if pcm is None:
+            continue
+
+        # Discard audio captured while muted (mute may have been triggered mid-capture)
+        if is_muted():
             continue
 
         try:

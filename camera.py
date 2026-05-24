@@ -22,7 +22,7 @@ import cv2
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
-    LASER_STARS_MIN, LASER_COOLDOWN,
+    LASER_STARS_MIN, LASER_SINGLE_MIN, LASER_COOLDOWN,
 )
 
 # ── Shared state ──────────────────────────────────────────────────────────────
@@ -388,6 +388,9 @@ class CameraDetector:
         if is_star and self._laser_consec < 2:
             return
         if not is_star:
+            # Require minimum dot count to avoid false positives from room LEDs
+            if dot_count < LASER_SINGLE_MIN:
+                return
             if self._laser_dot_was_present:
                 return
             self._laser_dot_was_present = True
@@ -402,7 +405,7 @@ class CameraDetector:
             print(f"[Laser] Star field ({dot_count} dots) → mute toggle")
             self.on_laser_stars(self.is_muted_fn())
         else:
-            print(f"[Laser] Single dot → wake")
+            print(f"[Laser] Single dot ({dot_count}) → wake")
             self.on_laser_wake()
 
     # ── YOLO + MediaPipe detection ────────────────────────────────────────────

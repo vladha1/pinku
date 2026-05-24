@@ -30,8 +30,9 @@ YOLO_IGNORE   = set(os.getenv("YOLO_IGNORE", "kite,ceiling fan").split(","))  # 
 DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
 
 # ── Laser detection ───────────────────────────────────────────────────────────
-LASER_STARS_MIN = int(os.getenv("LASER_STARS_MIN", "5"))    # ≥ this many dots = star field
-LASER_COOLDOWN  = float(os.getenv("LASER_COOLDOWN", "30.0")) # seconds between laser actions (raised — laser was waking too often)
+LASER_STARS_MIN    = int(os.getenv("LASER_STARS_MIN",    "5"))     # ≥ this many dots = star field (mute toggle)
+LASER_SINGLE_MIN   = int(os.getenv("LASER_SINGLE_MIN",   "2"))     # min dots to count as a single-dot wake (raise to disable false positives)
+LASER_COOLDOWN     = float(os.getenv("LASER_COOLDOWN",   "120.0")) # seconds between laser actions (raised — LEDs in room cause false positives)
 
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
@@ -44,5 +45,5 @@ DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # ── Wake / session ────────────────────────────────────────────────────────────
-SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "30.0"))  # seconds of silence before going idle
+SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "60.0"))  # seconds of silence before going idle (60 = enough time to think + respond)
 LOG_DIR           = os.getenv("LOG_DIR", "logs")
