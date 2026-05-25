@@ -178,18 +178,16 @@ def transcribe_and_respond(
         wf.writeframes(pcm)
     wav_b64 = base64.b64encode(buf.getvalue()).decode()
 
-    # Build Gemini contents: recent history + current audio
-    contents: list[dict] = []
-    for turn in (history or [])[-4:]:   # last 2 exchanges for context
-        role = "model" if turn["role"] == "assistant" else "user"
-        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
-    contents.append({
+    # NO history sent — history biases the transcription toward the previous
+    # language/topic and causes hallucinations (e.g. English heard as Hindi).
+    # History is only used in chat() for generating text replies.
+    contents = [{
         "role": "user",
         "parts": [{"inline_data": {"mime_type": "audio/wav", "data": wav_b64}}],
-    })
+    }]
 
     try:
-        raw = _gemini_call(contents, temperature=0.2, max_tokens=700,
+        raw = _gemini_call(contents, temperature=0.0, max_tokens=700,
                            system=_TRANSCRIBE_SYSTEM)
         print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
     except Exception as e:
