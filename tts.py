@@ -136,15 +136,18 @@ def is_speaking() -> bool:
     return _speaking
 
 
-def _speak_edge(text: str, voice: str):
+def _speak_edge(text: str, voice: str) -> float:
+    """Returns actual playback duration in seconds."""
     global _current_proc, _speaking
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     tmp.close()
+    t0 = time.monotonic()
     try:
         async def _gen():
             comm = _edge_tts.Communicate(text, voice)
             await comm.save(tmp.name)
         asyncio.run(_gen())
+        t0 = time.monotonic()   # start timer from when audio actually begins playing
         _current_proc = subprocess.Popen(
             ["afplay", tmp.name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -152,16 +155,19 @@ def _speak_edge(text: str, voice: str):
         _current_proc.wait()
     except Exception as e:
         print(f"[TTS] edge-tts error: {e} — falling back to say")
-        _speak_say(text, SAY_VOICE_HI if _is_hindi(text) else SAY_VOICE_EN)
+        return _speak_say(text, SAY_VOICE_HI if _is_hindi(text) else SAY_VOICE_EN)
     finally:
         try:
             os.unlink(tmp.name)
         except Exception:
             pass
+    return time.monotonic() - t0
 
 
-def _speak_say(text: str, voice: str):
+def _speak_say(text: str, voice: str) -> float:
+    """Returns actual playback duration in seconds."""
     global _current_proc
+    t0 = time.monotonic()
     try:
         _current_proc = subprocess.Popen(
             ["say", "-v", voice, "-r", str(SAY_RATE), text],
@@ -170,15 +176,19 @@ def _speak_say(text: str, voice: str):
         _current_proc.wait()
     except Exception as e:
         print(f"[TTS] say error: {e}")
+    return time.monotonic() - t0
 
 
-def speak(text: str, prefer_hi: bool = False, block: bool = False):
+def speak(text: str, prefer_hi: bool = False, block: bool = False) -> float:
     """
     Speak text via edge-tts (neural) or macOS say (fallback).
     prefer_hi=True → Hindi voice.  block=True → wait until done.
+    Returns measured playback duration in seconds (only meaningful when block=True).
     """
     if not text or not text.strip():
-        return
+        return 0.0
+
+    duration: list[float] = [0.0]
 
     def _run():
         global _speaking
@@ -189,17 +199,19 @@ def speak(text: str, prefer_hi: bool = False, block: bool = False):
             try:
                 if _EDGE_AVAILABLE:
                     voice = EDGE_VOICE_HI if is_hi else EDGE_VOICE_EN
-                    _speak_edge(text, voice)
+                    duration[0] = _speak_edge(text, voice)
                 else:
                     voice = SAY_VOICE_HI if is_hi else SAY_VOICE_EN
-                    _speak_say(text, voice)
+                    duration[0] = _speak_say(text, voice)
             finally:
                 _speaking = False
 
     if block:
         _run()
+        return duration[0]
     else:
         threading.Thread(target=_run, daemon=True).start()
+        return 0.0
 
 
 # ── Chime functions ───────────────────────────────────────────────────────────

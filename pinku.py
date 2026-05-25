@@ -75,9 +75,12 @@ def _speak_reply(reply: str, is_hi: bool):
     _log("pinku", reply)
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
-    tts.speak(reply, prefer_hi=is_hi, block=True)
-    # Brief settle so TTS echo fades before mic opens again
-    time.sleep(1.0)
+    duration = tts.speak(reply, prefer_hi=is_hi, block=True)
+    # Keep mic muted for room reverb: 15% of speech duration, min 0.5s, max 2.0s.
+    # This ensures the mic doesn't open until the echo has faded.
+    settle = max(0.5, min(duration * 0.15, 2.0))
+    print(f"[TTS] speech={duration:.1f}s  settle={settle:.1f}s")
+    time.sleep(settle)
     # Only clear mic mute if the user hasn't manually muted — don't override their intent
     if not _user_muted.is_set():
         _muted.clear()
