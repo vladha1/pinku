@@ -77,7 +77,7 @@ def _speak_reply(reply: str, is_hi: bool):
     _muted.set()                          # silence mic while speaking to prevent feedback
     tts.speak(reply, prefer_hi=is_hi, block=True)
     # Brief settle so TTS echo fades before mic opens again
-    time.sleep(0.6)
+    time.sleep(1.0)
     # Only clear mic mute if the user hasn't manually muted — don't override their intent
     if not _user_muted.is_set():
         _muted.clear()
@@ -90,7 +90,6 @@ def _handle_chat(action: dict):
     tr    = action.get("transcript", "")
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
-    _log("user",   tr)
     _log("source", f"Gemini text ({llm.GEMINI_MODEL})")
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
@@ -105,11 +104,11 @@ def _handle_time(action: dict):
     from datetime import datetime
     now  = datetime.now()
     lang = action.get("lang", "en")
-    _log("user", action.get("transcript", ""))
     if lang == "hi":
         reply = f"अभी {now.strftime('%-I बजकर %M मिनट')} हैं।"
     else:
         reply = f"It's {now.strftime('%-I:%M %p')}."
+    _log("source", "system clock")
     dashboard.update_status(last_transcript=action.get("transcript",""), last_reply=reply)
     _speak_reply(reply, lang == "hi")
 
@@ -123,7 +122,6 @@ def _handle_describe(action: dict):
         return
     tr   = action.get("transcript", "What do you see?")
     lang = action.get("lang", "en")
-    _log("user", tr)
     tts.speak("Let me look…")
     b64  = frame_to_b64(frame)
     desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
