@@ -210,7 +210,6 @@ def transcribe_and_respond(
     result.setdefault("lang", "en")
     result.setdefault("action", "ignore")
     result.setdefault("reply", "")
-    _dashboard_log("llm", f"via {GEMINI_MODEL} (audio) → {result['action']}")
     print(f"[LLM] transcribed: {result['transcript']!r} → {result['action']}")
     return result
 
@@ -329,11 +328,9 @@ def chat(transcript: str,
     try:
         reply = _gemini_call(contents, temperature=0.9, max_tokens=400, system=system)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
-        _dashboard_log("llm", f"via {GEMINI_MODEL}")
         return reply
     except Exception as e:
         print(f"[LLM] Gemini chat failed ({e}) — falling back to Ollama")
-        _dashboard_log("llm", f"Gemini unavailable — using Ollama ({OLLAMA_MODEL})")
         # Fallback: Ollama
         msgs = [{"role": "system", "content": system}]
         if history:
@@ -362,11 +359,9 @@ def describe_image(image_b64: str, question: str = "", is_hi: bool = False) -> s
     }]
     try:
         result = _gemini_call(contents, temperature=0.5, max_tokens=200)
-        _dashboard_log("llm", f"vision via {GEMINI_MODEL}")
         return result
     except Exception as e:
         print(f"[LLM] Gemini vision failed ({e}) — trying Ollama llava")
-        _dashboard_log("llm", "Gemini vision unavailable — using Ollama llava")
         # Fallback to local llava
         payload = json.dumps({
             "model": "llava:7b",
