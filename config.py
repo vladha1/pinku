@@ -29,6 +29,10 @@ GESTURE_MODEL = os.getenv("GESTURE_MODEL", "gesture_yolo.pt")  # downloaded on f
 YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))
 YOLO_IGNORE   = set(os.getenv("YOLO_IGNORE", "kite,ceiling fan").split(","))
 DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
+# Minimum inter-shoulder width in pixels to count someone as "present" (proximity filter).
+# Raise to require the person to be closer; lower to accept from further away.
+# At 640px wide: ~100px ≈ 3-4m, ~140px ≈ 2m, ~60px ≈ 5-6m.
+MIN_SHOULDER_PX = int(os.getenv("MIN_SHOULDER_PX", "100"))
 
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)

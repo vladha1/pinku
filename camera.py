@@ -22,7 +22,7 @@ import cv2
 
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
-    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY,
+    YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, MIN_SHOULDER_PX,
 )
 
 # ── COCO 17-point pose keypoint indices ───────────────────────────────────────
@@ -287,9 +287,19 @@ class CameraDetector:
                     def kx(i):  return float(kps_np[i][0])
                     def ky(i):  return float(kps_np[i][1])
 
-                    # Only count as present if face (nose) is visible
+                    # Only count as present if face (nose) is visible AND
+                    # the person is close enough (inter-shoulder width ≥ MIN_SHOULDER_PX).
+                    # This prevents distant faces (across the room, on TV) from waking Pinku.
                     if vis(_KP_NOSE):
-                        event["persons"] += 1
+                        if vis(_KP_L_SHO) and vis(_KP_R_SHO):
+                            shoulder_w = abs(kx(_KP_R_SHO) - kx(_KP_L_SHO))
+                            close_enough = shoulder_w >= MIN_SHOULDER_PX
+                        else:
+                            # Shoulders not detected — use nose keypoint confidence as proxy
+                            # (high conf usually means the person is close/clear)
+                            close_enough = float(kps_np[_KP_NOSE][2]) >= 0.75
+                        if close_enough:
+                            event["persons"] += 1
 
                     # Check each visible wrist
                     for wri, sho in [(_KP_R_WRI, _KP_R_SHO), (_KP_L_WRI, _KP_L_SHO)]:
