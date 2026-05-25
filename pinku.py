@@ -88,7 +88,8 @@ def _handle_chat(action: dict):
     tr    = action.get("transcript", "")
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
-    _log("user", tr)
+    _log("user",   tr)
+    _log("source", f"Gemini text ({llm.GEMINI_MODEL})")
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
@@ -199,7 +200,7 @@ def _gesture_throttle(label: str) -> bool:
 
 def _gesture_open_hand():
     """🖐 Open hand / wave — wake Pinku and unmute."""
-    print("[Gesture] 🖐 Open Hand → wake / unmute")
+    _log("wake", "🖐 Open Hand gesture → wake")
     _user_muted.clear()
     _muted.clear()
     _extend_session()
@@ -207,7 +208,7 @@ def _gesture_open_hand():
 
 def _gesture_fist():
     """✊ Closed fist — sleep / mute."""
-    print("[Gesture] ✊ Fist → sleep / mute")
+    _log("wake", "✊ Fist gesture → sleep")
     tts.stop_speaking()
     _handle_mute()
 
@@ -248,7 +249,7 @@ def on_detection(event: dict):
                 _last_speech_at = time.time()
                 _awake.set()
                 dashboard.update_status(state="awake")
-                _log("info", "Person in frame — listening")
+                _log("wake", "👤 Face detected → listening")
                 tts.play_beep(entry=True)   # rising 3-note, suppressed if played recently
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
@@ -376,10 +377,8 @@ def _handle_gemini_result(result: dict):
     if not transcript:
         return
 
-    _log("stt", transcript)
-
     if action == "ignore":
-        _log("info", f'Gemini: background noise — "{transcript}"')
+        _log("info", f'Ignored: "{transcript}"')
         return
 
     _last_speech_at = time.time()
@@ -394,11 +393,12 @@ def _handle_gemini_result(result: dict):
         return
 
     dashboard.update_status(state="processing", last_transcript=transcript)
-    _log("user", transcript)
+    _log("user",   transcript)
 
     if reply:
         # Gemini already generated the reply (chat / scripture / knowledge)
-        _log("pinku", reply)
+        _log("source", f"Gemini audio ({llm.GEMINI_MODEL})")
+        _log("pinku",  reply)
         _session_hist.append({"role": "user",      "content": transcript})
         _session_hist.append({"role": "assistant", "content": reply})
         if len(_session_hist) > 12:
@@ -423,9 +423,10 @@ def _fallback_process(pcm: bytes):
         return
     if not text:
         return
-    _log("stt", f"[whisper] {text}")
+    _log("user",   text)
+    _log("source", f"Whisper + Ollama fallback")
     action = llm.route(text)
-    _log("route", f"[ollama] action={action.get('action')} — \"{text}\"")
+    _log("info",   f"route={action.get('action')} lang={action.get('lang','en')}")
     _dispatch_action(action)
 
 
@@ -493,7 +494,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         # Wake word confirmed
         _awake.set()
         _last_speech_at = time.time()
-        _log("wake", f'Wake word! command="{command}"')
+        _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
 
         if not command:
             # Just the wake word — beep and wait for next utterance
