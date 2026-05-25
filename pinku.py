@@ -76,6 +76,8 @@ def _speak_reply(reply: str, is_hi: bool):
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
     tts.speak(reply, prefer_hi=is_hi, block=True)
+    # Brief settle so TTS echo fades before mic opens again
+    time.sleep(0.6)
     # Only clear mic mute if the user hasn't manually muted — don't override their intent
     if not _user_muted.is_set():
         _muted.clear()
@@ -370,7 +372,6 @@ def _handle_gemini_result(result: dict):
 
     transcript = result.get("transcript", "").strip()
     action     = result.get("action", "ignore")
-    reply      = result.get("reply", "").strip()
     lang       = result.get("lang", "en")
     is_hi      = lang == "hi"
 
@@ -380,6 +381,29 @@ def _handle_gemini_result(result: dict):
     if action == "ignore":
         _log("info", f'Ignored: "{transcript}"')
         return
+
+    # Actions that Python handles — discard any Gemini-supplied reply (it ignores our
+    # system prompt instruction to leave reply:"" and generates text anyway).
+    _PYTHON_ACTIONS = {
+        "time", "weather", "mute", "unmute", "describe",
+        "music_play", "music_stop", "lights_on", "lights_off",
+    }
+    if action in _PYTHON_ACTIONS:
+        reply = ""
+    else:
+        reply = result.get("reply", "").strip()
+
+    # Bare wake word with no command — beep and wait
+    # (happens when face is visible and person just says "Pinku" / "Pinky")
+    if not reply and action not in _PYTHON_ACTIONS:
+        _, command = _check_wake(transcript)
+        if not command:
+            _log("wake", f'🔤 Wake word heard — waiting for command')
+            _awake.set()
+            _last_speech_at = time.time()
+            tts.play_beep()
+            dashboard.update_status(state="awake")
+            return
 
     _last_speech_at = time.time()
 
@@ -393,12 +417,11 @@ def _handle_gemini_result(result: dict):
         return
 
     dashboard.update_status(state="processing", last_transcript=transcript)
-    _log("user",   transcript)
+    _log("user", transcript)
 
     if reply:
-        # Gemini already generated the reply (chat / scripture / knowledge)
+        # Gemini already generated the reply (chat / scripture)
         _log("source", f"Gemini audio ({llm.GEMINI_MODEL})")
-        _log("pinku",  reply)
         _session_hist.append({"role": "user",      "content": transcript})
         _session_hist.append({"role": "assistant", "content": reply})
         if len(_session_hist) > 12:
