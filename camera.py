@@ -294,10 +294,11 @@ class CameraDetector:
                         if vis(_KP_L_SHO) and vis(_KP_R_SHO):
                             shoulder_w = abs(kx(_KP_R_SHO) - kx(_KP_L_SHO))
                             close_enough = shoulder_w >= MIN_SHOULDER_PX
+                            print(f"[Camera] shoulder_w={shoulder_w:.0f}px  min={MIN_SHOULDER_PX}  → {'CLOSE' if close_enough else 'TOO FAR'}")
                         else:
-                            # Shoulders not detected — use nose keypoint confidence as proxy
-                            # (high conf usually means the person is close/clear)
-                            close_enough = float(kps_np[_KP_NOSE][2]) >= 0.75
+                            nose_conf = float(kps_np[_KP_NOSE][2])
+                            close_enough = nose_conf >= 0.75
+                            print(f"[Camera] nose_conf={nose_conf:.2f} (no shoulders)  → {'CLOSE' if close_enough else 'TOO FAR'}")
                         if close_enough:
                             event["persons"] += 1
 
