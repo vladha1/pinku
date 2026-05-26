@@ -877,34 +877,40 @@ body {
 /* Log panel */
 .log-area {
   flex:1; overflow-y:auto; padding:0; display:none; flex-direction:column;
+  width:100%;
 }
 .log-area.open { display:flex; }
-.log-area::-webkit-scrollbar { width:3px; }
+.log-area::-webkit-scrollbar { width:4px; }
 .log-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 .log-toolbar {
-  flex-shrink:0; padding:6px 14px; border-bottom:1px solid var(--border);
+  flex-shrink:0; padding:8px 20px; border-bottom:1px solid var(--border);
   display:flex; justify-content:space-between; align-items:center;
-  background:rgba(0,0,0,0.2); font-size:0.72rem; color:var(--muted);
+  background:rgba(0,0,0,0.25); font-size:0.75rem; color:var(--muted);
 }
 .log-clear-btn {
-  font-size:0.7rem; padding:2px 8px; border-radius:6px; cursor:pointer;
+  font-size:0.72rem; padding:3px 10px; border-radius:6px; cursor:pointer;
   background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--muted);
 }
 .log-clear-btn:hover { background:rgba(255,255,255,0.1); }
-.log-entries { flex:1; overflow-y:auto; padding:6px 14px; display:flex; flex-direction:column; gap:1px; }
-.log-entries::-webkit-scrollbar { width:3px; }
+.log-entries {
+  flex:1; overflow-y:auto; padding:6px 20px;
+  display:flex; flex-direction:column; gap:0;
+  width:100%; box-sizing:border-box;
+}
+.log-entries::-webkit-scrollbar { width:4px; }
 .log-entries::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 .log-entry {
-  font-size:0.82rem; padding:4px 0;
-  border-bottom:1px solid rgba(255,255,255,0.06);
-  display:flex; gap:8px; align-items:baseline;
+  font-size:0.84rem; padding:5px 0;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+  display:flex; gap:10px; align-items:baseline;
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  width:100%;
 }
-.log-entry .log-ts  { flex-shrink:0; font-size:0.70rem; color:#7c85a0; min-width:62px; }
-.log-entry .log-lvl { flex-shrink:0; font-size:0.65rem; font-weight:600; padding:1px 5px;
+.log-entry .log-ts  { flex-shrink:0; font-size:0.72rem; color:#7c85a0; min-width:66px; }
+.log-entry .log-lvl { flex-shrink:0; font-size:0.67rem; font-weight:600; padding:2px 7px;
                        border-radius:4px; background:rgba(255,255,255,0.07);
-                       min-width:52px; text-align:center; letter-spacing:0.03em; }
-.log-entry .log-msg { flex:1; word-break:break-word; color:#d1d5db; }
+                       min-width:72px; text-align:center; letter-spacing:0.03em; }
+.log-entry .log-msg { flex:1; word-break:break-word; color:#d1d5db; line-height:1.4; }
 </style>
 </head>
 <body>
