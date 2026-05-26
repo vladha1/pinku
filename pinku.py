@@ -104,6 +104,14 @@ def _speak_reply(reply: str, is_hi: bool):
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
 
+    # Release the processing lock now — _muted + tts.is_speaking() guard from here.
+    # This lets the voice loop accept the next question as soon as speech ends + settles,
+    # without waiting for the full TTS playback to finish first.
+    try:
+        _processing.release()
+    except RuntimeError:
+        pass   # wasn't held (called outside the voice loop)
+
     # Ask TTS for the known duration before playback starts (say: word-count math;
     # edge-tts: afinfo on the generated MP3 file). Use it to schedule unmute precisely.
     known_duration = tts.known_duration(reply)
@@ -596,7 +604,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _fallback_process(pcm)
 
         finally:
-            _processing.release()
+            # _speak_reply releases early; for actions that don't speak
+            # (ignore, mute, time dispatch, etc.) release it here.
+            try:
+                _processing.release()
+            except RuntimeError:
+                pass   # already released by _speak_reply
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
