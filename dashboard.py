@@ -80,20 +80,31 @@ def stream():
     with _clients_lock:
         _clients.append(q)
     def gen():
-        # Merge live camera status into initial push so reconnecting clients
-        # immediately see the real camera state without waiting for a tab switch.
         try:
-            from camera import get_status as _cam_get_status
-            cs = _cam_get_status()
-            init = {"type": "status", **_status,
-                    "cam_status": cs["camera"], "det_status": cs["detection"]}
-        except Exception:
-            init = {"type": "status", **_status}
-        yield f"data: {json.dumps(init)}\n\n"
-        while True:
-            time.sleep(0.05)
-            while q:
-                yield q.pop(0)
+            # Merge live camera status into initial push so reconnecting clients
+            # immediately see the real camera state without waiting for a tab switch.
+            try:
+                from camera import get_status as _cam_get_status
+                cs = _cam_get_status()
+                init = {"type": "status", **_status,
+                        "cam_status": cs["camera"], "det_status": cs["detection"]}
+            except Exception:
+                init = {"type": "status", **_status}
+            yield f"data: {json.dumps(init)}\n\n"
+            last_heartbeat = time.time()
+            while True:
+                time.sleep(0.05)
+                while q:
+                    yield q.pop(0)
+                # Heartbeat every 15s — causes GeneratorExit on disconnected clients
+                # so they are cleaned up from _clients rather than accumulating
+                if time.time() - last_heartbeat > 15:
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = time.time()
+        except GeneratorExit:
+            with _clients_lock:
+                try: _clients.remove(q)
+                except ValueError: pass
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
@@ -1373,15 +1384,23 @@ function showTab(name) {
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
+let _es = null;
 function connect() {
-  const es = new EventSource('/api/stream');
+  // Always close the previous connection before opening a new one —
+  // otherwise every reconnect (VNC blip, tab restore) stacks up another
+  // EventSource, and each one receives every log event → N duplicate lines.
+  if (_es) { try { _es.close(); } catch(_) {} _es = null; }
+
+  _es = new EventSource('/api/stream');
   document.getElementById('ws-dot').className = 'ws-dot off';
-  es.onopen  = () => document.getElementById('ws-dot').className = 'ws-dot on';
-  es.onerror = () => {
+  _es.onopen  = () => document.getElementById('ws-dot').className = 'ws-dot on';
+  _es.onerror = () => {
     document.getElementById('ws-dot').className = 'ws-dot off';
+    try { _es.close(); } catch(_) {}
+    _es = null;
     setTimeout(connect, 3000);
   };
-  es.onmessage = e => {
+  _es.onmessage = e => {
     try {
       const data = JSON.parse(e.data);
       if (data.type === 'status') {
