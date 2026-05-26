@@ -119,6 +119,17 @@ def _speak_reply(reply: str, is_hi: bool):
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
+    # Safety: if the timer fired early (estimate was short), _muted is already
+    # cleared while echo is still in the air. Re-mute for a fresh settle period.
+    if not _muted.is_set() and not _user_muted.is_set():
+        print(f"[TTS] timer fired early — re-muting for {settle:.1f}s settle")
+        _muted.set()
+        def _re_settle():
+            time.sleep(settle)
+            if not _user_muted.is_set():
+                _muted.clear()
+        threading.Thread(target=_re_settle, daemon=True, name="tts-resiltle").start()
+
 
 def _handle_chat(action: dict):
     tr    = action.get("transcript", "")

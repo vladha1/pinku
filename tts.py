@@ -127,10 +127,13 @@ def _play(path: str):
 def known_duration(text: str) -> float:
     """
     Return the expected TTS playback duration before speaking.
-    - say:      exact from word count ÷ SAY_RATE
-    - edge-tts: word-count estimate (file isn't generated yet at this point)
-    The caller uses this to set the unmute timer before playback starts.
+    - say:      word count ÷ SAY_RATE  (accurate)
+    - edge-tts: word count ÷ 130 wpm  (neural voices are slower; conservative
+                under-estimate is fine because _speak_reply re-checks after speak())
     """
+    words = max(1, len(text.split()))
+    if _EDGE_AVAILABLE:
+        return (words / 130.0) * 60.0   # edge-tts neural — err on the slow side
     return _estimate_say_duration(text)
 
 
