@@ -491,8 +491,20 @@ def _handle_gemini_result(result: dict):
     if not transcript:
         return
 
+    # ── Hallucination guard ───────────────────────────────────────────────────
+    # If the transcript is only the wake word (nothing actionable after it),
+    # treat as ignore — Gemini sometimes hallucinates "Pinku" from background noise.
+    _WAKE_WORDS = {"pinku", "pinky", "pink", "pingu"}
+    _transcript_words = [w.strip(".,!?।").lower() for w in transcript.split()]
+    _content_words = [w for w in _transcript_words if w not in _WAKE_WORDS]
+    if not _content_words:
+        _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
+        _brief_mute(1.0)
+        return
+
     if action == "ignore":
         _log("info", f'Ignored: "{transcript}"')
+        _brief_mute(1.0)
         return
 
     # Actions that Python handles — discard any Gemini-supplied reply (it ignores our
