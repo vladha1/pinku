@@ -588,7 +588,9 @@ def _handle_gemini_result(result: dict):
             _log("wake", f'🔤 Wake word heard — waiting for command')
             _awake.set()
             _last_speech_at = time.time()
-            tts.play_beep()
+            # No beep — silently open session. Beep fires on face-detection entry
+            # or intentional gesture only. Random wake-word hallucinations would
+            # otherwise cause spurious chimes.
             dashboard.update_status(state="awake")
             return
 
@@ -724,10 +726,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
 
             if not command:
-                # Just the wake word — beep and wait for next utterance
-                tts.play_beep()
+                # Just the wake word — silently activate and wait for next utterance.
+                # No beep: Whisper hallucinations on background noise would cause
+                # spurious chimes. play_think() fires when actual command is processed.
                 dashboard.update_status(state="awake")
-                _brief_mute(1.2)   # prevent re-capturing the beep or same audio
+                _brief_mute(1.2)
                 continue
 
             # Wake word + inline command — send audio to Gemini for quality response
