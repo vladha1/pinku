@@ -99,17 +99,24 @@ def _speak_reply(reply: str, is_hi: bool):
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
     duration = tts.speak(reply, prefer_hi=is_hi, block=True)
-    # Keep mic muted for room reverb: 15% of speech duration, min 0.5s, max 2.0s.
-    # This ensures the mic doesn't open until the echo has faded.
-    settle = max(0.5, min(duration * 0.15, 2.0))
+
+    # Settle = 25% of speech duration so echo fades before mic opens.
+    # min 1.5s (short replies still echo), max 3.5s (cap for very long replies).
+    settle = max(1.5, min(duration * 0.25, 3.5))
     print(f"[TTS] speech={duration:.1f}s  settle={settle:.1f}s")
-    time.sleep(settle)
-    # Only clear mic mute if the user hasn't manually muted — don't override their intent
-    if not _user_muted.is_set():
-        _muted.clear()
-    # Reset inactivity timer from end of reply so user has the full window to respond
+
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
+
+    # Clear mute via a background timer — NOT here in the voice-loop thread.
+    # This way the voice loop sees is_muted()=True at the top of its next iteration
+    # and stays in its 0.2s sleep instead of immediately calling wait_for_utterance
+    # while the TTS echo is still reverberating in the room.
+    def _unmute_after():
+        time.sleep(settle)
+        if not _user_muted.is_set():
+            _muted.clear()
+    threading.Thread(target=_unmute_after, daemon=True, name="tts-settle").start()
 
 
 def _handle_chat(action: dict):
