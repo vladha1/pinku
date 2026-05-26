@@ -424,7 +424,7 @@ def _dispatch_gestures(event: dict):
 
 import math as _math
 
-_last_laser_spoke: float = 0.0   # prevent re-announcing the same score
+_laser_was_present: bool = False   # True while a dot is on the wall
 
 def _dart_score(x: float, y: float) -> tuple[int, str]:
     """
@@ -432,8 +432,7 @@ def _dart_score(x: float, y: float) -> tuple[int, str]:
     100 = bullseye, decreasing rings outward, 0 = off-board.
     Returns (score, callout_text).
     """
-    # Distance from centre (0.5, 0.5), scaled so the frame corner = 1.0
-    dx = (x - 0.5) * 2          # -1 .. +1
+    dx = (x - 0.5) * 2
     dy = (y - 0.5) * 2
     dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
 
@@ -447,37 +446,43 @@ def _dart_score(x: float, y: float) -> tuple[int, str]:
 
 def _handle_laser(dots: list[dict]):
     """
-    Called whenever green laser dots appear, move, or disappear.
-
-    1 dot  → dartboard score callout (centre of frame = 100 pts).
+    0 dots  → mark absent (next appearance will rescore).
+    1 dot   → score only on fresh appearance; ignore while dot stays on wall.
     2+ dots → mute / unmute toggle.
     """
-    global _last_laser_spoke
+    global _laser_was_present
 
+    # ── Dot gone — reset so next throw rescores ───────────────────────────────
     if not dots:
+        if _laser_was_present:
+            _log("laser", "🔴 Laser gone — ready for next throw")
+            dashboard.update_status(laser=None)
+        _laser_was_present = False
         return
 
-    # ── Multi-dot: toggle mute ────────────────────────────────────────────────
+    # ── Multi-dot: toggle mute (no score) ────────────────────────────────────
     if len(dots) >= 2:
-        _log("laser", f"🔴🔴 {len(dots)} laser dots → mute toggle")
+        _log("laser", f"🔴🔴 {len(dots)} dots → mute toggle")
         if _user_muted.is_set():
             _handle_unmute()
         else:
             _handle_mute()
+        _laser_was_present = True
         return
 
-    # ── Single dot: dartboard score ───────────────────────────────────────────
+    # ── Single dot ────────────────────────────────────────────────────────────
     dot = dots[0]
     x, y = dot["x"], dot["y"]
     score, callout = _dart_score(x, y)
-
-    now = time.time()
-    _log("laser", f"🎯 Laser ({x:.2f},{y:.2f}) → {score} pts")
     dashboard.update_status(laser={"x": x, "y": y, "score": score})
 
-    # Speak the score (rate-limited: don't re-announce if dot barely moved)
-    if now - _last_laser_spoke > 1.5 and not _user_muted.is_set():
-        _last_laser_spoke = now
+    if _laser_was_present:
+        return   # dot still on wall, just moved — don't rescore
+
+    # Fresh appearance — score it
+    _laser_was_present = True
+    _log("laser", f"🎯 ({x:.2f},{y:.2f}) → {score} pts")
+    if not _user_muted.is_set():
         threading.Thread(
             target=tts.speak, kwargs={"text": callout, "block": False},
             daemon=True, name="laser-score",
@@ -507,7 +512,7 @@ def on_detection(event: dict):
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = now
 
-    if event.get("laser"):   # non-empty list
+    if "laser" in event:   # always call — empty list = dot gone
         _handle_laser(event["laser"])
 
     if event.get("gestures"):
