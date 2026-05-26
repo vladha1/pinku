@@ -94,6 +94,19 @@ def _log(level: str, msg: str):
 
 # ── Action handlers ───────────────────────────────────────────────────────────
 
+def _brief_mute(seconds: float = 1.5):
+    """Mute briefly after actions that don't speak — prevents re-capturing
+    the same utterance or ambient echo immediately after processing."""
+    if _user_muted.is_set():
+        return
+    _muted.set()
+    def _clear():
+        time.sleep(seconds)
+        if not _user_muted.is_set():
+            _muted.clear()
+    threading.Thread(target=_clear, daemon=True, name="brief-mute").start()
+
+
 def _speak_reply(reply: str, is_hi: bool):
     global _last_speech_at
     # Hard guard: if already speaking, discard this reply rather than overlap
@@ -168,6 +181,36 @@ def _handle_time(action: dict):
         reply = f"It's {now.strftime('%-I:%M %p')}."
     _log("source", "system clock")
     dashboard.update_status(last_transcript=action.get("transcript",""), last_reply=reply)
+    _speak_reply(reply, lang == "hi")
+
+
+def _handle_weather(action: dict):
+    """Fetch weather from wttr.in — no API key needed."""
+    import urllib.request as _ur
+    lang = action.get("lang", "en")
+    tr   = action.get("transcript", "")
+
+    # Extract city from transcript — take the last capitalised word sequence
+    # e.g. "how is the weather in Kolkata today" → "Kolkata"
+    import re as _re2
+    m = _re2.search(r'\bin\s+([A-Z][a-zA-Z\s]+?)(?:\s+today|\s+tomorrow|\?|$)', tr)
+    city = m.group(1).strip() if m else "Mumbai"
+
+    _log("source", f"wttr.in ({city})")
+    try:
+        url = f"https://wttr.in/{city.replace(' ', '+')}?format=3"
+        with _ur.urlopen(url, timeout=8) as r:
+            raw = r.read().decode().strip()
+        # raw looks like: "Kolkata: ⛅️  +32°C"
+        if lang == "hi":
+            reply = f"{city} का मौसम: {raw.split(':', 1)[-1].strip()}"
+        else:
+            reply = raw
+    except Exception as e:
+        _log("warn", f"Weather fetch failed: {e}")
+        reply = "Sorry, I couldn't get the weather right now."
+
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
     _speak_reply(reply, lang == "hi")
 
 
@@ -406,6 +449,7 @@ def _dispatch_action(action: dict):
     lang = action.get("lang", "en")
     if act == "ignore":
         _log("info", "Classified as noise/ignore — skipping")
+        _brief_mute(1.0)   # brief pause so same audio isn't re-captured
         return
     elif act == "mute":
         _handle_mute()
@@ -418,9 +462,10 @@ def _dispatch_action(action: dict):
     elif act == "scripture":
         tts.play_think()
         _handle_scripture(action)
-    elif act in ("music_play", "music_stop", "lights_on", "lights_off", "weather"):
+    elif act == "weather":
+        _handle_weather(action)
+    elif act in ("music_play", "music_stop", "lights_on", "lights_off"):
         _log("warn", f'Action "{act}" not yet implemented')
-        tts.play_error()
         tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
     else:
         _handle_chat(action)
@@ -451,6 +496,8 @@ def _handle_gemini_result(result: dict):
         "time", "weather", "mute", "unmute", "describe",
         "music_play", "music_stop", "lights_on", "lights_off",
     }
+    # weather is handled by Python (_handle_weather fetches from wttr.in)
+    # so force reply="" to always go through dispatch, not Gemini's reply
     if action in _PYTHON_ACTIONS:
         reply = ""
     else:
@@ -591,6 +638,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # Just the wake word — beep and wait for next utterance
                 tts.play_beep()
                 dashboard.update_status(state="awake")
+                _brief_mute(1.2)   # prevent re-capturing the beep or same audio
                 continue
 
             # Wake word + inline command — send audio to Gemini for quality response
