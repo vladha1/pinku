@@ -60,6 +60,7 @@ _muted         = threading.Event()   # set = muted (mic disabled)
 _user_muted    = threading.Event()   # set = user manually muted (gesture/button)
 _awake         = threading.Event()   # set = in active voice session
 _stop_all      = threading.Event()
+_processing    = threading.Lock()    # held while handling an utterance end-to-end
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _det_logger    = log_module.DetectionLogger()
 
@@ -540,54 +541,62 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if is_muted() or tts.is_speaking():
             continue
 
-        # ── Gate: Gemini path (face visible or session open) ──────────────────
-        if _human_is_present() or _awake.is_set():
+        # ── Processing lock: drop audio if already handling a previous utterance ─
+        if not _processing.acquire(blocking=False):
+            continue   # silently discard — previous response still in flight
+
+        try:
+            # ── Gate: Gemini path (face visible or session open) ──────────────
+            if _human_is_present() or _awake.is_set():
+                dashboard.update_status(state="processing")
+                tts.play_think()
+                result = llm.transcribe_and_respond(pcm, history=_session_hist)
+                if result is not None:
+                    _handle_gemini_result(result)
+                else:
+                    # Gemini unavailable → fall back to Whisper + Ollama
+                    _log("warn", "Gemini audio unavailable — using Whisper fallback")
+                    _fallback_process(pcm)
+                continue
+
+            # ── Gate: idle mode — Whisper locally for wake word only ─────────
+            try:
+                text = stt.transcribe(pcm)
+            except Exception as e:
+                _log("error", f"STT error: {e}")
+                continue
+            if not text:
+                continue
+
+            _log("stt", text)
+            triggered, command = _check_wake(text)
+            if not triggered:
+                _log("info", f'Idle — no wake word: "{text}"')
+                continue
+
+            # Wake word confirmed
+            _awake.set()
+            _last_speech_at = time.time()
+            _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
+
+            if not command:
+                # Just the wake word — beep and wait for next utterance
+                tts.play_beep()
+                dashboard.update_status(state="awake")
+                continue
+
+            # Wake word + inline command — send audio to Gemini for quality response
             dashboard.update_status(state="processing")
             tts.play_think()
             result = llm.transcribe_and_respond(pcm, history=_session_hist)
             if result is not None:
                 _handle_gemini_result(result)
             else:
-                # Gemini unavailable → fall back to Whisper + Ollama
-                _log("warn", "Gemini audio unavailable — using Whisper fallback")
+                # Gemini unavailable → route the Whisper text we already have
                 _fallback_process(pcm)
-            continue
 
-        # ── Gate: idle mode — Whisper locally for wake word only ─────────────
-        try:
-            text = stt.transcribe(pcm)
-        except Exception as e:
-            _log("error", f"STT error: {e}")
-            continue
-        if not text:
-            continue
-
-        _log("stt", text)
-        triggered, command = _check_wake(text)
-        if not triggered:
-            _log("info", f'Idle — no wake word: "{text}"')
-            continue
-
-        # Wake word confirmed
-        _awake.set()
-        _last_speech_at = time.time()
-        _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
-
-        if not command:
-            # Just the wake word — beep and wait for next utterance
-            tts.play_beep()
-            dashboard.update_status(state="awake")
-            continue
-
-        # Wake word + inline command — send audio to Gemini for quality response
-        dashboard.update_status(state="processing")
-        tts.play_think()
-        result = llm.transcribe_and_respond(pcm, history=_session_hist)
-        if result is not None:
-            _handle_gemini_result(result)
-        else:
-            # Gemini unavailable → route the Whisper text we already have
-            _fallback_process(pcm)
+        finally:
+            _processing.release()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
