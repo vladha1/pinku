@@ -194,7 +194,7 @@ def _handle_weather(action: dict):
     # e.g. "how is the weather in Kolkata today" → "Kolkata"
     import re as _re2
     m = _re2.search(r'\bin\s+([A-Z][a-zA-Z\s]+?)(?:\s+today|\s+tomorrow|\?|$)', tr)
-    city = m.group(1).strip() if m else "Mumbai"
+    city = m.group(1).strip() if m else "Gurugram"
 
     _log("source", f"wttr.in ({city})")
     try:
