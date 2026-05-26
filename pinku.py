@@ -173,20 +173,26 @@ def _handle_chat(action: dict):
 
 def _handle_time(action: dict):
     from datetime import datetime
+    import calendar as _cal
     import re as _re3
     now  = datetime.now()
     lang = action.get("lang", "en")
     tr   = action.get("transcript", "").lower()
 
-    # Detect what was actually asked — time, date, day, month, or year
+    # Detect what was actually asked — time, date, day, month, year, or days-in-month
+    _ask_days_count = bool(_re3.search(
+        r'kitne\s*din|how\s*many\s*days?|days?\s*in|din\s*hain|din\s*hai|'
+        r'महीने\s*में\s*कितने|कितने\s*दिन', tr))
     _ask_month  = bool(_re3.search(r'month|mahina|महीना|माह', tr))
     _ask_day    = bool(_re3.search(r'\bday\b|din\b|वार|दिन|weekday|week', tr))
     _ask_date   = bool(_re3.search(r'\bdate\b|tarikh|तारीख', tr))
     _ask_year   = bool(_re3.search(r'year|saal|साल|वर्ष', tr))
     _ask_time   = bool(_re3.search(r'\btime\b|baj|waqt|समय|बज|टाइम', tr))
-    # If none matched specifically, default to time
-    _ask_any_date = _ask_month or _ask_day or _ask_date or _ask_year
+    _ask_any_date = _ask_month or _ask_day or _ask_date or _ask_year or _ask_days_count
     _ask_only_time = _ask_time and not _ask_any_date
+
+    # Python-computed calendar facts (always accurate)
+    days_in_month = _cal.monthrange(now.year, now.month)[1]
 
     # Hindi month names
     _HI_MONTHS = ["जनवरी","फ़रवरी","मार्च","अप्रैल","मई","जून",
@@ -200,7 +206,9 @@ def _handle_time(action: dict):
         date_str  = f"{now.day} {month_str}"
         year_str  = str(now.year)
 
-        if _ask_only_time:
+        if _ask_days_count:
+            reply = f"{month_str} में {days_in_month} दिन हैं।"
+        elif _ask_only_time:
             reply = f"अभी {time_str} हैं।"
         elif _ask_month and not _ask_time and not _ask_day and not _ask_date:
             reply = f"अभी {month_str} का महीना चल रहा है।"
@@ -211,10 +219,11 @@ def _handle_time(action: dict):
         elif _ask_date and not _ask_time:
             reply = f"आज {date_str} है।"
         else:
-            # General or combined — give full date + time
             reply = f"आज {day_str}, {date_str} {year_str} है। अभी {time_str} हैं।"
     else:
-        if _ask_only_time:
+        if _ask_days_count:
+            reply = f"{now.strftime('%B')} has {days_in_month} days."
+        elif _ask_only_time:
             reply = f"It's {now.strftime('%-I:%M %p')}."
         elif _ask_month and not _ask_time and not _ask_day and not _ask_date:
             reply = f"It's {now.strftime('%B')}."

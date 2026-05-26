@@ -348,8 +348,15 @@ def chat(transcript: str,
     Falls back to Ollama if Gemini is unavailable.
     history: list of {"role": "user"|"assistant", "content": "..."} dicts.
     """
+    from datetime import datetime as _dt
+    _now = _dt.now()
+    _date_ctx = (
+        f"Current date and time: {_now.strftime('%A, %d %B %Y, %I:%M %p')} IST. "
+        f"Days in current month ({_now.strftime('%B')}): "
+        f"{__import__('calendar').monthrange(_now.year, _now.month)[1]}."
+    )
     base   = _CHAT_SYSTEM_HI if is_hi else _CHAT_SYSTEM_EN
-    system = base + ("\n" + system_extra if system_extra else "")
+    system = base + "\n" + _date_ctx + ("\n" + system_extra if system_extra else "")
 
     # Build Gemini contents list from history + current turn
     contents: list[dict] = []
