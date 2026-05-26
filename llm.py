@@ -105,7 +105,7 @@ Be precise with facts and numbers.
 
 # ── Gemini audio: transcription + routing + reply in one call ─────────────────
 
-_TRANSCRIBE_SYSTEM = """\
+_TRANSCRIBE_BASE = """\
 You are Pinky (lovingly called Pinku), a home AI assistant in an Indian household.
 If asked your name, reply: in English — "My name is Pinky, but everyone here lovingly calls me Pinku."
 In Hindi — "मेरा नाम Pinky है, पर घर में लोग मुझे Pinku कहते हैं।"
@@ -121,56 +121,72 @@ Write the exact spoken words. The speaker may use:
   Bollywood actors/films, Indian cities, foods, festivals, deities, scripture names
 
 STEP 2 — CLASSIFY
-Was the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in this clip?
-- If you are not certain the wake word was spoken, return "ignore". When in doubt, ignore.
-- Do NOT infer the wake word from context. It must be audibly present.
-- Background noise, room echo, TV, side-conversations, or silence → "ignore".
-- A real command must follow the wake word. The wake word alone (nothing after it) → action "ignore".
+{WAKE_RULE}
 
 STEP 3 — REPLY
 Generate a spoken reply for intents you can answer directly.
 
 Return ONLY valid JSON — no markdown, no explanation:
-{
+{{
   "transcript": "<exact words, or empty string if no clear speech>",
   "lang": "en" or "hi",
   "action": "<see list>",
   "reply": "<spoken response, or empty string>"
-}
+}}
 
 ACTION LIST (pick exactly one):
-"ignore"     → background noise, TV, not addressed to Pinku, unintelligible, wake word only → reply must be ""
-"chat"       → clear question/conversation addressed to Pinku → reply REQUIRED (≤60 words, plain sentences)
+"ignore"     → background noise, TV, side-conversation, unintelligible, or not for Pinky → reply must be ""
+"chat"       → clear question/conversation → reply REQUIRED (≤60 words, plain sentences)
 "scripture"  → Gita, Ramayana, Mahabharata, Vedas, Upanishads, yoga, meditation, Ayurveda,
                Indian mythology, history, classical music, poetry, Sanskrit → reply REQUIRED
 "time"       → asked for current time or date → reply: "" (system inserts actual time)
 "weather"    → weather question → reply: ""
-"mute"       → told Pinku to stop / sleep / be quiet → reply: ""
-"unmute"     → told Pinku to wake / start / listen → reply: ""
-"describe"   → asked Pinku to look / describe what it sees → reply: ""
+"mute"       → told Pinky to stop / sleep / be quiet → reply: ""
+"unmute"     → told Pinky to wake / start / listen → reply: ""
+"describe"   → asked Pinky to look / describe what it sees → reply: ""
 "music_play" → wants music played → reply: "", add "query": "<search term>" field
 "music_stop" → stop music → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
 
 RULES:
-- CONSERVATIVE: a false ignore is harmless; a false response is disruptive. Prefer ignore when uncertain.
-- The wake word must be clearly present AND a real command must follow it.
-- Not clearly addressed to Pinku? → "ignore"
 - Reply is SPOKEN ALOUD — no bullet points, no markdown, natural sentences only
 - Hindi: Devanagari script in reply, no English unless user mixed it
 - Scripture: include original script verse if relevant, then meaning + one insight
 - Keep replies ≤60 words (scripture/knowledge: ≤100 words)
 """
 
+# Wake rule injected into STEP 2 depending on session state
+_WAKE_RULE_IDLE = """\
+Is the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in this clip?
+- Wake word not clearly audible → "ignore". When in doubt, ignore.
+- Do NOT infer the wake word. It must be audibly present.
+- Background noise, room echo, TV, side-conversations, or silence → "ignore".
+- Wake word alone (nothing actionable after it) → "ignore"."""
+
+_WAKE_RULE_SESSION = """\
+You are in an ACTIVE CONVERSATION SESSION — the person is already talking to you.
+No wake word is required. Respond to any clear question or command directed at you.
+- Clear question, request, or statement → pick the appropriate action.
+- Pure background noise, TV audio, or someone talking to another person → "ignore".
+- Silence / unintelligible → "ignore"."""
+
+def _make_transcribe_system(session_active: bool) -> str:
+    rule = _WAKE_RULE_SESSION if session_active else _WAKE_RULE_IDLE
+    return _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+
 
 def transcribe_and_respond(
     pcm: bytes,
     history: list[dict] | None = None,
+    session_active: bool = False,
 ) -> dict | None:
     """
     Send microphone PCM audio to Gemini for transcription + intent + reply in one call.
     Replaces: Whisper transcription + Ollama routing + Gemini chat.
+
+    session_active=True  → person is already in conversation, no wake word required.
+    session_active=False → idle monitoring, wake word must be explicitly spoken.
 
     Returns dict {transcript, lang, action, reply} or None if Gemini unavailable.
     Falls back to None so caller can use the old Whisper+Ollama path.
@@ -199,9 +215,10 @@ def transcribe_and_respond(
         "parts": [{"inline_data": {"mime_type": "audio/wav", "data": wav_b64}}],
     }]
 
+    system = _make_transcribe_system(session_active)
     try:
         raw = _gemini_call(contents, temperature=0.0, max_tokens=700,
-                           system=_TRANSCRIBE_SYSTEM)
+                           system=system)
         print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
     except Exception as e:
         print(f"[LLM] transcribe_and_respond: Gemini failed ({e})")

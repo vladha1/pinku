@@ -622,9 +622,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: Gemini path (face visible or session open) ──────────────
             if _human_is_present() or _awake.is_set():
+                # session_active=True → no wake word required; person is already
+                # in conversation (face detected or awake session open).
                 dashboard.update_status(state="processing")
                 tts.play_think()
-                result = llm.transcribe_and_respond(pcm, history=_session_hist)
+                result = llm.transcribe_and_respond(
+                    pcm, history=_session_hist, session_active=True)
                 if result is not None:
                     _handle_gemini_result(result)
                 else:
