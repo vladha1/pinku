@@ -34,6 +34,16 @@ DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detec
 # At 640px wide: ~100px ≈ 3-4m, ~140px ≈ 2m, ~60px ≈ 5-6m.
 MIN_SHOULDER_PX = int(os.getenv("MIN_SHOULDER_PX", "100"))
 
+# ── Laser dot detection ───────────────────────────────────────────────────────
+# Detects a green laser pointer dot on the wall via HSV masking.
+# Set LASER_DETECT=0 to disable. Adds ~2ms per detection cycle.
+LASER_DETECT     = bool(int(os.getenv("LASER_DETECT", "1")))
+# HSV hue range (OpenCV 0-180 scale) for green laser. 532nm pointer ≈ H 55-75.
+LASER_HUE_LO     = int(os.getenv("LASER_HUE_LO",  "40"))
+LASER_HUE_HI     = int(os.getenv("LASER_HUE_HI",  "90"))
+# Movement threshold — only re-fire if dot moves more than this fraction of frame
+LASER_MOVE_THRESH = float(os.getenv("LASER_MOVE_THRESH", "0.04"))
+
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
 VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "400"))  # ignore clips shorter than this

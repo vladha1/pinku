@@ -979,6 +979,17 @@ body {
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-size:0.88rem; color:var(--muted); background:rgba(0,0,0,0.6);
 }
+#laser-dot {
+  position:absolute; width:18px; height:18px; border-radius:50%;
+  background:rgba(74,222,128,0.9); box-shadow:0 0 8px #4ade80, 0 0 18px rgba(74,222,128,0.6);
+  transform:translate(-50%,-50%); pointer-events:none;
+  display:none; transition:left 0.08s, top 0.08s;
+}
+#laser-zone-label {
+  position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.65); color:#4ade80; font-size:0.72rem;
+  padding:2px 8px; border-radius:6px; pointer-events:none; display:none;
+}
 .cam-toolbar {
   width:100%; max-width:640px; padding:5px 10px;
   display:flex; justify-content:space-between; align-items:center;
@@ -1173,6 +1184,8 @@ body {
   <div class="cam-feed-wrap">
     <img id="cam-img" alt="Camera" style="display:none">
     <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
+    <div id="laser-dot"></div>
+    <div id="laser-zone-label"></div>
   </div>
   <div class="cam-toolbar">
     <span id="cam-status-text" style="font-size:0.72rem;color:#64748b">Checking…</span>
@@ -1286,6 +1299,26 @@ function applyStatus(data) {
   document.getElementById('mute-btn').textContent = isMuted ? '🎙️' : '🔇';
   document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
   document.getElementById('mute-btn').classList.toggle('active', isMuted);
+
+  // Laser dot overlay
+  if (data.laser !== undefined) {
+    const dot   = document.getElementById('laser-dot');
+    const label = document.getElementById('laser-zone-label');
+    if (data.laser && data.laser.x !== undefined) {
+      const wrap = document.querySelector('.cam-feed-wrap');
+      if (wrap) {
+        const r = wrap.getBoundingClientRect();
+        dot.style.left  = (data.laser.x * 100) + '%';
+        dot.style.top   = (data.laser.y * 100) + '%';
+        dot.style.display = 'block';
+        label.textContent = '🔴 ' + (data.laser.zone || '');
+        label.style.display = 'block';
+      }
+    } else {
+      dot.style.display   = 'none';
+      label.style.display = 'none';
+    }
+  }
 
   // Camera status (included in initial SSE push and whenever camera.py changes state)
   if (data.cam_status !== undefined || data.det_status !== undefined) {

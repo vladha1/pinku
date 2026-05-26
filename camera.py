@@ -23,6 +23,7 @@ import cv2
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, MIN_SHOULDER_PX,
+    LASER_DETECT, LASER_HUE_LO, LASER_HUE_HI, LASER_MOVE_THRESH,
 )
 
 # ── COCO 17-point pose keypoint indices ───────────────────────────────────────
@@ -155,6 +156,71 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
     return None
 
 
+# ── Green laser dot detection ─────────────────────────────────────────────────
+
+def _detect_laser_dot(frame: np.ndarray) -> dict | None:
+    """
+    Detect a green laser pointer dot via HSV masking.
+    Returns {"x": 0-1, "y": 0-1, "r": radius_px, "px": int, "py": int} or None.
+
+    Cheap: ~2ms.  No ML model needed — laser dots are uniquely saturated green.
+    """
+    if not LASER_DETECT:
+        return None
+
+    hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.array([LASER_HUE_LO, 160, 180], np.uint8),   # high sat + high val
+        np.array([LASER_HUE_HI, 255, 255], np.uint8),
+    )
+    # Small blur merges adjacent bright pixels without spreading much
+    mask = cv2.GaussianBlur(mask, (7, 7), 0)
+    _, mask = cv2.threshold(mask, 80, 255, cv2.THRESH_BINARY)
+
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None
+
+    h, w     = frame.shape[:2]
+    frame_px = w * h
+    best     = None
+    best_score = 0.0
+
+    for cnt in cnts:
+        area = cv2.contourArea(cnt)
+        if area < 3 or area > frame_px * 0.015:   # ignore noise and large blobs
+            continue
+        perim = cv2.arcLength(cnt, True)
+        if perim < 1:
+            continue
+        # Circularity: 1.0 = perfect circle.  Laser dots are nearly circular.
+        circ = 4 * np.pi * area / (perim * perim)
+        if circ < 0.25:
+            continue
+        score = area * circ   # prefer large, round blobs
+        if score > best_score:
+            best_score = score
+            best = cnt
+
+    if best is None:
+        return None
+
+    M = cv2.moments(best)
+    if M["m00"] == 0:
+        return None
+
+    cx = M["m10"] / M["m00"]
+    cy = M["m01"] / M["m00"]
+    return {
+        "x":  round(cx / w, 3),   # normalised 0-1 (left→right)
+        "y":  round(cy / h, 3),   # normalised 0-1 (top→bottom)
+        "r":  round(float(np.sqrt(cv2.contourArea(best) / np.pi)), 1),
+        "px": int(cx),
+        "py": int(cy),
+    }
+
+
 # ── Detection class ───────────────────────────────────────────────────────────
 
 class CameraDetector:
@@ -167,6 +233,7 @@ class CameraDetector:
         self.on_detection   = on_detection or (lambda e: None)
         self._stop          = threading.Event()
         self._last_snapshot = None
+        self._last_laser_xy: tuple[float, float] | None = None
 
     def start(self):
         threading.Thread(target=self._capture_loop, daemon=True, name="cam-capture").start()
@@ -258,7 +325,7 @@ class CameraDetector:
         h = frame.shape[0]
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "objects": [], "persons": 0, "gestures": [],
+            "objects": [], "persons": 0, "gestures": [], "laser": None,
         }
 
         # ── Object detection (YOLO) — persons counted separately via face ────────
@@ -318,6 +385,24 @@ class CameraDetector:
             if yolo_person_seen:
                 event["persons"] = 1
 
+        # ── Laser dot ─────────────────────────────────────────────────────────
+        laser = _detect_laser_dot(frame)
+        laser_changed = False
+        if laser:
+            event["laser"] = laser
+            lx, ly = laser["x"], laser["y"]
+            if self._last_laser_xy is None:
+                laser_changed = True   # dot appeared
+            else:
+                dx = abs(lx - self._last_laser_xy[0])
+                dy = abs(ly - self._last_laser_xy[1])
+                if dx > LASER_MOVE_THRESH or dy > LASER_MOVE_THRESH:
+                    laser_changed = True   # dot moved significantly
+            self._last_laser_xy = (lx, ly)
+        elif self._last_laser_xy is not None:
+            laser_changed = True   # dot disappeared
+            self._last_laser_xy = None
+
         # ── Dedup ─────────────────────────────────────────────────────────────
         snap = (
             event["persons"],
@@ -325,6 +410,6 @@ class CameraDetector:
             tuple(sorted(g["gesture"] for g in event["gestures"])),
         )
         has_det = event["objects"] or event["persons"] or event["gestures"]
-        if has_det and snap != self._last_snapshot:
+        if (has_det and snap != self._last_snapshot) or laser_changed:
             self.on_detection(event)
         self._last_snapshot = snap if has_det else None

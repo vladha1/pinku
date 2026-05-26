@@ -420,6 +420,44 @@ def _dispatch_gestures(event: dict):
             threading.Thread(target=fn, daemon=True).start()
 
 
+# ── Laser dot handler ────────────────────────────────────────────────────────
+#
+# The frame is divided into a 3×3 grid of named zones:
+#
+#   top-left    | top-center    | top-right
+#   mid-left    | center        | mid-right
+#   bot-left    | bot-center    | bot-right
+#
+# Extend this to trigger actions (e.g. laser on top-right = lights on).
+
+def _laser_zone(x: float, y: float) -> str:
+    col = "left" if x < 0.33 else ("right" if x > 0.67 else "center")
+    row = "top"  if y < 0.33 else ("bot"   if y > 0.67 else "mid")
+    return f"{row}-{col}" if not (row == "mid" and col == "center") else "center"
+
+
+_last_laser_log: float = 0.0   # rate-limit dashboard log spam
+
+def _handle_laser(laser: dict):
+    """Called whenever the green laser dot appears, moves, or disappears."""
+    global _last_laser_log
+    x, y = laser["x"], laser["y"]
+    zone = _laser_zone(x, y)
+
+    # Rate-limit log to once per second so it doesn't spam
+    now = time.time()
+    if now - _last_laser_log > 1.0:
+        _log("laser", f"🔴 Laser → zone={zone}  ({x:.2f}, {y:.2f})")
+        _last_laser_log = now
+
+    dashboard.update_status(laser={"x": x, "y": y, "zone": zone})
+
+    # ── Zone-based actions (add your own here) ────────────────────────────────
+    # Example (uncomment + extend):
+    # if zone == "top-right":
+    #     _dispatch_action({"action": "lights_on", "lang": "en", "transcript": ""})
+
+
 # ── Detection callback ────────────────────────────────────────────────────────
 
 def on_detection(event: dict):
@@ -442,6 +480,9 @@ def on_detection(event: dict):
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = now
+
+    if event.get("laser"):
+        _handle_laser(event["laser"])
 
     if event.get("gestures"):
         _dispatch_gestures(event)
