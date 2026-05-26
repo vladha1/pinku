@@ -42,8 +42,8 @@ LASER_DETECT      = bool(int(os.getenv("LASER_DETECT", "1")))
 # 532 nm green laser ≈ H 55-75. Loosen S/V if dot isn't detected.
 LASER_HUE_LO      = int(os.getenv("LASER_HUE_LO",  "35"))
 LASER_HUE_HI      = int(os.getenv("LASER_HUE_HI",  "95"))
-LASER_SAT_MIN     = int(os.getenv("LASER_SAT_MIN",  "80"))   # lower = easier to detect
-LASER_VAL_MIN     = int(os.getenv("LASER_VAL_MIN", "140"))   # lower = easier to detect
+LASER_SAT_MIN     = int(os.getenv("LASER_SAT_MIN",  "50"))   # lower = easier to detect
+LASER_VAL_MIN     = int(os.getenv("LASER_VAL_MIN", "100"))   # lower = easier to detect
 # Laser runs its own fast loop independent of YOLO (cheap HSV op, ~2ms)
 LASER_POLL_SEC    = float(os.getenv("LASER_POLL_SEC", "0.12"))   # ~8 fps
 # Movement threshold — only re-fire if dot moves more than this fraction of frame

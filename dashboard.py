@@ -267,6 +267,50 @@ def camera_status():
     except Exception as e:
         return jsonify({"camera": f"error: {e}", "detection": "unknown"})
 
+@_app.route("/api/laser/debug")
+def laser_debug():
+    """
+    Capture a frame, run laser detection with verbose logging, and return
+    a JPEG showing the HSV mask so you can see exactly what colours are matched.
+    Visit http://mac-ip:5100/api/laser/debug in a browser.
+    """
+    try:
+        from camera import get_frame, _detect_laser_dots
+        import cv2, numpy as np
+        frame = get_frame()
+        if frame is None:
+            return ("No frame", 503)
+
+        # Run with debug output
+        dots = _detect_laser_dots(frame, debug=True)
+
+        # Build HSV mask image for visual inspection
+        import config as _cfg
+        hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(
+            hsv,
+            np.array([_cfg.LASER_HUE_LO, _cfg.LASER_SAT_MIN, _cfg.LASER_VAL_MIN]),
+            np.array([_cfg.LASER_HUE_HI, 255, 255]),
+        )
+        # Stack: original | mask (green channel brightened)
+        mask_bgr  = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        # Mark detected dots on original
+        for d in dots:
+            cv2.circle(frame, (d["px"], d["py"]), max(8, int(d["r"]*2)), (0,255,0), 2)
+        combined = np.hstack([frame, mask_bgr])
+        _, buf = cv2.imencode(".jpg", combined, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        from flask import make_response
+        r = make_response(buf.tobytes())
+        r.headers["Content-Type"]  = "image/jpeg"
+        r.headers["Cache-Control"] = "no-store"
+        # Also log summary
+        print(f"[Laser debug] dots found: {len(dots)} — {dots}")
+        return r
+    except Exception as e:
+        import traceback
+        return (traceback.format_exc(), 500)
+
+
 @_app.route("/api/camera/request-permission")
 def camera_request_permission():
     """

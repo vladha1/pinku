@@ -183,28 +183,32 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
 
 # ── Green laser dot detection ─────────────────────────────────────────────────
 
-def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
+def _detect_laser_dots(frame: np.ndarray, debug: bool = False) -> list[dict]:
     """
     Detect ALL green laser pointer dots via HSV masking.
-    Returns list of {"x": 0-1, "y": 0-1, "r": radius_px} dicts (empty = none found).
-
-    Cheap: ~2ms.  Returning multiple dots lets callers distinguish
-    single-dot (dart score) from multi-dot (gesture / mute toggle).
+    debug=True: log every candidate blob with its stats before filtering.
     """
     if not LASER_DETECT:
         return []
 
-    hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
         np.array([LASER_HUE_LO, LASER_SAT_MIN, LASER_VAL_MIN], np.uint8),
         np.array([LASER_HUE_HI, 255,            255           ], np.uint8),
     )
-    mask = cv2.GaussianBlur(mask, (7, 7), 0)
-    _, mask = cv2.threshold(mask, 80, 255, cv2.THRESH_BINARY)
+    # Morphological close to merge adjacent pixels — avoids blurring tiny dots away
+    kernel = np.ones((3, 3), np.uint8)
+    mask   = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    mask_px = int(np.count_nonzero(mask))
+    if debug:
+        print(f"[Laser debug] H:{LASER_HUE_LO}-{LASER_HUE_HI}  S≥{LASER_SAT_MIN}  V≥{LASER_VAL_MIN}  →  {mask_px} px in mask")
 
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
+        if debug:
+            print("[Laser debug] no contours found")
         return []
 
     h, w     = frame.shape[:2]
@@ -213,20 +217,28 @@ def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
 
     for cnt in cnts:
         area = cv2.contourArea(cnt)
-        # Min radius ~3px (r²π≈28) filters indicator LEDs; max 1.5% of frame
-        if area < 28 or area > frame_px * 0.015:
-            continue
         perim = cv2.arcLength(cnt, True)
-        if perim < 1:
-            continue
-        circ = 4 * np.pi * area / (perim * perim)
-        if circ < 0.25:
-            continue
-        M = cv2.moments(cnt)
+        circ  = (4 * np.pi * area / (perim * perim)) if perim > 0 else 0
+        M     = cv2.moments(cnt)
         if M["m00"] == 0:
             continue
         cx = M["m10"] / M["m00"]
         cy = M["m01"] / M["m00"]
+        # Sample HSV at centroid for debug
+        hx, hy = int(cx), int(cy)
+        hx = max(0, min(w-1, hx)); hy = max(0, min(h-1, hy))
+        h_val, s_val, v_val = hsv[hy, hx]
+
+        if debug:
+            print(f"[Laser debug]   blob area={area:.0f} circ={circ:.2f} "
+                  f"HSV=({h_val},{s_val},{v_val}) at ({cx:.0f},{cy:.0f})  "
+                  f"{'PASS' if area >= 8 and circ >= 0.2 else 'FAIL'}")
+
+        if area < 8 or area > frame_px * 0.02:
+            continue
+        if circ < 0.20:
+            continue
+
         dots.append({
             "x":  round(cx / w, 3),
             "y":  round(cy / h, 3),
@@ -235,7 +247,6 @@ def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
             "py": int(cy),
         })
 
-    # Sort left-to-right for stable ordering
     dots.sort(key=lambda d: d["x"])
     return dots
 
