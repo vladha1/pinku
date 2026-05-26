@@ -350,18 +350,23 @@ def on_detection(event: dict):
     dashboard.push_detection(event)
 
     if event.get("persons", 0) > 0:
-        _last_human_at = time.time()
+        now = time.time()
+        was_absent = (now - _last_human_at) > 30.0   # truly left the room vs session timeout
+        _last_human_at = now
         if not _user_muted.is_set():
             if not _awake.is_set():
-                # Person walked in — open listening session, play entry chime (with cooldown)
-                _last_speech_at = time.time()
+                # Person detected — silently re-open session
+                _last_speech_at = now
                 _awake.set()
                 dashboard.update_status(state="awake")
                 _log("wake", "👤 Face detected → listening")
-                tts.play_beep(entry=True)   # rising 3-note, suppressed if played recently
+                # Only chime if person was genuinely absent (>30s) — not on every
+                # session timeout re-trigger while they're still sitting in the room
+                if was_absent:
+                    tts.play_beep(entry=True)
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
-                _last_speech_at = time.time()
+                _last_speech_at = now
 
     if event.get("gestures"):
         _dispatch_gestures(event)
