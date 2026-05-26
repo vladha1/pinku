@@ -895,13 +895,16 @@ body {
 .log-entries::-webkit-scrollbar { width:3px; }
 .log-entries::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 .log-entry {
-  font-size:0.73rem; padding:2px 0;
-  border-bottom:1px solid rgba(255,255,255,0.03);
+  font-size:0.82rem; padding:4px 0;
+  border-bottom:1px solid rgba(255,255,255,0.06);
   display:flex; gap:8px; align-items:baseline;
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
 }
-.log-entry .log-ts  { flex-shrink:0; font-size:0.63rem; color:#333355; min-width:60px; }
-.log-entry .log-msg { flex:1; word-break:break-word; }
+.log-entry .log-ts  { flex-shrink:0; font-size:0.70rem; color:#7c85a0; min-width:62px; }
+.log-entry .log-lvl { flex-shrink:0; font-size:0.65rem; font-weight:600; padding:1px 5px;
+                       border-radius:4px; background:rgba(255,255,255,0.07);
+                       min-width:52px; text-align:center; letter-spacing:0.03em; }
+.log-entry .log-msg { flex:1; word-break:break-word; color:#d1d5db; }
 </style>
 </head>
 <body>
@@ -1327,10 +1330,11 @@ function addLog(level, msg, ts) {
   entry.className = 'log-entry';
   const t = ts || new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   const icon  = LOG_ICONS[level]  || '⚪';
-  const color = LOG_COLORS[level] || '#64748b';
+  const color = LOG_COLORS[level] || '#94a3b8';
   entry.innerHTML =
     `<span class="log-ts">${esc(t)}</span>` +
-    `<span class="log-msg" style="color:${color}">${icon} ${esc(msg)}</span>`;
+    `<span class="log-lvl" style="color:${color};border:1px solid ${color}40">${icon} ${esc(level)}</span>` +
+    `<span class="log-msg">${esc(msg)}</span>`;
   box.insertBefore(entry, box.firstChild);
   while (box.children.length > 200) box.removeChild(box.lastChild);
 }

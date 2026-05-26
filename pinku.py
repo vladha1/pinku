@@ -18,9 +18,32 @@ Usage:
 
 from __future__ import annotations
 import argparse
+import os
 import threading
 import time
 import sys
+
+# ── Single-instance lockfile ──────────────────────────────────────────────────
+# Prevents two copies of pinku.py running at the same time (e.g. from repeated
+# `bash start_pinku.command` calls before the old instance fully exits).
+_LOCKFILE = "/tmp/pinku.lock"
+
+def _acquire_lock():
+    import fcntl
+    _lock_fh = open(_LOCKFILE, "w")
+    try:
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Read the stale PID so we can report it
+        try:
+            pid = open(_LOCKFILE).read().strip()
+        except Exception:
+            pid = "?"
+        print(f"[Pinku] Another instance is already running (PID {pid}). Exiting.")
+        sys.exit(1)
+    _lock_fh.write(str(os.getpid()))
+    _lock_fh.flush()
+    return _lock_fh   # keep open — released automatically when process exits
 
 import config
 import stt
@@ -540,6 +563,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    _acquire_lock()   # exit immediately if another instance is running
     ap = argparse.ArgumentParser(description="Pinku — local home assistant")
     ap.add_argument("--no-camera",    action="store_true", help="Disable camera detection")
     ap.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard")
