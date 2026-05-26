@@ -187,6 +187,38 @@ def camera_snapshot():
     except Exception as e:
         return (str(e), 503)
 
+@_app.route("/api/restart", methods=["POST"])
+def api_restart():
+    """
+    git pull + restart Pinku.  Kills the current process after a short
+    delay so the HTTP response reaches the browser first.
+    Pinku must be launched by a wrapper that auto-restarts on exit
+    (start_pinku.command uses a simple loop for this).
+    """
+    import subprocess, sys, os, threading
+    from flask import jsonify, request
+
+    token = (request.get_json(silent=True) or {}).get("token", "")
+    if token != "pinku":
+        return jsonify({"ok": False, "error": "bad token"}), 403
+
+    def _do_restart():
+        import time
+        time.sleep(1.0)   # let the HTTP response fly first
+        try:
+            subprocess.run(
+                ["git", "-C", os.path.dirname(os.path.abspath(__file__)),
+                 "pull", "--ff-only"],
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"[Restart] git pull failed: {e}")
+        os.kill(os.getpid(), 15)   # SIGTERM → triggers the finally block in main()
+
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return jsonify({"ok": True, "msg": "Pulling & restarting in ~1 s…"})
+
+
 @_app.route("/api/camera/status")
 def camera_status():
     from flask import jsonify
@@ -992,6 +1024,7 @@ body {
   <div class="header-btns">
     <button class="hdr-btn stop-btn" id="stop-btn" title="Pause — stop speaking, mic re-opens after">⏸</button>
     <button class="hdr-btn mute-btn" id="mute-btn" title="Mute / Unmute listening">🔇</button>
+    <button class="hdr-btn" id="restart-btn" title="git pull + restart Pinku" style="border-color:rgba(251,191,36,0.4);color:#fbbf24;font-size:0.8rem;">↺</button>
   </div>
 </header>
 
@@ -1275,6 +1308,20 @@ document.getElementById('stop-btn').addEventListener('click', () => {
 });
 document.getElementById('mute-btn').addEventListener('click', () => {
   apiAction('mute_toggle');
+});
+document.getElementById('restart-btn').addEventListener('click', () => {
+  if (!confirm('git pull + restart Pinku?')) return;
+  const btn = document.getElementById('restart-btn');
+  btn.textContent = '⏳'; btn.disabled = true;
+  fetch('/api/restart', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({token:'pinku'}),
+  }).then(r => r.json()).then(d => {
+    btn.textContent = d.ok ? '✓' : '✗';
+    if (d.ok) setTimeout(() => location.reload(), 5000);
+    else { btn.disabled = false; btn.textContent = '↺'; }
+  }).catch(() => { btn.disabled = false; btn.textContent = '↺'; });
 });
 
 // ── History panel ─────────────────────────────────────────────────────────────
