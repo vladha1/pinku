@@ -187,6 +187,45 @@ def camera_snapshot():
     except Exception as e:
         return (str(e), 503)
 
+@_app.route("/restart")
+def restart_page():
+    """Simple tap-to-restart page — works from any browser including iPad Safari."""
+    return """<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Restart Pinku</title>
+<style>
+body{background:#0a0a14;color:#e8e8f4;font-family:-apple-system,sans-serif;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}
+button{padding:20px 40px;font-size:1.2rem;border-radius:16px;border:2px solid #fbbf24;
+background:rgba(251,191,36,0.12);color:#fbbf24;cursor:pointer;}
+button:disabled{opacity:0.5;}
+#msg{margin-top:20px;font-size:0.95rem;color:#94a3b8;text-align:center;}
+</style></head><body>
+<div style="text-align:center">
+  <button id="btn" onclick="doRestart()">↺ git pull + restart Pinku</button>
+  <div id="msg">Pulls latest code from git, then restarts.</div>
+</div>
+<script>
+function doRestart(){
+  const btn=document.getElementById('btn');
+  const msg=document.getElementById('msg');
+  btn.disabled=true; btn.textContent='⏳ Restarting…';
+  msg.textContent='Pulling from git…';
+  fetch('/api/restart',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'pinku'})})
+  .then(r=>r.json()).then(d=>{
+    msg.textContent=d.ok?'✓ Done — reloading in 6s…':'✗ '+d.error;
+    if(d.ok) setTimeout(()=>location.href='/',6000);
+    else { btn.disabled=false; btn.textContent='↺ git pull + restart Pinku'; }
+  }).catch(()=>{
+    msg.textContent='✓ Restarting… reloading in 6s';
+    setTimeout(()=>location.href='/',6000);
+  });
+}
+</script></body></html>"""
+
+
 @_app.route("/api/restart", methods=["POST"])
 def api_restart():
     """
