@@ -430,19 +430,15 @@ def on_detection(event: dict):
 
     if event.get("persons", 0) > 0:
         now = time.time()
-        was_absent = (now - _last_human_at) > 30.0   # truly left the room vs session timeout
         _last_human_at = now
         if not _user_muted.is_set():
             if not _awake.is_set():
-                # Person detected — silently re-open session
+                # Person detected — silently re-open session (no beep — too many
+                # false triggers from people walking past / borderline distances)
                 _last_speech_at = now
                 _awake.set()
                 dashboard.update_status(state="awake")
                 _log("wake", "👤 Face detected → listening")
-                # Only chime if person was genuinely absent (>30s) — not on every
-                # session timeout re-trigger while they're still sitting in the room
-                if was_absent:
-                    tts.play_beep(entry=True)
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = now
@@ -546,7 +542,6 @@ def _dispatch_action(action: dict):
     elif act == "describe":
         _handle_describe(action)
     elif act == "scripture":
-        tts.play_think()
         _handle_scripture(action)
     elif act == "weather":
         _handle_weather(action)
@@ -625,6 +620,11 @@ def _handle_gemini_result(result: dict):
         tts.play_sleep()
         dashboard.update_status(state="idle", last_transcript=transcript, last_reply="")
         return
+
+    # ── Confirmed real command — play think tick now ──────────────────────────
+    # Fires only here, after all ignore/hallucination/wake-word-only paths have
+    # returned early. This means beep = "I heard a real command, working on it."
+    tts.play_think()
 
     dashboard.update_status(state="processing", last_transcript=transcript)
     _log("user", transcript)
@@ -715,7 +715,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # session_active=True → no wake word required; person is already
                 # in conversation (face detected or awake session open).
                 dashboard.update_status(state="processing")
-                tts.play_think()
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True)
                 if result is not None:
@@ -756,7 +755,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
             # Wake word + inline command — send audio to Gemini for quality response
             dashboard.update_status(state="processing")
-            tts.play_think()
             result = llm.transcribe_and_respond(pcm, history=_session_hist)
             if result is not None:
                 _handle_gemini_result(result)
