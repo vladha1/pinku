@@ -12,6 +12,7 @@ For multilingual use, switch WHISPER_MODEL to "small" in config.py.
 
 from __future__ import annotations
 import io
+import os
 import time
 import wave
 import threading
@@ -78,7 +79,7 @@ class AudioRecorder:
     def __init__(self):
         import webrtcvad
         import pyaudio
-        self._vad = webrtcvad.Vad(2)   # aggressiveness 0-3; 2 = balanced
+        self._vad = webrtcvad.Vad(3)   # aggressiveness 0-3; 3 = most aggressive (rejects TV/ambient)
         self._pa  = pyaudio.PyAudio()
         self._stream   = None
         self._running  = False
@@ -204,11 +205,17 @@ _HALLUCINATION_EXACT = {
     "pinku is the name of a home ai assistant",
     "the ai assistant is the name of a home ai assistant",
     "wake word pinku", "pinku",
+    # Common cricket/TV hallucinations
+    "virat kohli", "india indians", "india indians.", "india india",
+    "rohit sharma", "ms dhoni", "sachin tendulkar",
+    "kishu lai", "k r k r", "r k r k",
 }
 
 _HALLUCINATION_STARTS = (
     "subtitles", "transcript", "captions", "this video",
     "thanks for", "thank you for", "please like",
+    # Whisper looping on TV speech patterns
+    "r. k.", "k. r.", "r k r", "k r k",
 )
 
 def _is_hallucination(text: str) -> bool:
@@ -222,6 +229,16 @@ def _is_hallucination(text: str) -> bool:
     # Pinku's own TTS output being picked up by mic
     if any(phrase in t for phrase in ("going quiet", "going quite", "pinku ready", "okay bye")):
         return True
+    # Repetition detector — "Virat Kohli. Virat Kohli. Virat Kohli." is noise
+    words = t.split()
+    if len(words) >= 4:
+        # Check if the transcript is just a short phrase repeated
+        for phrase_len in (1, 2, 3):
+            phrase = " ".join(words[:phrase_len])
+            repeats = sum(1 for i in range(0, len(words), phrase_len)
+                          if " ".join(words[i:i+phrase_len]) == phrase)
+            if repeats >= 3 and repeats * phrase_len >= len(words) * 0.75:
+                return True
     return False
 
 
@@ -229,14 +246,22 @@ def _is_hallucination(text: str) -> bool:
 _ALLOWED_LANGUAGES = {"en", "hi"}
 
 
+_MIN_RMS = float(os.getenv("WHISPER_MIN_RMS", "0.015"))  # below this = too quiet, skip Whisper
+
 def transcribe(pcm: bytes) -> str:
     """
     Transcribe raw 16-bit mono PCM bytes using local Whisper.
     Returns the cleaned transcript string, or "" if likely hallucination/noise.
     Silently drops any language other than English or Hindi.
     """
-    model = _load_whisper()
+    # Energy gate — reject audio that's too quiet to be intentional speech.
+    # TV audio picked up from across the room is typically low RMS at the mic.
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    rms = float(np.sqrt(np.mean(audio ** 2)))
+    if rms < _MIN_RMS:
+        return ""
+
+    model = _load_whisper()
 
     segments, info = model.transcribe(
         audio,
