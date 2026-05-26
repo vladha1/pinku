@@ -248,11 +248,18 @@ def _gesture_throttle(label: str) -> bool:
 
 
 def _gesture_open_hand():
-    """🖐 Open hand / wave — wake Pinku and unmute."""
-    _log("wake", "🖐 Open Hand gesture → wake")
-    _user_muted.clear()
-    _muted.clear()
-    _extend_session()
+    """🖐 Open hand / wave — stop speech if speaking, otherwise wake Pinku."""
+    if tts.is_speaking():
+        _log("wake", "🖐 Open Hand → stop speaking")
+        tts.stop_speaking()
+        _muted.clear()   # re-open mic so user can follow up immediately
+        _user_muted.clear()
+        _extend_session()
+    else:
+        _log("wake", "🖐 Open Hand gesture → wake")
+        _user_muted.clear()
+        _muted.clear()
+        _extend_session()
 
 
 def _gesture_fist():
