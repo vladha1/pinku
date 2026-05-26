@@ -21,6 +21,31 @@ _status = {
 _clients_lock = threading.Lock()
 _clients: list = []
 
+# ── Conversation history ──────────────────────────────────────────────────────
+import os as _os
+_HISTORY_FILE = _os.path.join(_os.path.expanduser("~"), ".pinku_history.jsonl")
+_history_lock = threading.Lock()
+
+def record_conversation(transcript: str, reply: str,
+                        lang: str = "en", source: str = ""):
+    """Append a user↔Pinky exchange to the persistent history file."""
+    if not transcript and not reply:
+        return
+    entry = {
+        "ts":         time.strftime("%Y-%m-%d %H:%M:%S"),
+        "transcript": transcript,
+        "reply":      reply,
+        "lang":       lang,
+        "source":     source,
+    }
+    with _history_lock:
+        try:
+            with open(_HISTORY_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"[Dashboard] history write error: {e}")
+    _broadcast({"type": "history", **entry})
+
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -112,6 +137,26 @@ def stream():
 def api_status():
     from flask import jsonify
     return jsonify(_status)
+
+@_app.route("/api/history")
+def api_history():
+    """Return last N conversation entries from the persistent history file."""
+    from flask import request, jsonify
+    limit = int(request.args.get("limit", 200))
+    entries = []
+    with _history_lock:
+        try:
+            with open(_HISTORY_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except Exception:
+                            pass
+        except FileNotFoundError:
+            pass
+    return jsonify(entries[-limit:])
 
 @_app.route("/api/action", methods=["POST"])
 def api_action():
@@ -827,11 +872,14 @@ body {
 .pinky-nav-item.active { opacity: 1; color: #c084fc; }
 .pinky-nav-ic { font-size: 1.2rem; line-height: 1; }
 
-/* Chat panel */
-.chat-area { flex:1; overflow-y:auto; padding:14px; display:none; flex-direction:column; gap:10px; }
-.chat-area.open { display:flex; }
-.chat-area::-webkit-scrollbar { width:3px; }
-.chat-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+/* History panel */
+.history-area { flex:1; overflow-y:auto; padding:14px; display:none; flex-direction:column; gap:10px; }
+.history-area.open { display:flex; }
+.history-area::-webkit-scrollbar { width:3px; }
+.history-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.hist-day-sep { text-align:center; font-size:0.72rem; color:#6b7280; margin:6px 0 2px;
+                letter-spacing:0.04em; }
+.hist-source  { font-size:0.68rem; color:#6b7280; margin-top:2px; text-align:right; }
 .msg-row { display:flex; gap:8px; }
 .msg-row.user { justify-content:flex-end; }
 .msg-row.pinku { justify-content:flex-start; }
@@ -1045,8 +1093,8 @@ body {
   </div><!-- pinky-stage -->
 </div><!-- main-area -->
 
-<!-- Chat area (hidden by default) -->
-<div class="chat-area" id="chat-area"></div>
+<!-- History area (hidden by default) -->
+<div class="history-area" id="history-area"></div>
 
 <!-- Camera area (hidden by default) -->
 <div class="camera-area" id="camera-area">
@@ -1075,8 +1123,8 @@ body {
   <button class="pinky-nav-item active" id="nav-home" onclick="showTab('home')">
     <span class="pinky-nav-ic">🏠</span>Home
   </button>
-  <button class="pinky-nav-item" id="nav-chat" onclick="showTab('chat')">
-    <span class="pinky-nav-ic">💬</span>Chat
+  <button class="pinky-nav-item" id="nav-history" onclick="showTab('history')">
+    <span class="pinky-nav-ic">📜</span>History
   </button>
   <button class="pinky-nav-item" id="nav-cam" onclick="showTab('cam')">
     <span class="pinky-nav-ic">📷</span>Camera
@@ -1159,7 +1207,7 @@ function applyStatus(data) {
     _lastReply = data.last_reply;
     document.getElementById('r-body').textContent = data.last_reply;
     document.getElementById('r-cloud').classList.add('has-text');
-    addChat(data.last_transcript, data.last_reply);
+    // history is updated via the dedicated SSE "history" event, not here
   }
 
   // Mute button icon
@@ -1229,27 +1277,71 @@ document.getElementById('mute-btn').addEventListener('click', () => {
   apiAction('mute_toggle');
 });
 
-// ── Chat panel ────────────────────────────────────────────────────────────────
-let _chatLastTr = '', _chatLastRe = '';
-function addChat(tr, re) {
-  if (!tr && !re) return;
-  if (tr === _chatLastTr && re === _chatLastRe) return;
-  _chatLastTr = tr; _chatLastRe = re;
-  const box = document.getElementById('chat-area');
-  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  if (tr) {
+// ── History panel ─────────────────────────────────────────────────────────────
+let _histLastKey = '';   // dedup key: ts+transcript
+let _histLastDay = '';   // track day separators
+
+function _histTimeLabel(tsStr) {
+  // tsStr: "2026-05-26 08:33:25"
+  try {
+    const d = new Date(tsStr.replace(' ', 'T'));
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  } catch(_) { return tsStr.slice(11,16); }
+}
+
+function _histDayLabel(tsStr) {
+  try {
+    const d = new Date(tsStr.replace(' ', 'T'));
+    return d.toLocaleDateString([], {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  } catch(_) { return tsStr.slice(0,10); }
+}
+
+function appendHistoryEntry(entry) {
+  if (!entry.transcript && !entry.reply) return;
+  const key = (entry.ts || '') + entry.transcript;
+  if (key === _histLastKey) return;
+  _histLastKey = key;
+
+  const box = document.getElementById('history-area');
+  const day = (entry.ts || '').slice(0,10);
+
+  // Day separator
+  if (day && day !== _histLastDay) {
+    _histLastDay = day;
+    const sep = document.createElement('div');
+    sep.className = 'hist-day-sep';
+    sep.textContent = _histDayLabel(entry.ts);
+    box.appendChild(sep);
+  }
+
+  const timeStr = entry.ts ? _histTimeLabel(entry.ts) : '';
+
+  if (entry.transcript) {
     const d = document.createElement('div');
     d.className = 'msg-row user';
-    d.innerHTML = `<div><div class="bubble user">${esc(tr)}</div><div class="msg-time">${now}</div></div>`;
+    d.innerHTML = `<div><div class="bubble user">${esc(entry.transcript)}</div><div class="msg-time">${timeStr}</div></div>`;
     box.appendChild(d);
   }
-  if (re) {
+  if (entry.reply) {
+    const src = entry.source ? `<div class="hist-source">${esc(entry.source)}</div>` : '';
     const d = document.createElement('div');
     d.className = 'msg-row pinku';
-    d.innerHTML = `<div><div class="bubble pinku">${esc(re)}</div><div class="msg-time">${now}</div></div>`;
+    d.innerHTML = `<div><div class="bubble pinku">${esc(entry.reply)}</div><div class="msg-time">${timeStr}</div>${src}</div>`;
     box.appendChild(d);
   }
-  box.scrollTop = box.scrollHeight;
+}
+
+async function loadHistory() {
+  try {
+    const resp = await fetch('/api/history?limit=200');
+    const entries = await resp.json();
+    const box = document.getElementById('history-area');
+    box.innerHTML = '';
+    _histLastDay = '';
+    _histLastKey = '';
+    entries.forEach(appendHistoryEntry);
+    box.scrollTop = box.scrollHeight;
+  } catch(e) { console.warn('History load failed', e); }
 }
 
 // ── Camera panel ──────────────────────────────────────────────────────────────
@@ -1365,21 +1457,23 @@ function formatDetEvent(e) {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-const _TABS = ['home', 'chat', 'cam', 'log'];
+const _TABS = ['home', 'history', 'cam', 'log'];
 function showTab(name) {
-  document.getElementById('main-area').style.display   = name === 'home' ? '' : 'none';
-  document.getElementById('chat-area').className       = 'chat-area'   + (name === 'chat' ? ' open' : '');
-  document.getElementById('camera-area').className     = 'camera-area' + (name === 'cam'  ? ' open' : '');
-  document.getElementById('log-area').className        = 'log-area'    + (name === 'log'  ? ' open' : '');
+  document.getElementById('main-area').style.display       = name === 'home'    ? '' : 'none';
+  document.getElementById('history-area').className        = 'history-area'   + (name === 'history' ? ' open' : '');
+  document.getElementById('camera-area').className         = 'camera-area'    + (name === 'cam'     ? ' open' : '');
+  document.getElementById('log-area').className            = 'log-area'       + (name === 'log'     ? ' open' : '');
   _TABS.forEach(t => {
     const el = document.getElementById('nav-' + t);
     if (el) el.classList.toggle('active', t === name);
   });
   if (name === 'cam') startCamera();
   else                stopCamera();
-  if (name === 'chat') {
-    const box = document.getElementById('chat-area');
-    setTimeout(() => box.scrollTop = box.scrollHeight, 80);
+  if (name === 'history') {
+    loadHistory().then(() => {
+      const box = document.getElementById('history-area');
+      setTimeout(() => box.scrollTop = box.scrollHeight, 80);
+    });
   }
 }
 
@@ -1410,6 +1504,13 @@ function connect() {
         flashDetection(data);
       } else if (data.type === 'log') {
         addLog(data.level || 'info', data.msg || '', data.ts || '');
+      } else if (data.type === 'history') {
+        // Live append to history panel if it's currently open
+        const box = document.getElementById('history-area');
+        if (box.classList.contains('open')) {
+          appendHistoryEntry(data);
+          box.scrollTop = box.scrollHeight;
+        }
       }
     } catch(_) {}
   };

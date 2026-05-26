@@ -168,7 +168,9 @@ def _handle_chat(action: dict):
     if len(_session_hist) > 12:
         _session_hist[:] = _session_hist[-12:]
     dashboard.update_status(last_transcript=tr, last_reply=reply)
-    _speak_reply(reply, is_hi)   # ← speak the answer
+    dashboard.record_conversation(tr, reply, lang=lang,
+                                  source=f"Gemini + Google Search ({llm.GEMINI_MODEL})")
+    _speak_reply(reply, is_hi)
 
 
 def _handle_time(action: dict):
@@ -607,12 +609,14 @@ def _handle_gemini_result(result: dict):
 
     if reply:
         # Gemini already generated the reply (chat / scripture)
-        _log("source", f"Gemini audio ({llm.GEMINI_MODEL})")
+        src = f"Gemini audio ({llm.GEMINI_MODEL})"
+        _log("source", src)
         _session_hist.append({"role": "user",      "content": transcript})
         _session_hist.append({"role": "assistant", "content": reply})
         if len(_session_hist) > 12:
             _session_hist[:] = _session_hist[-12:]
         dashboard.update_status(last_transcript=transcript, last_reply=reply)
+        dashboard.record_conversation(transcript, reply, lang=lang, source=src)
         _speak_reply(reply, is_hi)
     else:
         # Action needs Python handler (time, mute, describe, etc.)
