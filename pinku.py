@@ -793,7 +793,7 @@ def main():
         dashboard.register_action("mute",         _handle_mute)
         dashboard.register_action("unmute",       _handle_unmute)
         dashboard.register_action("stop",         tts.stop_speaking)
-        dashboard.register_action("mute_toggle",  lambda: _handle_unmute() if is_muted() else _handle_mute())
+        dashboard.register_action("mute_toggle",  lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
 
     # ── Camera ────────────────────────────────────────────────────────────────
     cam = None
