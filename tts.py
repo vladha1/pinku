@@ -124,6 +124,16 @@ def _play(path: str):
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
 
+def known_duration(text: str) -> float:
+    """
+    Return the expected TTS playback duration before speaking.
+    - say:      exact from word count ÷ SAY_RATE
+    - edge-tts: word-count estimate (file isn't generated yet at this point)
+    The caller uses this to set the unmute timer before playback starts.
+    """
+    return _estimate_say_duration(text)
+
+
 def stop_speaking():
     """Interrupt current TTS immediately."""
     global _current_proc, _speaking
@@ -137,17 +147,25 @@ def is_speaking() -> bool:
 
 
 def _speak_edge(text: str, voice: str) -> float:
-    """Returns actual playback duration in seconds."""
+    """
+    Generate MP3 via edge-tts, read exact duration with afinfo,
+    then play. Returns known duration so the caller can set the
+    unmute timer before/during playback rather than after.
+    """
     global _current_proc, _speaking
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     tmp.close()
-    t0 = time.monotonic()
+    duration = 0.0
     try:
         async def _gen():
             comm = _edge_tts.Communicate(text, voice)
             await comm.save(tmp.name)
         asyncio.run(_gen())
-        t0 = time.monotonic()   # start timer from when audio actually begins playing
+        # Exact duration from file — known BEFORE playback starts
+        duration = _get_file_duration(tmp.name)
+        if duration == 0.0:
+            # afinfo unavailable — fall back to word-count estimate
+            duration = _estimate_say_duration(text)
         _current_proc = subprocess.Popen(
             ["afplay", tmp.name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -161,13 +179,33 @@ def _speak_edge(text: str, voice: str) -> float:
             os.unlink(tmp.name)
         except Exception:
             pass
-    return time.monotonic() - t0
+    return duration
+
+
+def _estimate_say_duration(text: str) -> float:
+    """Estimate `say` playback duration from word count + SAY_RATE."""
+    words = max(1, len(text.split()))
+    return (words / SAY_RATE) * 60.0
+
+
+def _get_file_duration(path: str) -> float:
+    """Read exact playback duration from an audio file via afinfo."""
+    try:
+        out = subprocess.check_output(
+            ["afinfo", path], stderr=subprocess.DEVNULL, timeout=5,
+        ).decode()
+        for line in out.splitlines():
+            if "estimated duration" in line:
+                return float(line.split(":")[1].strip().split()[0])
+    except Exception:
+        pass
+    return 0.0
 
 
 def _speak_say(text: str, voice: str) -> float:
-    """Returns actual playback duration in seconds."""
+    """Returns known playback duration in seconds (computed before speaking)."""
     global _current_proc
-    t0 = time.monotonic()
+    duration = _estimate_say_duration(text)
     try:
         _current_proc = subprocess.Popen(
             ["say", "-v", voice, "-r", str(SAY_RATE), text],
@@ -176,7 +214,7 @@ def _speak_say(text: str, voice: str) -> float:
         _current_proc.wait()
     except Exception as e:
         print(f"[TTS] say error: {e}")
-    return time.monotonic() - t0
+    return duration
 
 
 def speak(text: str, prefer_hi: bool = False, block: bool = False) -> float:

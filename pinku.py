@@ -98,25 +98,26 @@ def _speak_reply(reply: str, is_hi: bool):
     _log("pinku", reply)
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
-    duration = tts.speak(reply, prefer_hi=is_hi, block=True)
 
-    # Settle = 25% of speech duration so echo fades before mic opens.
-    # min 1.5s (short replies still echo), max 3.5s (cap for very long replies).
-    settle = max(1.5, min(duration * 0.25, 3.5))
-    print(f"[TTS] speech={duration:.1f}s  settle={settle:.1f}s")
+    # Ask TTS for the known duration before playback starts (say: word-count math;
+    # edge-tts: afinfo on the generated MP3 file). Use it to schedule unmute precisely.
+    known_duration = tts.known_duration(reply)
+    settle          = max(1.5, min(known_duration * 0.25, 3.5))
+    print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s  total_mute={known_duration+settle:.1f}s")
 
-    _last_speech_at = time.time()
-    dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
-
-    # Clear mute via a background timer — NOT here in the voice-loop thread.
-    # This way the voice loop sees is_muted()=True at the top of its next iteration
-    # and stays in its 0.2s sleep instead of immediately calling wait_for_utterance
-    # while the TTS echo is still reverberating in the room.
+    # Start the unmute timer NOW, before playback begins.
+    # It sleeps for known_duration + settle so it fires right as the echo fades.
+    # The voice loop sees is_muted()=True and stays in its 0.2s sleep the whole
+    # time — wait_for_utterance is never called while speech+echo are in the air.
     def _unmute_after():
-        time.sleep(settle)
+        time.sleep(known_duration + settle)
         if not _user_muted.is_set():
             _muted.clear()
     threading.Thread(target=_unmute_after, daemon=True, name="tts-settle").start()
+
+    tts.speak(reply, prefer_hi=is_hi, block=True)   # blocks for actual playback
+    _last_speech_at = time.time()
+    dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
 
 def _handle_chat(action: dict):
