@@ -173,12 +173,60 @@ def _handle_chat(action: dict):
 
 def _handle_time(action: dict):
     from datetime import datetime
+    import re as _re3
     now  = datetime.now()
     lang = action.get("lang", "en")
+    tr   = action.get("transcript", "").lower()
+
+    # Detect what was actually asked — time, date, day, month, or year
+    _ask_month  = bool(_re3.search(r'month|mahina|महीना|माह', tr))
+    _ask_day    = bool(_re3.search(r'\bday\b|din\b|वार|दिन|weekday|week', tr))
+    _ask_date   = bool(_re3.search(r'\bdate\b|tarikh|तारीख', tr))
+    _ask_year   = bool(_re3.search(r'year|saal|साल|वर्ष', tr))
+    _ask_time   = bool(_re3.search(r'\btime\b|baj|waqt|समय|बज|टाइम', tr))
+    # If none matched specifically, default to time
+    _ask_any_date = _ask_month or _ask_day or _ask_date or _ask_year
+    _ask_only_time = _ask_time and not _ask_any_date
+
+    # Hindi month names
+    _HI_MONTHS = ["जनवरी","फ़रवरी","मार्च","अप्रैल","मई","जून",
+                  "जुलाई","अगस्त","सितंबर","अक्टूबर","नवंबर","दिसंबर"]
+    _HI_DAYS   = ["सोमवार","मंगलवार","बुधवार","गुरुवार","शुक्रवार","शनिवार","रविवार"]
+
     if lang == "hi":
-        reply = f"अभी {now.strftime('%-I बजकर %M मिनट')} हैं।"
+        time_str  = now.strftime('%-I बजकर %M मिनट')
+        month_str = _HI_MONTHS[now.month - 1]
+        day_str   = _HI_DAYS[now.weekday()]
+        date_str  = f"{now.day} {month_str}"
+        year_str  = str(now.year)
+
+        if _ask_only_time:
+            reply = f"अभी {time_str} हैं।"
+        elif _ask_month and not _ask_time and not _ask_day and not _ask_date:
+            reply = f"अभी {month_str} का महीना चल रहा है।"
+        elif _ask_year and not _ask_time:
+            reply = f"अभी {year_str} साल चल रहा है।"
+        elif _ask_day and not _ask_time:
+            reply = f"आज {day_str} है।"
+        elif _ask_date and not _ask_time:
+            reply = f"आज {date_str} है।"
+        else:
+            # General or combined — give full date + time
+            reply = f"आज {day_str}, {date_str} {year_str} है। अभी {time_str} हैं।"
     else:
-        reply = f"It's {now.strftime('%-I:%M %p')}."
+        if _ask_only_time:
+            reply = f"It's {now.strftime('%-I:%M %p')}."
+        elif _ask_month and not _ask_time and not _ask_day and not _ask_date:
+            reply = f"It's {now.strftime('%B')}."
+        elif _ask_year and not _ask_time:
+            reply = f"It's {now.year}."
+        elif _ask_day and not _ask_time:
+            reply = f"Today is {now.strftime('%A')}."
+        elif _ask_date and not _ask_time:
+            reply = f"Today is {now.strftime('%A, %d %B')}."
+        else:
+            reply = f"Today is {now.strftime('%A, %d %B %Y')}. It's {now.strftime('%-I:%M %p')}."
+
     _log("source", "system clock")
     dashboard.update_status(last_transcript=action.get("transcript",""), last_reply=reply)
     _speak_reply(reply, lang == "hi")
