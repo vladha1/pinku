@@ -663,6 +663,14 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if is_muted() or tts.is_speaking():
             continue
 
+        # ── Echo / double-response guard ─────────────────────────────────────────
+        # Drop audio captured within _ECHO_GUARD_SEC of the last spoken reply.
+        # Prevents the TTS output (or room echo) from being processed as a new
+        # utterance when the mute timer fires early or the lock is released early.
+        _ECHO_GUARD_SEC = 2.5
+        if time.time() - _last_speech_at < _ECHO_GUARD_SEC:
+            continue
+
         # ── Processing lock: drop audio if already handling a previous utterance ─
         if not _processing.acquire(blocking=False):
             continue   # silently discard — previous response still in flight

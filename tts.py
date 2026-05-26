@@ -133,7 +133,9 @@ def known_duration(text: str) -> float:
     """
     words = max(1, len(text.split()))
     if _EDGE_AVAILABLE:
-        return (words / 130.0) * 60.0   # edge-tts neural — err on the slow side
+        # edge-tts Hindi neural voice speaks ~100 wpm (numbers, Devanagari expand);
+        # use 95 wpm to ensure the mute timer outlasts actual playback.
+        return (words / 95.0) * 60.0
     return _estimate_say_duration(text)
 
 
