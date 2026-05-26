@@ -175,7 +175,7 @@ def camera_snapshot():
     try:
         from camera import get_frame
         import cv2
-        frame = get_frame()
+        frame = get_frame(annotated=True)
         if frame is None:
             return ("No camera frame — camera may still be starting up", 503)
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])

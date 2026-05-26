@@ -40,10 +40,34 @@ _last_frame: np.ndarray | None = None
 _cam_status = "starting"
 _det_status = "starting"
 
+# Last known laser dots — drawn on camera.jpg overlay
+_laser_overlay_lock = threading.Lock()
+_laser_overlay_dots: list[dict] = []   # list of {px, py, r}
 
-def get_frame() -> np.ndarray | None:
+
+def get_frame(annotated: bool = False) -> np.ndarray | None:
+    """Return current frame. If annotated=True, draws laser dot overlay."""
     with _frame_lock:
-        return _last_frame.copy() if _last_frame is not None else None
+        frame = _last_frame.copy() if _last_frame is not None else None
+    if frame is None or not annotated:
+        return frame
+    with _laser_overlay_lock:
+        dots = list(_laser_overlay_dots)
+    for d in dots:
+        px, py = d.get("px", 0), d.get("py", 0)
+        r  = max(10, int(d.get("r", 6) * 2.5))
+        # Outer glow ring
+        cv2.circle(frame, (px, py), r + 6, (0, 200, 0), 2, cv2.LINE_AA)
+        # Bright filled dot
+        cv2.circle(frame, (px, py), r, (0, 255, 80), -1, cv2.LINE_AA)
+        # Cross-hair
+        cv2.line(frame, (px - r - 8, py), (px + r + 8, py), (0, 255, 80), 1, cv2.LINE_AA)
+        cv2.line(frame, (px, py - r - 8), (px, py + r + 8), (0, 255, 80), 1, cv2.LINE_AA)
+        # Score label
+        score_text = f"{d.get('score', '?')} pts" if 'score' in d else f"({d['x']:.2f},{d['y']:.2f})"
+        cv2.putText(frame, score_text, (px + r + 4, py - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 80), 1, cv2.LINE_AA)
+    return frame
 
 
 def get_status() -> dict:
@@ -206,6 +230,8 @@ def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
             "x":  round(cx / w, 3),
             "y":  round(cy / h, 3),
             "r":  round(float(np.sqrt(area / np.pi)), 1),
+            "px": int(cx),
+            "py": int(cy),
         })
 
     # Sort left-to-right for stable ordering
@@ -328,6 +354,13 @@ class CameraDetector:
     def _run_laser(self, frame):
         """Fast laser detection — runs ~8 fps independent of YOLO."""
         laser_dots = _detect_laser_dots(frame)
+
+        # Always update the camera overlay
+        with _laser_overlay_lock:
+            _laser_overlay_dots.clear()
+            _laser_overlay_dots.extend(laser_dots)
+
+        # Log every change (appear / move / disappear)
         q = int(1 / max(LASER_MOVE_THRESH, 0.01))
         laser_key = tuple(
             (round(d["x"] * q), round(d["y"] * q)) for d in laser_dots
@@ -335,6 +368,24 @@ class CameraDetector:
         if laser_key == self._last_laser_key:
             return
         self._last_laser_key = laser_key
+
+        if laser_dots:
+            coords = "  ".join(f"({d['x']:.2f},{d['y']:.2f}) r={d['r']:.0f}px"
+                               for d in laser_dots)
+            print(f"[Laser] {len(laser_dots)} dot(s): {coords}")
+            try:
+                import dashboard as _db
+                _db.log_message("laser", f"🔴 {len(laser_dots)} dot(s) — {coords}")
+            except Exception:
+                pass
+        else:
+            print("[Laser] dot gone")
+            try:
+                import dashboard as _db
+                _db.log_message("laser", "🔴 dot gone")
+            except Exception:
+                pass
+
         self.on_detection({
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "objects": [], "persons": 0, "gestures": [],
