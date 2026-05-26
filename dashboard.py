@@ -1300,20 +1300,19 @@ function applyStatus(data) {
   document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
   document.getElementById('mute-btn').classList.toggle('active', isMuted);
 
-  // Laser dot overlay
+  // Laser dot overlay (data.laser = {x,y,score} from pinku.py status update)
   if (data.laser !== undefined) {
     const dot   = document.getElementById('laser-dot');
     const label = document.getElementById('laser-zone-label');
     if (data.laser && data.laser.x !== undefined) {
-      const wrap = document.querySelector('.cam-feed-wrap');
-      if (wrap) {
-        const r = wrap.getBoundingClientRect();
-        dot.style.left  = (data.laser.x * 100) + '%';
-        dot.style.top   = (data.laser.y * 100) + '%';
-        dot.style.display = 'block';
-        label.textContent = '🔴 ' + (data.laser.zone || '');
-        label.style.display = 'block';
-      }
+      dot.style.left    = (data.laser.x * 100) + '%';
+      dot.style.top     = (data.laser.y * 100) + '%';
+      dot.style.display = 'block';
+      const s = data.laser.score;
+      label.textContent = s === 100 ? '🎯 BULLSEYE! 100'
+                        : s === 0   ? '💨 Miss'
+                        : '🎯 ' + s + ' pts';
+      label.style.display = 'block';
     } else {
       dot.style.display   = 'none';
       label.style.display = 'none';

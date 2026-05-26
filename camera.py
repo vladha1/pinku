@@ -158,67 +158,58 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
 
 # ── Green laser dot detection ─────────────────────────────────────────────────
 
-def _detect_laser_dot(frame: np.ndarray) -> dict | None:
+def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
     """
-    Detect a green laser pointer dot via HSV masking.
-    Returns {"x": 0-1, "y": 0-1, "r": radius_px, "px": int, "py": int} or None.
+    Detect ALL green laser pointer dots via HSV masking.
+    Returns list of {"x": 0-1, "y": 0-1, "r": radius_px} dicts (empty = none found).
 
-    Cheap: ~2ms.  No ML model needed — laser dots are uniquely saturated green.
+    Cheap: ~2ms.  Returning multiple dots lets callers distinguish
+    single-dot (dart score) from multi-dot (gesture / mute toggle).
     """
     if not LASER_DETECT:
-        return None
+        return []
 
     hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
-        np.array([LASER_HUE_LO, 160, 180], np.uint8),   # high sat + high val
+        np.array([LASER_HUE_LO, 160, 180], np.uint8),
         np.array([LASER_HUE_HI, 255, 255], np.uint8),
     )
-    # Small blur merges adjacent bright pixels without spreading much
     mask = cv2.GaussianBlur(mask, (7, 7), 0)
     _, mask = cv2.threshold(mask, 80, 255, cv2.THRESH_BINARY)
 
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
-        return None
+        return []
 
     h, w     = frame.shape[:2]
     frame_px = w * h
-    best     = None
-    best_score = 0.0
+    dots: list[dict] = []
 
     for cnt in cnts:
         area = cv2.contourArea(cnt)
-        if area < 3 or area > frame_px * 0.015:   # ignore noise and large blobs
+        if area < 3 or area > frame_px * 0.015:
             continue
         perim = cv2.arcLength(cnt, True)
         if perim < 1:
             continue
-        # Circularity: 1.0 = perfect circle.  Laser dots are nearly circular.
         circ = 4 * np.pi * area / (perim * perim)
         if circ < 0.25:
             continue
-        score = area * circ   # prefer large, round blobs
-        if score > best_score:
-            best_score = score
-            best = cnt
+        M = cv2.moments(cnt)
+        if M["m00"] == 0:
+            continue
+        cx = M["m10"] / M["m00"]
+        cy = M["m01"] / M["m00"]
+        dots.append({
+            "x":  round(cx / w, 3),
+            "y":  round(cy / h, 3),
+            "r":  round(float(np.sqrt(area / np.pi)), 1),
+        })
 
-    if best is None:
-        return None
-
-    M = cv2.moments(best)
-    if M["m00"] == 0:
-        return None
-
-    cx = M["m10"] / M["m00"]
-    cy = M["m01"] / M["m00"]
-    return {
-        "x":  round(cx / w, 3),   # normalised 0-1 (left→right)
-        "y":  round(cy / h, 3),   # normalised 0-1 (top→bottom)
-        "r":  round(float(np.sqrt(cv2.contourArea(best) / np.pi)), 1),
-        "px": int(cx),
-        "py": int(cy),
-    }
+    # Sort left-to-right for stable ordering
+    dots.sort(key=lambda d: d["x"])
+    return dots
 
 
 # ── Detection class ───────────────────────────────────────────────────────────
@@ -233,7 +224,7 @@ class CameraDetector:
         self.on_detection   = on_detection or (lambda e: None)
         self._stop          = threading.Event()
         self._last_snapshot = None
-        self._last_laser_xy: tuple[float, float] | None = None
+        self._last_laser_key: tuple = ()   # dedup key: quantized dot positions
 
     def start(self):
         threading.Thread(target=self._capture_loop, daemon=True, name="cam-capture").start()
@@ -385,23 +376,16 @@ class CameraDetector:
             if yolo_person_seen:
                 event["persons"] = 1
 
-        # ── Laser dot ─────────────────────────────────────────────────────────
-        laser = _detect_laser_dot(frame)
-        laser_changed = False
-        if laser:
-            event["laser"] = laser
-            lx, ly = laser["x"], laser["y"]
-            if self._last_laser_xy is None:
-                laser_changed = True   # dot appeared
-            else:
-                dx = abs(lx - self._last_laser_xy[0])
-                dy = abs(ly - self._last_laser_xy[1])
-                if dx > LASER_MOVE_THRESH or dy > LASER_MOVE_THRESH:
-                    laser_changed = True   # dot moved significantly
-            self._last_laser_xy = (lx, ly)
-        elif self._last_laser_xy is not None:
-            laser_changed = True   # dot disappeared
-            self._last_laser_xy = None
+        # ── Laser dots ────────────────────────────────────────────────────────
+        laser_dots = _detect_laser_dots(frame)
+        event["laser"] = laser_dots
+        # Dedup key: count + quantized positions (grid of 1/THRESH cells)
+        q = int(1 / max(LASER_MOVE_THRESH, 0.01))
+        laser_key = tuple(
+            (round(d["x"] * q), round(d["y"] * q)) for d in laser_dots
+        )
+        laser_changed = laser_key != self._last_laser_key
+        self._last_laser_key = laser_key
 
         # ── Dedup ─────────────────────────────────────────────────────────────
         snap = (

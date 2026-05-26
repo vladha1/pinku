@@ -421,41 +421,67 @@ def _dispatch_gestures(event: dict):
 
 
 # ── Laser dot handler ────────────────────────────────────────────────────────
-#
-# The frame is divided into a 3×3 grid of named zones:
-#
-#   top-left    | top-center    | top-right
-#   mid-left    | center        | mid-right
-#   bot-left    | bot-center    | bot-right
-#
-# Extend this to trigger actions (e.g. laser on top-right = lights on).
 
-def _laser_zone(x: float, y: float) -> str:
-    col = "left" if x < 0.33 else ("right" if x > 0.67 else "center")
-    row = "top"  if y < 0.33 else ("bot"   if y > 0.67 else "mid")
-    return f"{row}-{col}" if not (row == "mid" and col == "center") else "center"
+import math as _math
+
+_last_laser_spoke: float = 0.0   # prevent re-announcing the same score
+
+def _dart_score(x: float, y: float) -> tuple[int, str]:
+    """
+    Map a normalised (x, y) position to a dartboard score centred in the frame.
+    100 = bullseye, decreasing rings outward, 0 = off-board.
+    Returns (score, callout_text).
+    """
+    # Distance from centre (0.5, 0.5), scaled so the frame corner = 1.0
+    dx = (x - 0.5) * 2          # -1 .. +1
+    dy = (y - 0.5) * 2
+    dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
+
+    if   dist < 0.07: return 100, "Bullseye! One hundred!"
+    elif dist < 0.18: return  75, "Seventy five!"
+    elif dist < 0.32: return  50, "Fifty!"
+    elif dist < 0.48: return  25, "Twenty five."
+    elif dist < 0.65: return  10, "Ten."
+    else:             return   0, "Miss."
 
 
-_last_laser_log: float = 0.0   # rate-limit dashboard log spam
+def _handle_laser(dots: list[dict]):
+    """
+    Called whenever green laser dots appear, move, or disappear.
 
-def _handle_laser(laser: dict):
-    """Called whenever the green laser dot appears, moves, or disappears."""
-    global _last_laser_log
-    x, y = laser["x"], laser["y"]
-    zone = _laser_zone(x, y)
+    1 dot  → dartboard score callout (centre of frame = 100 pts).
+    2+ dots → mute / unmute toggle.
+    """
+    global _last_laser_spoke
 
-    # Rate-limit log to once per second so it doesn't spam
+    if not dots:
+        return
+
+    # ── Multi-dot: toggle mute ────────────────────────────────────────────────
+    if len(dots) >= 2:
+        _log("laser", f"🔴🔴 {len(dots)} laser dots → mute toggle")
+        if _user_muted.is_set():
+            _handle_unmute()
+        else:
+            _handle_mute()
+        return
+
+    # ── Single dot: dartboard score ───────────────────────────────────────────
+    dot = dots[0]
+    x, y = dot["x"], dot["y"]
+    score, callout = _dart_score(x, y)
+
     now = time.time()
-    if now - _last_laser_log > 1.0:
-        _log("laser", f"🔴 Laser → zone={zone}  ({x:.2f}, {y:.2f})")
-        _last_laser_log = now
+    _log("laser", f"🎯 Laser ({x:.2f},{y:.2f}) → {score} pts")
+    dashboard.update_status(laser={"x": x, "y": y, "score": score})
 
-    dashboard.update_status(laser={"x": x, "y": y, "zone": zone})
-
-    # ── Zone-based actions (add your own here) ────────────────────────────────
-    # Example (uncomment + extend):
-    # if zone == "top-right":
-    #     _dispatch_action({"action": "lights_on", "lang": "en", "transcript": ""})
+    # Speak the score (rate-limited: don't re-announce if dot barely moved)
+    if now - _last_laser_spoke > 1.5 and not _user_muted.is_set():
+        _last_laser_spoke = now
+        threading.Thread(
+            target=tts.speak, kwargs={"text": callout, "block": False},
+            daemon=True, name="laser-score",
+        ).start()
 
 
 # ── Detection callback ────────────────────────────────────────────────────────
@@ -481,7 +507,7 @@ def on_detection(event: dict):
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = now
 
-    if event.get("laser"):
+    if event.get("laser"):   # non-empty list
         _handle_laser(event["laser"])
 
     if event.get("gestures"):
