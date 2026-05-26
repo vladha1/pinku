@@ -159,6 +159,8 @@ RULES:
 - Hindi: Devanagari script in reply, no English unless user mixed it
 - Scripture: include original script verse if relevant, then meaning + one insight
 - Keep replies ≤60 words (scripture/knowledge: ≤100 words)
+- For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS,
+  or anything requiring real-time information → set reply: "" (system will fetch fresh data)
 """
 
 # Wake rule injected into STEP 2 depending on session state
@@ -272,8 +274,11 @@ def _ollama_call(messages: list[dict], temperature: float = 0.1,
 # ── Gemini (chat + vision) ────────────────────────────────────────────────────
 
 def _gemini_call(contents: list[dict], temperature: float = 0.9,
-                 max_tokens: int = 400, system: str = "") -> str:
-    """POST to Gemini generateContent REST API."""
+                 max_tokens: int = 400, system: str = "",
+                 use_search: bool = False) -> str:
+    """POST to Gemini generateContent REST API.
+    use_search=True enables Google Search grounding for real-time answers.
+    """
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY not set")
 
@@ -289,6 +294,8 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     }
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
+    if use_search:
+        body["tools"] = [{"google_search": {}}]
 
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -298,7 +305,10 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # Extract text — grounded responses may have multiple parts; join them
+        parts = data["candidates"][0]["content"]["parts"]
+        text = " ".join(p.get("text", "") for p in parts).strip()
+        return text
     except urllib.error.URLError as e:
         raise RuntimeError(f"Gemini unreachable ({e})") from e
     except (KeyError, IndexError) as e:
@@ -366,7 +376,8 @@ def chat(transcript: str,
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        reply = _gemini_call(contents, temperature=0.9, max_tokens=400, system=system)
+        reply = _gemini_call(contents, temperature=0.9, max_tokens=400,
+                             system=system, use_search=True)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
         return reply
     except Exception as e:

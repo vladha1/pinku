@@ -161,7 +161,7 @@ def _handle_chat(action: dict):
     tr    = action.get("transcript", "")
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
-    _log("source", f"Gemini text ({llm.GEMINI_MODEL})")
+    _log("source", f"Gemini + Google Search ({llm.GEMINI_MODEL})")
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
