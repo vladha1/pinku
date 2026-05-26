@@ -213,7 +213,8 @@ def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
 
     for cnt in cnts:
         area = cv2.contourArea(cnt)
-        if area < 3 or area > frame_px * 0.015:
+        # Min radius ~3px (r²π≈28) filters indicator LEDs; max 1.5% of frame
+        if area < 28 or area > frame_px * 0.015:
             continue
         perim = cv2.arcLength(cnt, True)
         if perim < 1:
@@ -252,6 +253,7 @@ class CameraDetector:
         self._stop          = threading.Event()
         self._last_snapshot = None
         self._last_laser_key: tuple = ()   # dedup key: quantized dot positions
+        self._laser_warmup  = 8            # ignore first N laser frames (lets LEDs settle)
 
     def start(self):
         threading.Thread(target=self._capture_loop, daemon=True, name="cam-capture").start()
@@ -354,6 +356,18 @@ class CameraDetector:
     def _run_laser(self, frame):
         """Fast laser detection — runs ~8 fps independent of YOLO."""
         laser_dots = _detect_laser_dots(frame)
+
+        # Warmup: consume first N frames silently so always-on LEDs settle
+        # into the baseline key and are never reported as "appeared"
+        if self._laser_warmup > 0:
+            self._laser_warmup -= 1
+            q = int(1 / max(LASER_MOVE_THRESH, 0.01))
+            self._last_laser_key = tuple(
+                (round(d["x"] * q), round(d["y"] * q)) for d in laser_dots
+            )
+            if self._laser_warmup == 0:
+                print(f"[Laser] warmup done — baseline has {len(laser_dots)} dot(s) (LEDs/noise ignored)")
+            return
 
         # Always update the camera overlay
         with _laser_overlay_lock:
