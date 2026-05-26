@@ -127,12 +127,12 @@ STEP 3 — REPLY
 Generate a spoken reply for intents you can answer directly.
 
 Return ONLY valid JSON — no markdown, no explanation:
-{{
+{
   "transcript": "<exact words, or empty string if no clear speech>",
   "lang": "en" or "hi",
   "action": "<see list>",
   "reply": "<spoken response, or empty string>"
-}}
+}
 
 ACTION LIST (pick exactly one):
 "ignore"     → background noise, TV, side-conversation, unintelligible, or not for Pinky → reply must be ""
