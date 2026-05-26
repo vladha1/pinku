@@ -23,7 +23,8 @@ import cv2
 from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, MIN_SHOULDER_PX,
-    LASER_DETECT, LASER_HUE_LO, LASER_HUE_HI, LASER_MOVE_THRESH,
+    LASER_DETECT, LASER_HUE_LO, LASER_HUE_HI, LASER_SAT_MIN, LASER_VAL_MIN,
+    LASER_POLL_SEC, LASER_MOVE_THRESH,
 )
 
 # ── COCO 17-point pose keypoint indices ───────────────────────────────────────
@@ -172,8 +173,8 @@ def _detect_laser_dots(frame: np.ndarray) -> list[dict]:
     hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
-        np.array([LASER_HUE_LO, 160, 180], np.uint8),
-        np.array([LASER_HUE_HI, 255, 255], np.uint8),
+        np.array([LASER_HUE_LO, LASER_SAT_MIN, LASER_VAL_MIN], np.uint8),
+        np.array([LASER_HUE_HI, 255,            255           ], np.uint8),
     )
     mask = cv2.GaussianBlur(mask, (7, 7), 0)
     _, mask = cv2.threshold(mask, 80, 255, cv2.THRESH_BINARY)
@@ -293,22 +294,52 @@ class CameraDetector:
         print(f"[Camera] Detection status: {_det_status}")
         _push_status()
 
-        last_detect = 0.0
+        last_yolo  = 0.0
+        last_laser = 0.0
         while not self._stop.is_set():
             frame = get_frame()
             if frame is None:
-                time.sleep(0.1); continue
-            now = time.time()
-            if now - last_detect < DETECT_EVERY:
                 time.sleep(0.05); continue
-            last_detect = now
-            try:
-                self._run_detection(frame, yolo, pose_model)
-            except Exception:
-                print(f"[Camera] Detection error:\n{traceback.format_exc()}")
-                time.sleep(1.0)
+            now = time.time()
+
+            # ── Laser: fast independent loop (~8 fps) ─────────────────────────
+            if LASER_DETECT and now - last_laser >= LASER_POLL_SEC:
+                last_laser = now
+                try:
+                    self._run_laser(frame)
+                except Exception:
+                    pass   # never let laser errors kill the loop
+
+            # ── YOLO + pose: slow loop (every DETECT_EVERY seconds) ───────────
+            if now - last_yolo >= DETECT_EVERY:
+                last_yolo = now
+                try:
+                    self._run_detection(frame, yolo, pose_model)
+                except Exception:
+                    print(f"[Camera] Detection error:\n{traceback.format_exc()}")
+                    time.sleep(1.0)
+            else:
+                time.sleep(0.05)
 
         print("[Camera] Detection stopped")
+
+    # ── Laser-only fast path ──────────────────────────────────────────────────
+
+    def _run_laser(self, frame):
+        """Fast laser detection — runs ~8 fps independent of YOLO."""
+        laser_dots = _detect_laser_dots(frame)
+        q = int(1 / max(LASER_MOVE_THRESH, 0.01))
+        laser_key = tuple(
+            (round(d["x"] * q), round(d["y"] * q)) for d in laser_dots
+        )
+        if laser_key == self._last_laser_key:
+            return
+        self._last_laser_key = laser_key
+        self.on_detection({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "objects": [], "persons": 0, "gestures": [],
+            "laser": laser_dots,
+        })
 
     # ── Combined detection ────────────────────────────────────────────────────
 
@@ -316,7 +347,7 @@ class CameraDetector:
         h = frame.shape[0]
         event = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "objects": [], "persons": 0, "gestures": [], "laser": None,
+            "objects": [], "persons": 0, "gestures": [],
         }
 
         # ── Object detection (YOLO) — persons counted separately via face ────────
@@ -376,17 +407,6 @@ class CameraDetector:
             if yolo_person_seen:
                 event["persons"] = 1
 
-        # ── Laser dots ────────────────────────────────────────────────────────
-        laser_dots = _detect_laser_dots(frame)
-        event["laser"] = laser_dots
-        # Dedup key: count + quantized positions (grid of 1/THRESH cells)
-        q = int(1 / max(LASER_MOVE_THRESH, 0.01))
-        laser_key = tuple(
-            (round(d["x"] * q), round(d["y"] * q)) for d in laser_dots
-        )
-        laser_changed = laser_key != self._last_laser_key
-        self._last_laser_key = laser_key
-
         # ── Dedup ─────────────────────────────────────────────────────────────
         snap = (
             event["persons"],
@@ -394,6 +414,6 @@ class CameraDetector:
             tuple(sorted(g["gesture"] for g in event["gestures"])),
         )
         has_det = event["objects"] or event["persons"] or event["gestures"]
-        if (has_det and snap != self._last_snapshot) or laser_changed:
+        if has_det and snap != self._last_snapshot:
             self.on_detection(event)
         self._last_snapshot = snap if has_det else None

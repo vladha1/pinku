@@ -36,11 +36,16 @@ MIN_SHOULDER_PX = int(os.getenv("MIN_SHOULDER_PX", "100"))
 
 # ── Laser dot detection ───────────────────────────────────────────────────────
 # Detects a green laser pointer dot on the wall via HSV masking.
-# Set LASER_DETECT=0 to disable. Adds ~2ms per detection cycle.
-LASER_DETECT     = bool(int(os.getenv("LASER_DETECT", "1")))
-# HSV hue range (OpenCV 0-180 scale) for green laser. 532nm pointer ≈ H 55-75.
-LASER_HUE_LO     = int(os.getenv("LASER_HUE_LO",  "40"))
-LASER_HUE_HI     = int(os.getenv("LASER_HUE_HI",  "90"))
+# Set LASER_DETECT=0 to disable.
+LASER_DETECT      = bool(int(os.getenv("LASER_DETECT", "1")))
+# HSV ranges (OpenCV scale: H 0-180, S 0-255, V 0-255).
+# 532 nm green laser ≈ H 55-75. Loosen S/V if dot isn't detected.
+LASER_HUE_LO      = int(os.getenv("LASER_HUE_LO",  "35"))
+LASER_HUE_HI      = int(os.getenv("LASER_HUE_HI",  "95"))
+LASER_SAT_MIN     = int(os.getenv("LASER_SAT_MIN",  "80"))   # lower = easier to detect
+LASER_VAL_MIN     = int(os.getenv("LASER_VAL_MIN", "140"))   # lower = easier to detect
+# Laser runs its own fast loop independent of YOLO (cheap HSV op, ~2ms)
+LASER_POLL_SEC    = float(os.getenv("LASER_POLL_SEC", "0.12"))   # ~8 fps
 # Movement threshold — only re-fire if dot moves more than this fraction of frame
 LASER_MOVE_THRESH = float(os.getenv("LASER_MOVE_THRESH", "0.04"))
 
