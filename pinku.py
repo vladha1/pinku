@@ -67,6 +67,7 @@ _det_logger    = log_module.DetectionLogger()
 _last_speech_at: float = time.time()   # reset on every utterance / wake / gesture
 _last_human_at:  float = 0.0           # last time camera saw a person in frame
 _camera_enabled: bool  = False         # True once camera starts; enables auto-wake
+_settle_until:   float = 0.0           # voice loop blocked until this time (TTS + echo settle)
 
 # How long after last camera person detection before we consider room empty
 _HUMAN_GONE_SEC = 12.0
@@ -108,48 +109,46 @@ def _brief_mute(seconds: float = 1.5):
 
 
 def _speak_reply(reply: str, is_hi: bool):
-    global _last_speech_at
+    global _last_speech_at, _settle_until
     # Hard guard: if already speaking, discard this reply rather than overlap
     if tts.is_speaking():
         _log("info", "Already speaking — discarded duplicate reply")
         return
     _log("pinku", reply)
     dashboard.update_status(speaking=True)
-    _muted.set()                          # silence mic while speaking to prevent feedback
+    _muted.set()
 
-    # Release the processing lock now — _muted + tts.is_speaking() guard from here.
-    # This lets the voice loop accept the next question as soon as speech ends + settles,
-    # without waiting for the full TTS playback to finish first.
-    try:
-        _processing.release()
-    except RuntimeError:
-        pass   # wasn't held (called outside the voice loop)
-
-    # Ask TTS for the known duration before playback starts (say: word-count math;
-    # edge-tts: afinfo on the generated MP3 file). Use it to schedule unmute precisely.
     known_duration = tts.known_duration(reply)
     settle          = max(1.5, min(known_duration * 0.25, 3.5))
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s  total_mute={known_duration+settle:.1f}s")
 
-    # Start the unmute timer NOW, before playback begins.
-    # It sleeps for known_duration + settle so it fires right as the echo fades.
-    # The voice loop sees is_muted()=True and stays in its 0.2s sleep the whole
-    # time — wait_for_utterance is never called while speech+echo are in the air.
+    # Block the voice loop for the FULL TTS+settle window, even if the mute
+    # timer fires early or the processing lock is released early.
+    _settle_until = time.time() + known_duration + settle
+
+    # Release the processing lock now so the voice loop can re-enter once the
+    # settle window expires (it checks _settle_until separately).
+    try:
+        _processing.release()
+    except RuntimeError:
+        pass
+
     def _unmute_after():
         time.sleep(known_duration + settle)
         if not _user_muted.is_set():
             _muted.clear()
     threading.Thread(target=_unmute_after, daemon=True, name="tts-settle").start()
 
-    tts.speak(reply, prefer_hi=is_hi, block=True)   # blocks for actual playback
+    tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
-    # Safety: if the timer fired early (estimate was short), _muted is already
-    # cleared while echo is still in the air. Re-mute for a fresh settle period.
+    # Safety: if the estimate was short, the timer may have fired while TTS was
+    # still playing. Extend _settle_until and re-mute for a fresh settle period.
     if not _muted.is_set() and not _user_muted.is_set():
         print(f"[TTS] timer fired early — re-muting for {settle:.1f}s settle")
         _muted.set()
+        _settle_until = time.time() + settle
         def _re_settle():
             time.sleep(settle)
             if not _user_muted.is_set():
@@ -676,12 +675,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if is_muted() or tts.is_speaking():
             continue
 
-        # ── Echo / double-response guard ─────────────────────────────────────────
-        # Drop audio captured within _ECHO_GUARD_SEC of the last spoken reply.
-        # Prevents the TTS output (or room echo) from being processed as a new
-        # utterance when the mute timer fires early or the lock is released early.
-        _ECHO_GUARD_SEC = 2.5
-        if time.time() - _last_speech_at < _ECHO_GUARD_SEC:
+        # ── Settle guard ─────────────────────────────────────────────────────────
+        # _settle_until is set in _speak_reply to now + known_duration + settle.
+        # This blocks new processing for the full TTS+echo window regardless of
+        # whether the mute timer or the processing lock fires early.
+        if time.time() < _settle_until:
             continue
 
         # ── Processing lock: drop audio if already handling a previous utterance ─
