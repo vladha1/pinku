@@ -95,6 +95,9 @@ def _log(level: str, msg: str):
 
 def _speak_reply(reply: str, is_hi: bool):
     global _last_speech_at
+    # Hard guard: never overlap with in-progress speech
+    if tts.is_speaking():
+        tts.stop_speaking()
     _log("pinku", reply)
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
@@ -510,7 +513,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
     global _last_speech_at
 
     while not _stop_all.is_set():
-        if is_muted():
+        if is_muted() or tts.is_speaking():
             time.sleep(0.2)
             continue
 
@@ -526,7 +529,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if pcm is None:
             continue
 
-        if is_muted():
+        if is_muted() or tts.is_speaking():
             continue
 
         # ── Gate: Gemini path (face visible or session open) ──────────────────
