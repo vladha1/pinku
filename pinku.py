@@ -110,6 +110,11 @@ def _brief_mute(seconds: float = 1.5):
 
 def _speak_reply(reply: str, is_hi: bool):
     global _last_speech_at, _settle_until
+    # If user explicitly muted, discard reply entirely — don't speak even if
+    # Gemini finished processing after the button was pressed.
+    if _user_muted.is_set():
+        _log("info", "User muted — discarding reply")
+        return
     # Hard guard: if already speaking, discard this reply rather than overlap
     if tts.is_speaking():
         _log("info", "Already speaking — discarded duplicate reply")
@@ -301,9 +306,11 @@ def _handle_scripture(action: dict):
 
 
 def _handle_mute():
+    global _settle_until
     _user_muted.set()    # track user intent separately from speaking-mute
     _muted.set()
     _awake.clear()
+    _settle_until = 0.0   # cancel any pending settle window
     tts.stop_speaking()
     tts.play_mute()
     dashboard.update_status(state="idle", muted=True)
@@ -317,6 +324,20 @@ def _handle_unmute():
     dashboard.update_status(state="idle", muted=False)
     _log("info", "Unmuted 🎙️")
     _extend_session()
+
+
+def _handle_pause():
+    """Stop Pinky mid-sentence — mic re-opens after a short settle so user can speak next."""
+    global _settle_until
+    was_speaking = tts.is_speaking()
+    tts.stop_speaking()
+    _settle_until = 0.0   # cancel any lingering settle window
+    if was_speaking:
+        _log("info", "Paused ⏸")
+    # Brief mute (1.5 s) so the mic doesn't re-open instantly and capture echo/room noise
+    _brief_mute(1.5)
+    dashboard.update_status(speaking=False,
+                            state="awake" if _awake.is_set() else "idle")
 
 
 def _extend_session():
@@ -792,7 +813,8 @@ def main():
         dashboard.register_action("wake",         _extend_session)
         dashboard.register_action("mute",         _handle_mute)
         dashboard.register_action("unmute",       _handle_unmute)
-        dashboard.register_action("stop",         tts.stop_speaking)
+        dashboard.register_action("pause",        _handle_pause)
+        dashboard.register_action("stop",         _handle_pause)   # alias
         dashboard.register_action("mute_toggle",  lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
 
     # ── Camera ────────────────────────────────────────────────────────────────

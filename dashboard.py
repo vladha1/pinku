@@ -990,8 +990,8 @@ body {
     </div>
   </div>
   <div class="header-btns">
-    <button class="hdr-btn stop-btn" id="stop-btn" title="Stop speaking">⏹</button>
-    <button class="hdr-btn mute-btn" id="mute-btn" title="Mute / Unmute">🔇</button>
+    <button class="hdr-btn stop-btn" id="stop-btn" title="Pause — stop speaking, mic re-opens after">⏸</button>
+    <button class="hdr-btn mute-btn" id="mute-btn" title="Mute / Unmute listening">🔇</button>
   </div>
 </header>
 
@@ -1271,7 +1271,7 @@ document.getElementById('wake-btn').addEventListener('click', () => {
   setFaceClass('awake');
 });
 document.getElementById('stop-btn').addEventListener('click', () => {
-  apiAction('stop');
+  apiAction('pause');
 });
 document.getElementById('mute-btn').addEventListener('click', () => {
   apiAction('mute_toggle');
