@@ -379,7 +379,9 @@ def on_detection(event: dict):
 _WAKE_PHRASES = [
     "hey pinku", "hi pinku", "ok pinku", "okay pinku",
     "hello pinku", "yo pinku", "pinku",
-    # Common Whisper mishearings of "Pinku":
+    "hey pinky", "hi pinky", "ok pinky", "okay pinky",
+    "hello pinky", "yo pinky", "pinky",
+    # Common Whisper mishearings of "Pinku"/"Pinky":
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
     "hey pink", "hi pink", "ok pink", "pink",
     "hey pingu", "pingu",
@@ -402,7 +404,7 @@ import re as _re
 _PINKU_RE = _re.compile(
     r'^[.\s]*'                                            # strip leading dots/spaces Whisper adds
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे)[,.\s]+)?'   # optional prefix + any punctuation/space
-    r'(pinku|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink|पिंकू|पिंकु|पिंको)\b[,\s।]*',
+    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[,\s।]*',
     _re.IGNORECASE,
 )
 
@@ -494,7 +496,7 @@ def _handle_gemini_result(result: dict):
     # ── Hallucination guard ───────────────────────────────────────────────────
     # If the transcript is only the wake word (nothing actionable after it),
     # treat as ignore — Gemini sometimes hallucinates "Pinku" from background noise.
-    _WAKE_WORDS = {"pinku", "pinky", "pink", "pingu"}
+    _WAKE_WORDS = {"pinku", "pinky", "pinko", "pink", "pingu", "pinkoo"}
     _transcript_words = [w.strip(".,!?।").lower() for w in transcript.split()]
     _content_words = [w for w in _transcript_words if w not in _WAKE_WORDS]
     if not _content_words:
