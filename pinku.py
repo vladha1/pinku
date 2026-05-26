@@ -95,9 +95,10 @@ def _log(level: str, msg: str):
 
 def _speak_reply(reply: str, is_hi: bool):
     global _last_speech_at
-    # Hard guard: never overlap with in-progress speech
+    # Hard guard: if already speaking, discard this reply rather than overlap
     if tts.is_speaking():
-        tts.stop_speaking()
+        _log("info", "Already speaking — discarded duplicate reply")
+        return
     _log("pinku", reply)
     dashboard.update_status(speaking=True)
     _muted.set()                          # silence mic while speaking to prevent feedback
