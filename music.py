@@ -489,6 +489,7 @@ def start(
         _set_state(
             state="generating", theme=theme, prompt=prompt,
             elapsed=0, total=dur, chunk=0, chunks_total=chunks_needed, error="",
+            gen_start=int(time.time()), chunk_sec=chunk_sec,
         )
         print(f"[Music] ▶ theme={theme!r}  dur={dur}s  session={session_id}")
 
@@ -501,7 +502,8 @@ def start(
                     chunk_q.put(None)
                     return
                 try:
-                    _set_state(state="generating")
+                    gen_start = time.time()
+                    _set_state(state="generating", chunk=i, chunks_total=chunks_needed)
                     # Save directly to library dir with stable filename
                     lib_path = os.path.join(LIBRARY_DIR, f"{session_id}_{i}.wav")
                     if MUSIC_BACKEND == "abc":
@@ -516,10 +518,15 @@ def start(
                         # Override the /tmp path to go straight to library
                         import scipy.io.wavfile, numpy as np, torch
                         model, processor = _load_musicgen()
+                        # _load_musicgen may transiently set state to loading→idle;
+                        # re-assert generating so the UI stays correct.
+                        if not _stop_event.is_set():
+                            _set_state(state="generating", chunk=i, chunks_total=chunks_needed,
+                                       gen_start=int(gen_start), chunk_sec=chunk_sec)
                         # Move inputs to the same device as the model (MPS / CPU)
                         inputs = processor(text=[prompt], padding=True, return_tensors="pt")
                         inputs = {k: v.to(_mg_device) for k, v in inputs.items()}
-                        _dlog(f"generating chunk {i} ({chunk_sec*50} tokens) on {_mg_device}…")
+                        _dlog(f"generating chunk {i+1}/{chunks_needed} ({chunk_sec*50} tokens) on {_mg_device}…")
                         with torch.no_grad():
                             audio_values = model.generate(**inputs, max_new_tokens=chunk_sec * 50)
                         _dlog(f"raw shape: {tuple(audio_values.shape)}")

@@ -189,13 +189,26 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
 /* ── Progress bar ── */
 .progress-wrap { width: 100%; max-width: 600px; padding: 10px 20px 0; display: none; }
 .progress-track {
-  height: 5px; border-radius: 3px; background: rgba(255,255,255,0.06);
-  overflow: hidden;
+  height: 5px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden;
 }
 .progress-fill {
   height: 100%; border-radius: 3px;
   background: linear-gradient(90deg, #c084fc, #818cf8);
-  transition: width 0.5s linear; width: 0%;
+  transition: width 0.8s linear; width: 0%;
+}
+/* Chunk generation sub-bar (amber, shown only while generating) */
+.chunk-track {
+  height: 4px; border-radius: 3px; background: rgba(255,255,255,0.04);
+  overflow: hidden; margin-top: 5px;
+}
+.chunk-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+  transition: width 1s linear; width: 0%;
+}
+.progress-meta {
+  display: flex; justify-content: space-between;
+  font-size: 0.7rem; color: #64748b; margin-top: 5px;
 }
 
 /* ── Preset grid ── */
@@ -350,6 +363,13 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
   <!-- Progress -->
   <div class="progress-wrap" id="progress-wrap">
     <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="chunk-track"  id="chunk-track" style="display:none">
+      <div class="chunk-fill" id="chunk-fill"></div>
+    </div>
+    <div class="progress-meta" id="progress-meta" style="display:none">
+      <span id="meta-left"></span>
+      <span id="meta-right"></span>
+    </div>
   </div>
 
   <!-- Preset grid -->
@@ -505,6 +525,11 @@ function applyState(s) {
 
   const active     = ['loading','generating','playing'].includes(state);
   const canPause   = state === 'playing';
+  const chunkTrack = document.getElementById('chunk-track');
+  const chunkFill  = document.getElementById('chunk-fill');
+  const metaRow    = document.getElementById('progress-meta');
+  const metaLeft   = document.getElementById('meta-left');
+  const metaRight  = document.getElementById('meta-right');
 
   // Player controls visibility
   controls.classList.toggle('visible', active);
@@ -522,10 +547,33 @@ function applyState(s) {
     icon.textContent  = '⏳';
     label.textContent = s.cached ? 'Loading model from cache…' : 'Downloading model (~300 MB)…';
     sub.textContent   = s.cached ? 'Usually takes ~10s on M4' : 'First run only — saved to ~/pinku/models/';
+    chunkTrack.style.display = 'none';
+    metaRow.style.display    = 'none';
+    progFill.style.width = '0%';
   } else if (state === 'generating') {
+    const chunkNum   = (s.chunk || 0) + 1;
+    const chunkTot   = s.chunks_total || '?';
+    const chunkSec   = s.chunk_sec   || 30;
+    const genStart   = s.gen_start   || 0;
+    const elapsed    = genStart > 0 ? Math.round(Date.now()/1000 - genStart) : 0;
+    const pct        = chunkSec > 0 ? Math.min(98, Math.round(elapsed / chunkSec * 100)) : 0;
+    const remaining  = chunkSec > 0 ? Math.max(0, chunkSec - elapsed) : 0;
+
     icon.textContent  = '🎼';
     label.textContent = `Generating "${s.theme || ''}"…`;
-    sub.textContent   = `Chunk ${(s.chunk||0)+1} of ${s.chunks_total||'?'} · please wait`;
+    sub.textContent   = `Chunk ${chunkNum}${chunkTot !== '?' ? ' of ' + chunkTot : ''} · ~${remaining}s left`;
+
+    // Amber chunk progress bar
+    chunkTrack.style.display = '';
+    chunkFill.style.width    = pct + '%';
+
+    // Overall playlist progress (chunks done / total)
+    const overallPct = chunkTot !== '?' ? Math.round(((chunkNum - 1) / chunkTot) * 100) : 0;
+    progFill.style.width = overallPct + '%';
+
+    metaRow.style.display = '';
+    metaLeft.textContent  = `Chunk ${chunkNum}${chunkTot !== '?' ? '/' + chunkTot : ''} — ${elapsed}s elapsed`;
+    metaRight.textContent = `~${Math.round(remaining)}s remaining`;
   } else if (state === 'playing') {
     icon.textContent  = paused ? '⏸' : '♪';
     label.textContent = paused ? `⏸ ${s.theme || ''}` : `♪ ${s.theme || ''}`;
@@ -537,6 +585,8 @@ function applyState(s) {
           ? `${fmt(el)} / ${fmt(tot)} · chunk ${s.chunk||1}`
           : `${fmt(el)} elapsed`);
     progFill.style.width = (tot > 0 ? Math.min(100,(el/tot*100)).toFixed(1) : 50) + '%';
+    chunkTrack.style.display = 'none';
+    metaRow.style.display    = 'none';
   } else if (state === 'error') {
     icon.textContent  = '⚠️';
     label.textContent = 'Error — tap Generate to retry';
@@ -550,6 +600,8 @@ function applyState(s) {
     label.textContent = 'Ready to play';
     sub.textContent   = 'Choose a theme below';
     progFill.style.width = '0%';
+    chunkTrack.style.display = 'none';
+    metaRow.style.display    = 'none';
   }
   renderLibrary();
 }
