@@ -217,16 +217,19 @@ def _generate_chunk_abc(theme: str, idx: int) -> str | None:
 
 # ── Theme → prompt ────────────────────────────────────────────────────────────
 
+_NO_VOCALS = ", no vocals, instrumental only"
+
 def resolve_prompt(theme: str) -> str:
-    """Map a user theme to a MusicGen prompt. Uses presets, then passes through."""
+    """Map a user theme to a MusicGen prompt. Uses presets, then passes through.
+    Always appends a no-vocals tag so MusicGen never generates singing."""
     t = theme.strip().lower()
     if t in PRESETS:
-        return PRESETS[t]
-    for key, prompt in PRESETS.items():
-        if key in t:
-            return prompt
-    # Unknown theme — pass directly to MusicGen (it handles natural language well)
-    return theme
+        base = PRESETS[t]
+    else:
+        base = next((p for k, p in PRESETS.items() if k in t), theme)
+    # Strip any accidental duplicate before appending
+    base = base.replace(_NO_VOCALS, "").rstrip(", ")
+    return base + _NO_VOCALS
 
 
 # ── afplay playback ───────────────────────────────────────────────────────────
