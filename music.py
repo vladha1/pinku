@@ -153,6 +153,8 @@ _state: dict = {
     "chunk":        0,
     "chunks_total": 0,
     "error":        "",
+    "paused":       False,
+    "cached":       False,
 }
 
 _on_state_change:   Callable[[dict], None] | None = None
@@ -622,7 +624,43 @@ def stop():
     t = _play_thread
     if t and t.is_alive():
         t.join(timeout=3)
-    _set_state(state="idle", elapsed=0, chunk=0, chunks_total=0, error="")
+    _set_state(state="idle", elapsed=0, chunk=0, chunks_total=0, error="", paused=False)
+
+
+def pause():
+    """Pause current afplay with SIGSTOP (instant, no data loss)."""
+    import signal
+    if get_state()["state"] != "playing":
+        return
+    with _afplay_lock:
+        p = _afplay_proc
+    if p and p.poll() is None:
+        try:
+            p.send_signal(signal.SIGSTOP)
+            _set_state(paused=True)
+        except Exception:
+            pass
+
+
+def resume():
+    """Resume a SIGSTOP-paused afplay with SIGCONT."""
+    import signal
+    with _afplay_lock:
+        p = _afplay_proc
+    if p and p.poll() is None:
+        try:
+            p.send_signal(signal.SIGCONT)
+            _set_state(paused=False)
+        except Exception:
+            pass
+
+
+def pause_toggle():
+    """Toggle pause/resume."""
+    if get_state().get("paused"):
+        resume()
+    else:
+        pause()
 
 
 def play_library_item(

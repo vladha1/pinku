@@ -104,6 +104,12 @@ def api_stop():
     return jsonify({"ok": True})
 
 
+@_app.route("/api/pause", methods=["POST"])
+def api_pause():
+    music.pause_toggle()
+    return jsonify({"ok": True, "paused": music.get_state().get("paused", False)})
+
+
 @_app.route("/api/library")
 def api_library():
     return jsonify(music.list_library())
@@ -200,12 +206,31 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
 .status-sub {
   display: block; font-size: 0.75rem; color: #64748b; margin-top: 2px;
 }
-.stop-btn {
-  padding: 7px 16px; border-radius: 9px; font-size: 0.85rem; font-weight: 700;
-  border: 1px solid rgba(248,113,113,0.4); background: rgba(248,113,113,0.1);
-  color: #f87171; cursor: pointer; flex-shrink: 0; display: none;
+
+/* ── Player controls (shown when playing/paused) ── */
+.player-controls {
+  width: 100%; max-width: 600px; padding: 10px 20px 0;
+  display: none; gap: 8px; flex-wrap: wrap;
 }
-.stop-btn:hover { background: rgba(248,113,113,0.22); }
+.player-controls.visible { display: flex; }
+.ctrl-btn {
+  padding: 8px 18px; border-radius: 9px; font-size: 0.9rem; font-weight: 700;
+  cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+}
+.ctrl-pause {
+  border: 1px solid rgba(251,191,36,0.45); background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+}
+.ctrl-pause:hover  { background: rgba(251,191,36,0.24); }
+.ctrl-pause.paused {
+  border-color: rgba(74,222,128,0.5); background: rgba(74,222,128,0.14);
+  color: #4ade80;
+}
+.ctrl-stop {
+  border: 1px solid rgba(248,113,113,0.4); background: rgba(248,113,113,0.1);
+  color: #f87171;
+}
+.ctrl-stop:hover { background: rgba(248,113,113,0.22); }
 
 /* ── Progress bar ── */
 .progress-wrap { width: 100%; max-width: 600px; padding: 10px 20px 0; display: none; }
@@ -288,21 +313,25 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
 .lib-theme { font-size: 0.9rem; font-weight: 600; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .lib-meta  { font-size: 0.68rem; color: #64748b; margin-top: 1px; }
+.lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .lib-play  {
-  padding: 5px 11px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  padding: 6px 13px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
   border: 1px solid rgba(192,132,252,0.4); background: rgba(192,132,252,0.1); color: var(--accent);
 }
 .lib-play:hover { background: rgba(192,132,252,0.22); }
 .lib-del {
-  padding: 5px 9px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  padding: 6px 11px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
   border: 1px solid rgba(248,113,113,0.3); background: transparent; color: #f87171;
 }
 .lib-del:hover { background: rgba(248,113,113,0.12); }
 .lib-rename {
-  padding: 5px 9px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
-  border: 1px solid rgba(148,163,184,0.2); background: transparent; color: #64748b;
+  padding: 6px 11px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(148,163,184,0.25); background: transparent; color: #94a3b8;
 }
-.lib-rename:hover { background: rgba(148,163,184,0.1); color: #94a3b8; }
+.lib-rename:hover { background: rgba(148,163,184,0.1); color: var(--text); }
 
 /* inline rename edit row */
 .lib-edit-wrap { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
@@ -347,7 +376,12 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
       <span class="status-label" id="s-label">Ready to play</span>
       <span class="status-sub"   id="s-sub">Choose a theme below</span>
     </div>
-    <button class="stop-btn" id="stop-btn" onclick="doStop()">■ Stop</button>
+  </div>
+
+  <!-- Player controls — shown only while generating / playing / paused -->
+  <div class="player-controls" id="player-controls">
+    <button class="ctrl-btn ctrl-pause" id="pause-btn" onclick="doPause()">⏸ Pause</button>
+    <button class="ctrl-btn ctrl-stop"  id="stop-btn"  onclick="doStop()">■ Stop</button>
   </div>
 
   <!-- Progress -->
@@ -454,6 +488,10 @@ function doStop() {
   fetch('/api/stop', {method: 'POST'}).catch(console.error);
 }
 
+function doPause() {
+  fetch('/api/pause', {method: 'POST'}).catch(console.error);
+}
+
 function playLibrary(id) {
   fetch('/api/play_library', {
     method: 'POST',
@@ -482,21 +520,30 @@ function loadLibrary() {
 function applyState(s) {
   if (!s) return;
   _lastState = s;
-  const state    = s.state || 'idle';
+  const state    = s.state  || 'idle';
+  const paused   = !!s.paused;
   const icon     = document.getElementById('s-icon');
   const label    = document.getElementById('s-label');
   const sub      = document.getElementById('s-sub');
-  const stopBtn  = document.getElementById('stop-btn');
+  const controls = document.getElementById('player-controls');
+  const pauseBtn = document.getElementById('pause-btn');
   const playBtn  = document.getElementById('play-btn');
   const progWrap = document.getElementById('progress-wrap');
   const progFill = document.getElementById('progress-fill');
 
-  const active = ['loading','generating','playing'].includes(state);
-  stopBtn.style.display  = active ? '' : 'none';
+  const active     = ['loading','generating','playing'].includes(state);
+  const canPause   = state === 'playing';
+
+  // Player controls visibility
+  controls.classList.toggle('visible', active);
+  pauseBtn.style.display = canPause ? '' : 'none';
+  pauseBtn.classList.toggle('paused', paused);
+  pauseBtn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+
   progWrap.style.display = active ? '' : 'none';
   playBtn.disabled       = active;
   playBtn.textContent    = active ? '♪ Playing…' : '▶ Generate & Play';
-  playBtn.classList.toggle('playing', state === 'playing');
+  playBtn.classList.toggle('playing', state === 'playing' && !paused);
   label.classList.toggle('generating', state === 'generating' || state === 'loading');
 
   if (state === 'loading') {
@@ -508,13 +555,15 @@ function applyState(s) {
     label.textContent = `Generating "${s.theme || ''}"…`;
     sub.textContent   = `Chunk ${(s.chunk||0)+1} of ${s.chunks_total||'?'} · please wait`;
   } else if (state === 'playing') {
-    icon.textContent  = '♪';
-    label.textContent = `♪ ${s.theme || ''}`;
+    icon.textContent  = paused ? '⏸' : '♪';
+    label.textContent = paused ? `⏸ ${s.theme || ''}` : `♪ ${s.theme || ''}`;
     label.classList.remove('generating');
     const el = s.elapsed || 0, tot = s.total || 0;
-    sub.textContent = tot > 0
-      ? `${fmt(el)} / ${fmt(tot)} · chunk ${s.chunk||1}`
-      : `${fmt(el)} elapsed`;
+    sub.textContent = paused
+      ? 'Paused · tap Resume to continue'
+      : (tot > 0
+          ? `${fmt(el)} / ${fmt(tot)} · chunk ${s.chunk||1}`
+          : `${fmt(el)} elapsed`);
     progFill.style.width = (tot > 0 ? Math.min(100,(el/tot*100)).toFixed(1) : 50) + '%';
   } else if (state === 'error') {
     icon.textContent  = '⚠️';
@@ -559,10 +608,12 @@ function renderLibrary() {
         <div class="lib-theme">${esc(item.theme)}</div>
         <div class="lib-meta">${esc(item.created_at)}${mins?' · '+mins:''} · ${size}</div>
       </div>
-      <button class="lib-play"   onclick="playLibrary('${id}')">▶ Play</button>
-      <button class="lib-rename" data-id="${id}" data-theme="${esc(item.theme)}"
-              onclick="startRename(this.dataset.id, this.dataset.theme)">✏</button>
-      <button class="lib-del"    onclick="deleteLibrary('${id}')">🗑</button>
+      <div class="lib-actions">
+        <button class="lib-play"   onclick="playLibrary('${id}')">▶ Play</button>
+        <button class="lib-rename" data-id="${id}" data-theme="${esc(item.theme)}"
+                onclick="startRename(this.dataset.id, this.dataset.theme)">✏ Rename</button>
+        <button class="lib-del"    onclick="deleteLibrary('${id}')">🗑 Delete</button>
+      </div>
     </div>`;
   }).join('');
 }
