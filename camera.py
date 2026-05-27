@@ -25,7 +25,7 @@ from config import (
     CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
     YOLO_MODEL, YOLO_CONF, YOLO_IGNORE, DETECT_EVERY, MIN_SHOULDER_PX,
     LASER_DETECT, LASER_HUE_LO, LASER_HUE_HI, LASER_SAT_MIN, LASER_VAL_MIN,
-    LASER_POLL_SEC, LASER_MOVE_THRESH,
+    LASER_POLL_SEC, LASER_MOVE_THRESH, LASER_MAX_AREA, LASER_MAX_DOTS,
 )
 
 # ── COCO 17-point pose keypoint indices ───────────────────────────────────────
@@ -272,11 +272,12 @@ def _detect_laser_dots(frame: np.ndarray, debug: bool = False) -> list[dict]:
         h_val, s_val, v_val = hsv[hy, hx]
 
         if debug:
+            ok = area >= 8 and area <= LASER_MAX_AREA and circ >= 0.2
             print(f"[Laser debug]   blob area={area:.0f} circ={circ:.2f} "
                   f"HSV=({h_val},{s_val},{v_val}) at ({cx:.0f},{cy:.0f})  "
-                  f"{'PASS' if area >= 8 and circ >= 0.2 else 'FAIL'}")
+                  f"{'PASS' if ok else 'FAIL'} (max_area={LASER_MAX_AREA})")
 
-        if area < 8 or area > frame_px * 0.02:
+        if area < 8 or area > LASER_MAX_AREA:
             continue
         if circ < 0.20:
             continue
@@ -290,6 +291,14 @@ def _detect_laser_dots(frame: np.ndarray, debug: bool = False) -> list[dict]:
         })
 
     dots.sort(key=lambda d: d["x"])
+
+    # Sanity check: if way too many blobs survive it's projector / ambient light,
+    # not real laser dots.  Return empty so the warmup baseline stays clean too.
+    if len(dots) > LASER_MAX_DOTS:
+        if debug:
+            print(f"[Laser debug] {len(dots)} blobs > LASER_MAX_DOTS={LASER_MAX_DOTS} → rejecting frame (projector/noise)")
+        return []
+
     return dots
 
 

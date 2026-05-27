@@ -48,6 +48,12 @@ LASER_VAL_MIN     = int(os.getenv("LASER_VAL_MIN", "100"))   # lower = easier to
 LASER_POLL_SEC    = float(os.getenv("LASER_POLL_SEC", "0.12"))   # ~8 fps
 # Movement threshold — only re-fire if dot moves more than this fraction of frame
 LASER_MOVE_THRESH = float(os.getenv("LASER_MOVE_THRESH", "0.04"))
+# Real laser dots are tiny — reject blobs larger than this many pixels.
+# A 640x480 frame: a dot of radius ~11px = ~380px area. Projector sectors are 1000s of px.
+LASER_MAX_AREA    = int(os.getenv("LASER_MAX_AREA", "400"))
+# If more than this many blobs survive the filters in one frame, it's almost certainly
+# projector noise or ambient green light — ignore the whole frame.
+LASER_MAX_DOTS    = int(os.getenv("LASER_MAX_DOTS", "5"))
 
 # ── Voice activity detection ──────────────────────────────────────────────────
 VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.9"))  # silence to end utterance (was 1.5 — too slow for wake)
