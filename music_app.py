@@ -296,10 +296,21 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
 .play-btn.playing  { background: rgba(74,222,128,0.14); border-color: rgba(74,222,128,0.45); color: #4ade80; }
 
 /* ── Library ── */
-.library-section { width: 100%; max-width: 600px; padding: 20px 20px 0; display: none; }
+.library-section { width: 100%; max-width: 600px; padding: 20px 20px 0; }
+.library-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 10px;
+}
 .library-title {
   font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #64748b; padding-bottom: 8px;
+  color: #64748b;
+}
+.library-count {
+  font-size: 0.68rem; color: #475569;
+}
+.library-empty {
+  padding: 18px 0; text-align: center; color: #475569; font-size: 0.82rem;
+  border: 1px dashed rgba(255,255,255,0.08); border-radius: 11px;
 }
 .lib-item {
   display: flex; align-items: center; gap: 8px;
@@ -417,7 +428,10 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
 
   <!-- Library -->
   <div class="library-section" id="library-section">
-    <div class="library-title">📂 Saved sessions</div>
+    <div class="library-header">
+      <span class="library-title">📂 Saved tracks</span>
+      <span class="library-count" id="library-count"></span>
+    </div>
     <div id="library-list"></div>
   </div>
 
@@ -493,6 +507,11 @@ function doPause() {
 }
 
 function playLibrary(id) {
+  // If this item is already playing, stop it
+  if (_lastState && _lastState.playing_id === id) {
+    doStop();
+    return;
+  }
   fetch('/api/play_library', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -592,24 +611,34 @@ function esc(s) {
 }
 
 function renderLibrary() {
-  const section = document.getElementById('library-section');
-  const list    = document.getElementById('library-list');
-  if (!_library.length) { section.style.display = 'none'; return; }
-  section.style.display = '';
-  const curTheme = _lastState && _lastState.state === 'playing' ? _lastState.theme : null;
+  const list      = document.getElementById('library-list');
+  const countEl   = document.getElementById('library-count');
+  const playingId = _lastState ? (_lastState.playing_id || '') : '';
+
+  if (!_library.length) {
+    countEl.textContent = '';
+    list.innerHTML = `<div class="library-empty">
+      No saved tracks yet — generate some music and it will appear here automatically.
+    </div>`;
+    return;
+  }
+
+  countEl.textContent = _library.length + ' track' + (_library.length !== 1 ? 's' : '');
+
   list.innerHTML = _library.map(item => {
-    const mins   = item.duration_sec > 0 ? Math.round(item.duration_sec/60)+' min' : '';
-    const size   = item.size_kb > 1024 ? (item.size_kb/1024).toFixed(1)+'MB' : item.size_kb+'KB';
-    const active = curTheme === item.theme;
+    const mins   = item.duration_sec > 0 ? Math.round(item.duration_sec / 60) + ' min' : '';
+    const size   = item.size_kb > 1024
+                   ? (item.size_kb / 1024).toFixed(1) + ' MB'
+                   : item.size_kb + ' KB';
+    const active = playingId && playingId === item.id;
     const id     = esc(item.id);
-    // store theme in data attr to avoid inline quote escaping issues
-    return `<div class="lib-item${active?' playing':''}" id="li-${id}">
+    return `<div class="lib-item${active ? ' playing' : ''}" id="li-${id}">
       <div class="lib-info" id="li-info-${id}">
         <div class="lib-theme">${esc(item.theme)}</div>
-        <div class="lib-meta">${esc(item.created_at)}${mins?' · '+mins:''} · ${size}</div>
+        <div class="lib-meta">${esc(item.created_at)}${mins ? ' · ' + mins : ''} · ${size}</div>
       </div>
       <div class="lib-actions">
-        <button class="lib-play"   onclick="playLibrary('${id}')">▶ Play</button>
+        <button class="lib-play"   onclick="playLibrary('${id}')">${active ? '■ Stop' : '▶ Play'}</button>
         <button class="lib-rename" data-id="${id}" data-theme="${esc(item.theme)}"
                 onclick="startRename(this.dataset.id, this.dataset.theme)">✏ Rename</button>
         <button class="lib-del"    onclick="deleteLibrary('${id}')">🗑 Delete</button>

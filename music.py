@@ -155,6 +155,7 @@ _state: dict = {
     "error":        "",
     "paused":       False,
     "cached":       False,
+    "playing_id":   "",      # library item ID currently playing (empty = live generation)
 }
 
 _on_state_change:   Callable[[dict], None] | None = None
@@ -624,7 +625,7 @@ def stop():
     t = _play_thread
     if t and t.is_alive():
         t.join(timeout=3)
-    _set_state(state="idle", elapsed=0, chunk=0, chunks_total=0, error="", paused=False)
+    _set_state(state="idle", elapsed=0, chunk=0, chunks_total=0, error="", paused=False, playing_id="")
 
 
 def pause():
@@ -687,7 +688,7 @@ def play_library_item(
     def _run_lib():
         _set_state(state="playing", theme=theme, prompt=entry.get("prompt",""),
                    elapsed=0, total=int(total), chunk=0,
-                   chunks_total=len(chunks), error="")
+                   chunks_total=len(chunks), error="", playing_id=item_id)
         _dlog(f"▶ library play: {theme!r}  {len(chunks)} chunk(s)")
 
         start_ts  = time.time()
@@ -709,7 +710,7 @@ def play_library_item(
 
         _kill_afplay()
         _set_state(state="idle", elapsed=int(time.time() - start_ts),
-                   chunk=0, chunks_total=0)
+                   chunk=0, chunks_total=0, playing_id="")
         _dlog(f"■ library playback done")
 
     _play_thread = threading.Thread(target=_run_lib, daemon=True, name="music-lib-play")
