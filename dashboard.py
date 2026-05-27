@@ -119,6 +119,13 @@ def log_message(level: str, msg: str):
         "ts":    time.strftime("%H:%M:%S"),
     })
 
+# ── Laser-active flag (set by browser when darts tab is open) ────────────────
+_laser_active = False
+
+def laser_enabled() -> bool:
+    """Returns True only while the darts tab is open in the browser."""
+    return _laser_active
+
 # ── Action callbacks (registered by pinku.py) ─────────────────────────────────
 
 _actions: dict = {}
@@ -379,6 +386,18 @@ def laser_calibrate():
         result = {"ok": True}
     code = 200 if result.get("ok") else 400
     return jsonify(result), code
+
+
+@_app.route("/api/laser/active", methods=["POST"])
+def laser_active_set():
+    """Browser calls this when entering/leaving the darts tab.
+    Body: {"active": true|false}
+    """
+    from flask import jsonify, request as _req
+    global _laser_active
+    data = _req.get_json(silent=True) or {}
+    _laser_active = bool(data.get("active", False))
+    return jsonify({"ok": True, "laser_active": _laser_active})
 
 
 @_app.route("/api/camera/request-permission")
@@ -2024,6 +2043,9 @@ function showTab(name) {
   if (name === 'cam')        startCamera();
   else if (name === 'darts') startDartsCamera();
   else                       { stopCamera(); stopDartsCamera(); }
+  // Tell server whether laser processing should run
+  fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({active: name === 'darts'})}).catch(() => {});
   if (name === 'history') {
     loadHistory().then(() => {
       const box = document.getElementById('history-area');
@@ -2087,6 +2109,9 @@ function connect() {
   };
 }
 connect();
+// Ensure laser is off on fresh page load (home tab is default)
+fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({active: false})}).catch(() => {});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {

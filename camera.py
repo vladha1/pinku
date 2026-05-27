@@ -416,7 +416,15 @@ class CameraDetector:
     # ── Laser-only fast path ──────────────────────────────────────────────────
 
     def _run_laser(self, frame):
-        """Fast laser detection — runs ~8 fps independent of YOLO."""
+        """Fast laser detection — runs ~8 fps independent of YOLO.
+        Only processes when the darts tab is active in the browser."""
+        try:
+            import dashboard as _db
+            if not _db.laser_enabled():
+                return
+        except Exception:
+            pass  # if dashboard not loaded yet, skip silently
+
         laser_dots = _detect_laser_dots(frame)
 
         # Warmup: consume first N frames silently so always-on LEDs settle
