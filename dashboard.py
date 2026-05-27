@@ -1714,25 +1714,24 @@ function dartClear() {
 }
 
 function calibrateLaser() {
-  const btn = document.getElementById('cal-btn');
-  btn.textContent = '⏳ Setting…';
-  btn.disabled = true;
+  // Button may be in Darts tab (dart-cal-btn) or Camera tab (cal-btn)
+  const btn = document.getElementById('dart-cal-btn') || document.getElementById('cal-btn');
+  if (btn) { btn.textContent = '⏳ Setting…'; btn.disabled = true; }
   fetch('/api/laser/calibrate', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:'{}'})
   .then(r => r.json()).then(d => {
     if (d.ok) {
-      btn.textContent = '✅ Set!';
-      addLog('laser', `🎯 Bullseye calibrated → (${(d.bull_x||0).toFixed(3)}, ${(d.bull_y||0).toFixed(3)})`);
+      if (btn) btn.textContent = '✅ Set!';
+      addLog('laser', `🎯 Bullseye set → (${(d.bull_x||0).toFixed(3)}, ${(d.bull_y||0).toFixed(3)})`);
     } else {
-      btn.textContent = '❌ Failed';
+      if (btn) btn.textContent = '❌ ' + (d.error || 'Failed');
       addLog('warn', '🎯 Cal failed: ' + (d.error || 'unknown'));
     }
-    setTimeout(() => { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; }, 3000);
+    setTimeout(() => { if (btn) { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; } }, 3500);
   }).catch(err => {
-    btn.textContent = '❌ Error';
-    btn.disabled = false;
+    if (btn) { btn.textContent = '❌ Error'; btn.disabled = false; }
     addLog('error', 'Calibrate error: ' + err);
-    setTimeout(() => { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; }, 3000);
+    setTimeout(() => { if (btn) { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; } }, 3500);
   });
 }
 
