@@ -22,8 +22,9 @@ flask>=3.0.0
 numpy>=1.26.0
 
 # ── Music generation ─────────────────────────────────────────────────────────
-audiocraft                     # Meta MusicGen — local AI music (pip install audiocraft)
-# Note: audiocraft pulls in torch + torchaudio automatically.
+transformers>=4.40.0           # HuggingFace — provides MusicGen (no C build deps)
+scipy>=1.12.0                  # WAV file writing
+accelerate>=0.29.0             # speeds up model loading on MPS
 # ABC/MIDI fallback (optional, lightweight):
 #   brew install abcmidi fluidsynth fluid-soundfont-gm
 

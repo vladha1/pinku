@@ -91,52 +91,72 @@ def get_state() -> dict:
         return dict(_state)
 
 
-# ── MusicGen backend ──────────────────────────────────────────────────────────
+# ── MusicGen backend (via HuggingFace transformers — no C build deps) ─────────
+# Install: .venv/bin/pip install transformers scipy accelerate
+#
+# Token rate: MusicGen encodes audio at 50 tokens/sec.
+# chunk_sec=30  →  max_new_tokens=1500
 
-_mg_model = None
-_mg_lock  = threading.Lock()
+_mg_model     = None
+_mg_processor = None
+_mg_lock      = threading.Lock()
 
 
 def _load_musicgen():
-    global _mg_model
+    global _mg_model, _mg_processor
     if _mg_model is not None:
-        return _mg_model
+        return _mg_model, _mg_processor
     with _mg_lock:
         if _mg_model is not None:
-            return _mg_model
+            return _mg_model, _mg_processor
         _set_state(state="loading")
         print(f"[Music] Loading MusicGen {MUSICGEN_MODEL!r} …")
         try:
-            from audiocraft.models import MusicGen   # type: ignore
-            _mg_model = MusicGen.get_pretrained(MUSICGEN_MODEL)
-            print("[Music] MusicGen ready ✓")
+            from transformers import (          # type: ignore
+                MusicgenForConditionalGeneration,
+                AutoProcessor,
+            )
         except ImportError:
             raise RuntimeError(
-                "audiocraft not installed — run: pip install audiocraft"
+                "transformers not installed — run: "
+                ".venv/bin/pip install transformers scipy accelerate"
             )
-    return _mg_model
+        _mg_processor = AutoProcessor.from_pretrained(MUSICGEN_MODEL)
+        _mg_model     = MusicgenForConditionalGeneration.from_pretrained(
+            MUSICGEN_MODEL
+        )
+        print("[Music] MusicGen ready ✓")
+    return _mg_model, _mg_processor
 
 
 def _generate_chunk_musicgen(prompt: str, chunk_sec: int, idx: int) -> str:
-    """Generate one WAV chunk via MusicGen. Returns path (without extension)."""
+    """Generate one WAV chunk via MusicGen (transformers). Returns WAV path."""
     import torch
-    model = _load_musicgen()
-    model.set_generation_params(
-        duration=chunk_sec,
-        use_sampling=True,
-        top_k=250,
-        temperature=1.0,
-    )
-    with torch.no_grad():
-        wav = model.generate([prompt])   # [batch=1, channels, samples]
+    import scipy.io.wavfile   # type: ignore
+    import numpy as np
 
-    from audiocraft.data.audio import audio_write   # type: ignore
-    path = f"/tmp/pinku_music_{idx}"
-    audio_write(
-        path, wav[0].cpu(), model.sample_rate,
-        strategy="loudness", loudness_compressor=True,
-    )
-    return path + ".wav"
+    model, processor = _load_musicgen()
+
+    inputs = processor(text=[prompt], padding=True, return_tensors="pt")
+    with torch.no_grad():
+        audio_values = model.generate(
+            **inputs,
+            max_new_tokens=chunk_sec * 50,   # 50 tokens ≈ 1 second
+            do_sample=True,
+            guidance_scale=3.0,
+        )
+
+    # audio_values: [batch, channels, samples] — first result, first channel
+    sr   = model.config.audio_encoder.sampling_rate   # 32000 Hz
+    data = audio_values[0, 0].cpu().numpy()
+
+    # Normalise to int16
+    peak    = np.abs(data).max() or 1.0
+    data_i16 = (data / peak * 32767 * 0.82).astype(np.int16)
+
+    path = f"/tmp/pinku_music_{idx}.wav"
+    scipy.io.wavfile.write(path, rate=sr, data=data_i16)
+    return path
 
 
 # ── ABC/MIDI fallback backend ─────────────────────────────────────────────────
