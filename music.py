@@ -75,6 +75,16 @@ _afplay_lock = threading.Lock()
 _afplay_proc: subprocess.Popen | None = None
 
 
+def _dlog(msg: str, level: str = "music"):
+    """Log to stdout and dashboard Log tab."""
+    print(f"[Music] {msg}")
+    try:
+        import dashboard as _db
+        _db.log_message(level, f"♪ {msg}")
+    except Exception:
+        pass
+
+
 def _set_state(**kwargs):
     with _state_lock:
         _state.update(kwargs)
@@ -138,24 +148,43 @@ def _generate_chunk_musicgen(prompt: str, chunk_sec: int, idx: int) -> str:
     model, processor = _load_musicgen()
 
     inputs = processor(text=[prompt], padding=True, return_tensors="pt")
+    _dlog(f"generating chunk {idx} — {chunk_sec}s ({chunk_sec*50} tokens)…")
+
     with torch.no_grad():
         audio_values = model.generate(
             **inputs,
             max_new_tokens=chunk_sec * 50,   # 50 tokens ≈ 1 second
-            do_sample=True,
-            guidance_scale=3.0,
         )
 
-    # audio_values: [batch, channels, samples] — first result, first channel
-    sr   = model.config.audio_encoder.sampling_rate   # 32000 Hz
-    data = audio_values[0, 0].cpu().numpy()
+    _dlog(f"raw output shape: {tuple(audio_values.shape)}")
+
+    # Shape is [batch, channels, samples] or [batch, samples] depending on version
+    if audio_values.ndim == 3:
+        data = audio_values[0, 0].cpu().numpy()
+    elif audio_values.ndim == 2:
+        data = audio_values[0].cpu().numpy()
+    else:
+        data = audio_values.cpu().numpy().flatten()
+
+    # Sample rate: try config first, fall back to 32000 Hz (MusicGen default)
+    try:
+        sr = model.config.audio_encoder.sampling_rate
+    except Exception:
+        sr = 32000
+
+    _dlog(f"audio: {len(data)} samples @ {sr}Hz = {len(data)/sr:.1f}s")
 
     # Normalise to int16
-    peak    = np.abs(data).max() or 1.0
+    peak     = float(np.abs(data).max()) or 1.0
     data_i16 = (data / peak * 32767 * 0.82).astype(np.int16)
 
     path = f"/tmp/pinku_music_{idx}.wav"
     scipy.io.wavfile.write(path, rate=sr, data=data_i16)
+
+    size_kb = os.path.getsize(path) // 1024
+    _dlog(f"wrote {path} ({size_kb} KB)")
+    if size_kb < 10:
+        raise RuntimeError(f"WAV too small ({size_kb} KB) — generation likely failed")
     return path
 
 
@@ -339,8 +368,10 @@ def start(
                     tmp_files.append(path)
                     chunk_q.put(path)
                 except Exception as e:
-                    print(f"[Music] Chunk {i} generation error: {e}")
-                    _set_state(error=str(e)[:120])
+                    import traceback
+                    _dlog(f"chunk {i} error: {e}", level="error")
+                    _dlog(traceback.format_exc()[:300], level="error")
+                    _set_state(error=str(e)[:160])
                     chunk_q.put(None)
                     return
             chunk_q.put(None)   # sentinel
@@ -364,7 +395,7 @@ def start(
             chunk_idx += 1
             _set_state(state="playing", chunk=chunk_idx,
                        elapsed=int(time.time() - start_ts))
-            print(f"[Music] ♪ playing chunk {chunk_idx}")
+            _dlog(f"▶ playing chunk {chunk_idx}: {path}")
 
             proc = _play_wav_async(path)
 
