@@ -1155,26 +1155,36 @@ body {
 .dgb-player { font-size:1rem; font-weight:800; color:#c084fc; min-width:26px; }
 .dgb-dots   { flex:1; font-size:1.15rem; letter-spacing:3px; }
 .dgb-score  { font-size:1rem; font-weight:700; color:#fbbf24; }
-.darts-leaderboard {
-  width:100%; max-width:640px; flex-shrink:0;
-  padding:4px 12px 2px; display:none;
+.darts-top-row {
+  display:flex; flex-direction:row; align-items:flex-start;
+  width:100%; max-width:860px; gap:0; flex-shrink:0;
 }
-.darts-leaderboard.has-rows { display:block; }
+.darts-leaderboard {
+  flex:1; min-width:130px; max-width:190px; flex-shrink:0;
+  padding:6px 8px 6px; align-self:stretch;
+  background:rgba(255,255,255,0.03);
+  border-left:1px solid rgba(255,255,255,0.07);
+  border-radius:0 8px 8px 0; overflow-y:auto;
+}
 .dart-lb-title {
   font-size:0.65rem; text-transform:uppercase; letter-spacing:0.07em;
   color:#64748b; padding:4px 0 3px;
 }
+.dart-lb-empty {
+  font-size:0.7rem; color:#475569; padding:6px 2px; text-align:center;
+}
 .dart-lb-row {
-  display:flex; align-items:center; gap:8px;
-  padding:5px 8px; border-radius:8px; margin-bottom:3px;
+  display:flex; align-items:center; gap:6px;
+  padding:5px 6px; border-radius:8px; margin-bottom:4px;
   background:rgba(255,255,255,0.04);
   border:1px solid rgba(255,255,255,0.05);
+  flex-wrap:wrap;
 }
 .dart-lb-row.lb-active { border-color:rgba(192,132,252,0.35); background:rgba(192,132,252,0.06); }
-.dart-lb-player { font-size:0.82rem; font-weight:800; color:#c084fc; min-width:24px; }
-.dart-lb-turns  { flex:1; font-size:0.7rem; color:#64748b; }
-.dart-lb-shots  { font-size:0.72rem; color:#94a3b8; }
-.dart-lb-total  { font-size:0.95rem; font-weight:800; min-width:48px; text-align:right; }
+.dart-lb-player { font-size:0.85rem; font-weight:800; color:#c084fc; min-width:22px; }
+.dart-lb-turns  { font-size:0.65rem; color:#64748b; flex:1; }
+.dart-lb-shots  { font-size:0.65rem; color:#94a3b8; width:100%; padding-left:2px; }
+.dart-lb-total  { font-size:1rem; font-weight:800; text-align:right; }
 #darts-hit-layer { position:absolute; inset:0; pointer-events:none; }
 .dart-hit-dot {
   position:absolute;
@@ -1396,10 +1406,17 @@ body {
 
 <!-- Darts area (hidden by default) -->
 <div class="darts-area" id="darts-area">
-  <div class="cam-feed-wrap" id="darts-feed-wrap">
-    <img id="darts-img" alt="Darts camera" draggable="false" style="display:none;-webkit-user-drag:none;">
-    <div class="cam-offline" id="darts-offline">📷 Camera offline or not started</div>
-    <div id="darts-hit-layer"></div>
+  <!-- Top row: camera feed + right-side leaderboard -->
+  <div class="darts-top-row">
+    <div class="cam-feed-wrap" id="darts-feed-wrap">
+      <img id="darts-img" alt="Darts camera" draggable="false" style="display:none;-webkit-user-drag:none;">
+      <div class="cam-offline" id="darts-offline">📷 Camera offline or not started</div>
+      <div id="darts-hit-layer"></div>
+    </div>
+    <!-- Leaderboard (right side panel) -->
+    <div class="darts-leaderboard" id="darts-leaderboard">
+      <div class="dart-lb-title">🏆 Leaderboard</div>
+    </div>
   </div>
   <!-- Game status bar: current player + shot dots + turn total -->
   <div class="darts-gamebar">
@@ -1414,8 +1431,6 @@ body {
     <button class="darts-btn cal-btn"   id="dart-cal-btn"   onclick="calibrateLaser()" title="Point laser at bullseye">🎯 Calibrate</button>
     <button class="darts-btn new-btn"   id="dart-new-btn"   onclick="dartNewGame()">✕ New Game</button>
   </div>
-  <!-- Leaderboard (shown once rounds exist) -->
-  <div class="darts-leaderboard" id="darts-leaderboard"></div>
   <!-- Individual shot log -->
   <div class="darts-score-list" id="darts-score-list"></div>
 </div>
@@ -1804,7 +1819,10 @@ function updateGameBar(g) {
 function updateLeaderboard(rounds, currentPlayer) {
   const el = document.getElementById('darts-leaderboard');
   if (!el) return;
-  if (!rounds || !rounds.length) { el.classList.remove('has-rows'); el.innerHTML = ''; return; }
+  if (!rounds || !rounds.length) {
+    el.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
+    return;
+  }
 
   // Group by player
   const players = {};
@@ -1818,7 +1836,6 @@ function updateLeaderboard(rounds, currentPlayer) {
   // Sort by total descending
   const sorted = Object.entries(players).sort((a, b) => b[1].total - a[1].total);
 
-  el.classList.add('has-rows');
   el.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div>' +
     sorted.map(([pid, p]) => {
       const col = dartColor(p.total / Math.max(1, p.turns));
@@ -1849,7 +1866,7 @@ function dartNewGame() {
   document.getElementById('darts-hit-layer').innerHTML = '';
   document.getElementById('darts-score-list').innerHTML = '';
   const lb = document.getElementById('darts-leaderboard');
-  if (lb) { lb.innerHTML = ''; lb.classList.remove('has-rows'); }
+  if (lb) lb.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
   apiAction('dart_new_game');
 }
 
@@ -2053,7 +2070,7 @@ function connect() {
         const lb    = document.getElementById('darts-leaderboard');
         if (layer) layer.innerHTML = '';
         if (list)  list.innerHTML  = '';
-        if (lb)  { lb.innerHTML = ''; lb.classList.remove('has-rows'); }
+        if (lb)  lb.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
       } else if (data.type === 'dart_hits_clear') {
         const layer = document.getElementById('darts-hit-layer');
         if (layer) layer.innerHTML = '';

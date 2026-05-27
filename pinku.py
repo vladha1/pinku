@@ -569,6 +569,7 @@ def _dart_next_player():
     if not _game_awaiting and _game_shots:
         _end_dart_turn()
     _game_shots.clear()
+    _dart_hits.clear()             # clear so reconnecting clients see only new turn
     _game_player += 1
     _game_awaiting = False
     dashboard.push_dart_hits_clear()   # wipe dots on overlay for new turn
