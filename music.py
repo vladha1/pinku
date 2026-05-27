@@ -26,7 +26,7 @@ import uuid
 from typing import Callable
 
 from config import (
-    MUSIC_BACKEND, MUSICGEN_MODEL, MUSIC_CHUNK_SEC,
+    MUSIC_BACKEND, MUSICGEN_MODEL, MUSIC_CHUNK_SEC, MUSIC_MODEL_CACHE,
 )
 
 # ── Library (persistent saved sessions) ──────────────────────────────────────
@@ -225,18 +225,28 @@ def _load_musicgen():
     with _mg_lock:
         if _mg_model is not None:
             return _mg_model, _mg_processor
-        _set_state(state="loading")
         device = _best_device()
-        print(f"[Music] Loading MusicGen {MUSICGEN_MODEL!r} on {device} …")
+        os.makedirs(MUSIC_MODEL_CACHE, exist_ok=True)
+        _from_cache = os.path.isdir(os.path.join(
+            MUSIC_MODEL_CACHE,
+            "models--" + MUSICGEN_MODEL.replace("/", "--"),
+            "snapshots",
+        ))
+        _set_state(state="loading", cached=_from_cache)
+        print(f"[Music] {'Loading' if _from_cache else 'Downloading'} MusicGen "
+              f"{MUSICGEN_MODEL!r} on {device} "
+              f"({'cache: ' + MUSIC_MODEL_CACHE if _from_cache else '~300 MB first run'}) …")
         try:
             from transformers import (          # type: ignore
                 MusicgenForConditionalGeneration,
                 AutoProcessor,
             )
             import torch
-            _mg_processor = AutoProcessor.from_pretrained(MUSICGEN_MODEL)
+            _mg_processor = AutoProcessor.from_pretrained(
+                MUSICGEN_MODEL, cache_dir=MUSIC_MODEL_CACHE)
             _mg_model     = MusicgenForConditionalGeneration.from_pretrained(
                 MUSICGEN_MODEL,
+                cache_dir=MUSIC_MODEL_CACHE,
                 low_cpu_mem_usage=True,
             )
             _mg_model = _mg_model.to(device)

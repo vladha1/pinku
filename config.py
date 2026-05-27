@@ -68,6 +68,13 @@ MUSIC_BACKEND     = os.getenv("MUSIC_BACKEND",  "musicgen")
 #                      "facebook/musicgen-medium" (~1.5 GB, ~45s/chunk, higher quality)
 MUSICGEN_MODEL    = os.getenv("MUSICGEN_MODEL", "facebook/musicgen-small")
 MUSIC_CHUNK_SEC   = int(os.getenv("MUSIC_CHUNK_SEC", "30"))   # seconds per generated clip
+# Where to store the downloaded model weights.  Pinned to a fixed path so the
+# model is never re-downloaded across restarts (HF default ~/.cache can vary
+# depending on how the process is launched / which user runs it).
+MUSIC_MODEL_CACHE = os.getenv(
+    "MUSIC_MODEL_CACHE",
+    os.path.join(os.path.expanduser("~"), "pinku", "models"),
+)
 
 # ── Web dashboard ─────────────────────────────────────────────────────────────
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))

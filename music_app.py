@@ -501,8 +501,8 @@ function applyState(s) {
 
   if (state === 'loading') {
     icon.textContent  = '⏳';
-    label.textContent = 'Loading model…';
-    sub.textContent   = 'First run downloads MusicGen (~300 MB)';
+    label.textContent = s.cached ? 'Loading model from cache…' : 'Downloading model (~300 MB)…';
+    sub.textContent   = s.cached ? 'Usually takes ~10s on M4' : 'First run only — saved to ~/pinku/models/';
   } else if (state === 'generating') {
     icon.textContent  = '🎼';
     label.textContent = `Generating "${s.theme || ''}"…`;
