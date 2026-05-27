@@ -6,8 +6,9 @@ Camera — YOLO pose + OpenCV hand gesture classification.
   Hand gesture CV                     — skin mask + convexity defects on wrist crop
 
 Gestures detected:
-  Open Hand   — 4+ finger gaps (wave / open palm) → wake
-  Fist        — closed hand, high solidity         → sleep / mute
+  Hands Up    — open palm with wrist above shoulder → wake from muted / idle
+  Open Hand   — 4+ finger gaps, arm down (wave)     → stop speech / extend session
+  Fist        — closed hand, high solidity           → sleep / mute
 
 macOS: cv2.CAP_AVFOUNDATION backend, auto-scans indices 0-3.
 """
@@ -513,9 +514,9 @@ class CameraDetector:
                         # Classify hand shape at this wrist
                         gesture = _classify_hand(frame, kx(wri), ky(wri))
                         if gesture:
-                            # Upgrade Open Hand to Thumbs Up if arm is fully raised
+                            # Distinguish Hands Up (wrist above shoulder) from Open Hand (arm down)
                             if gesture == "Open Hand" and vis(sho) and ky(wri) < ky(sho):
-                                gesture = "Open Hand"   # arm raised + open palm
+                                gesture = "Hands Up"   # arm raised above shoulder
                             event["gestures"].append({"gesture": gesture})
                             break   # one gesture per frame is enough
 

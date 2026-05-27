@@ -37,6 +37,17 @@ _speak_lock    = threading.Lock()
 _current_proc: subprocess.Popen | None = None
 _speaking      = False
 
+# When set, all chime/beep/think tones are suppressed (used while user-muted).
+# Cleared just before wake tones so the unmute sound is still audible.
+_silent = threading.Event()
+
+def set_silent(on: bool):
+    """Suppress (True) or restore (False) all tone playback."""
+    if on:
+        _silent.set()
+    else:
+        _silent.clear()
+
 try:
     import edge_tts as _edge_tts
     _EDGE_AVAILABLE = True
@@ -265,8 +276,10 @@ _ENTRY_CHIME_COOLDOWN = 25.0   # seconds
 
 
 def play_beep(entry: bool = False):
-    """Rising 3-note C5→E5→G5 — wake confirmed / action acknowledged / person entry.
+    """Soft two-note C5→G5 — wake confirmed / action acknowledged / person entry.
     Pass entry=True for camera person-detection chimes to apply cooldown."""
+    if _silent.is_set():
+        return
     global _last_entry_chime_at
     if entry:
         now = time.time()
@@ -278,11 +291,15 @@ def play_beep(entry: bool = False):
 
 def play_think():
     """Short 1800 Hz tick — sending to LLM, please wait."""
+    if _silent.is_set():
+        return
     _play(_THINK_PATH)
 
 
 def play_error():
     """Descending G4→D4 — API or LLM call failed."""
+    if _silent.is_set():
+        return
     _play(_ERROR_PATH)
 
 

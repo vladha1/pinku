@@ -312,12 +312,14 @@ def _handle_mute():
     _awake.clear()
     _settle_until = 0.0   # cancel any pending settle window
     tts.stop_speaking()
-    tts.play_mute()
+    tts.set_silent(True)  # suppress all tones while muted
+    tts.play_mute()       # entry tone is still OK (transition, not during muted state)
     dashboard.update_status(state="idle", muted=True)
     _log("info", "Muted 🔇")
 
 
 def _handle_unmute():
+    tts.set_silent(False)  # re-enable tones before playing wake sound
     _user_muted.clear()
     _muted.clear()
     tts.play_unmute()
@@ -364,8 +366,11 @@ _gesture_last_at: dict[str, float] = {}
 _GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
-    "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → wake / unmute (works anytime)
-    # Fist removed — too many false positives from normal resting hand position
+    # requires_session=False → fires even from muted/idle state
+    "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → ONLY wake from muted
+    # requires_session=True → only fires during an active (awake) session
+    "Open Hand": (True,  "_gesture_open_hand"),  # 🖐 wave while awake → stop speech
+    # Fist removed — too many false positives from normal resting hand
 }
 
 
@@ -378,18 +383,23 @@ def _gesture_throttle(label: str) -> bool:
     return True
 
 
+def _gesture_hands_up():
+    """🙌 Hands up (wrist above shoulder) — wake from muted state.
+    This is the ONLY gesture that wakes Pinku when user-muted."""
+    _log("wake", "🙌 Hands Up → unmute + wake")
+    _handle_unmute()   # clears silent flag, plays unmute tone, opens session
+
+
 def _gesture_open_hand():
-    """🖐 Open hand / wave — stop speech if speaking, otherwise wake Pinku."""
+    """🖐 Open hand / wave (arm down) — interrupts speech or extends session.
+    Only fires during an active session (requires_session=True)."""
     if tts.is_speaking():
         _log("wake", "🖐 Open Hand → stop speaking")
         tts.stop_speaking()
-        _muted.clear()   # re-open mic so user can follow up immediately
-        _user_muted.clear()
+        _muted.clear()
         _extend_session()
     else:
-        _log("wake", "🖐 Open Hand gesture → wake")
-        _user_muted.clear()
-        _muted.clear()
+        _log("wake", "🖐 Open Hand → extend session")
         _extend_session()
 
 
@@ -401,6 +411,7 @@ def _gesture_fist():
 
 
 _GESTURE_FN_MAP: dict[str, object] = {
+    "_gesture_hands_up":  _gesture_hands_up,
     "_gesture_open_hand": _gesture_open_hand,
 }
 
