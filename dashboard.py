@@ -205,11 +205,14 @@ def api_action():
 
 @_app.route("/api/camera.jpg")
 def camera_snapshot():
-    """Current camera frame as JPEG. Returns 503 if camera not active."""
+    """Current camera frame as JPEG. Returns 503 if camera not active.
+    Pass ?annotated=1 to get dart rings + laser dot overlay (darts tab only)."""
     try:
         from camera import get_frame
+        from flask import request as _req
         import cv2
-        frame = get_frame(annotated=True)
+        annotated = _req.args.get("annotated", "0") == "1"
+        frame = get_frame(annotated=annotated)
         if frame is None:
             return ("No camera frame — camera may still be starting up", 503)
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -1741,7 +1744,7 @@ function refreshDartsCam() {
     document.getElementById('darts-offline').style.display = 'flex';
     _dartsTimer = setTimeout(refreshDartsCam, 2000);
   };
-  tmp.src = '/api/camera.jpg?t=' + Date.now();
+  tmp.src = '/api/camera.jpg?annotated=1&t=' + Date.now();
 }
 
 function addDartHitDot(hit) {

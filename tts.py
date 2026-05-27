@@ -5,7 +5,7 @@ Primary:  edge-tts  → Microsoft neural voices streamed to a temp file → afpl
 Fallback: macOS `say` (built-in, always available)
 
 Chimes match Pinky exactly:
-  play_beep()   — rising 3-note C5→E5→G5    (wake / confirm / entry)
+  play_beep()   — soft two-note C5→G5        (wake / confirm / entry)
   play_think()  — short 1800 Hz tick         (sending to LLM, processing)
   play_error()  — descending G4→D4           (API / LLM failure)
   play_mute()   — descending 520→330 Hz      (going quiet / mute)
@@ -89,10 +89,10 @@ _MUTE_PATH   = "/tmp/pinku_mute.wav"
 _UNMUTE_PATH = "/tmp/pinku_unmute.wav"
 
 def _generate_chimes():
-    # Wake / confirm — soft rising C5→E5→G5, bell decay on final note
+    # Wake / confirm — soft two-note C5→G5 (perfect fifth), gentle bell decay
     _write_wav(_CHIME_PATH,
-               [(523, 0.09), (0, 0.012), (659, 0.09), (0, 0.012), (784, 0.34)],
-               volume=0.28, decay=5.0)
+               [(523, 0.10), (0, 0.018), (784, 0.36)],
+               volume=0.20, decay=4.0)
     # Thinking — crisp short tick at 1800 Hz
     _write_wav(_THINK_PATH, [(1800, 0.04)], volume=0.35)
     # Error — descending G4→D4
