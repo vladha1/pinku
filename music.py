@@ -380,7 +380,9 @@ def start(
         gen_t.start()
 
         # ── Playback loop ──────────────────────────────────────────────────────
-        start_ts  = time.time()
+        # NOTE: start_ts is set on FIRST playback, not on generation start,
+        # so duration counts actual listening time — not model loading time.
+        start_ts: float | None = None
         chunk_idx = 0
 
         while not _stop_event.is_set():
@@ -393,8 +395,10 @@ def start(
                 break
 
             chunk_idx += 1
-            _set_state(state="playing", chunk=chunk_idx,
-                       elapsed=int(time.time() - start_ts))
+            if start_ts is None:
+                start_ts = time.time()   # clock starts when music actually begins
+
+            _set_state(state="playing", chunk=chunk_idx, elapsed=0)
             _dlog(f"▶ playing chunk {chunk_idx}: {path}")
 
             proc = _play_wav_async(path)
@@ -414,7 +418,7 @@ def start(
         _kill_afplay()
         gen_t.join(timeout=5)
         _cleanup(*tmp_files)
-        final_elapsed = int(time.time() - start_ts)
+        final_elapsed = int(time.time() - start_ts) if start_ts else 0
         _set_state(state="idle", elapsed=final_elapsed, chunk=0, chunks_total=0)
         print(f"[Music] ■ done  elapsed={final_elapsed}s")
 
