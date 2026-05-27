@@ -64,6 +64,22 @@ def dart_reset():
         _dart_hits.clear()
     _broadcast({"type": "dart_reset"})
 
+# ── Dart game state ───────────────────────────────────────────────────────────
+_game_state: dict = {
+    "player": 1, "shots_done": 0, "shots_total": 5,
+    "turn_total": 0, "awaiting": False, "rounds": [],
+}
+_game_lock = threading.Lock()
+
+def push_game_update(state: dict):
+    with _game_lock:
+        _game_state.update(state)
+    _broadcast({"type": "dart_game", **dict(_game_state)})
+
+def push_dart_hits_clear():
+    """Clear hit-dot overlay only (not scoreboard) — used on Next Player."""
+    _broadcast({"type": "dart_hits_clear"})
+
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -210,6 +226,12 @@ def dart_hits():
     from flask import jsonify
     with _dart_lock:
         return jsonify(list(_dart_hits))
+
+@_app.route("/api/dart/game")
+def dart_game():
+    from flask import jsonify
+    with _game_lock:
+        return jsonify(dict(_game_state))
 
 
 @_app.route("/restart")
@@ -1113,6 +1135,46 @@ body {
 .darts-btn.speak-btn { border-color:rgba(192,132,252,0.45); color:#c084fc; }
 .darts-btn.cal-btn   { border-color:rgba(251,191,36,0.45);  color:#fbbf24; }
 .darts-btn.clear-btn { border-color:rgba(248,113,113,0.4);  color:#f87171; }
+.darts-btn.next-btn  { border-color:rgba(74,222,128,0.45);  color:#4ade80; }
+.darts-btn.new-btn   { border-color:rgba(248,113,113,0.4);  color:#f87171; }
+.darts-btn.next-btn.awaiting {
+  background:rgba(74,222,128,0.18); font-weight:700;
+  animation:pulse-green 1.1s ease-in-out infinite;
+}
+@keyframes pulse-green {
+  0%,100% { box-shadow:0 0 6px rgba(74,222,128,0.25); }
+  50%     { box-shadow:0 0 18px rgba(74,222,128,0.55); }
+}
+.darts-gamebar {
+  width:100%; max-width:640px; flex-shrink:0;
+  display:flex; align-items:center; gap:10px;
+  padding:7px 14px;
+  background:rgba(0,0,0,0.3);
+  border-bottom:1px solid var(--border);
+}
+.dgb-player { font-size:1rem; font-weight:800; color:#c084fc; min-width:26px; }
+.dgb-dots   { flex:1; font-size:1.15rem; letter-spacing:3px; }
+.dgb-score  { font-size:1rem; font-weight:700; color:#fbbf24; }
+.darts-leaderboard {
+  width:100%; max-width:640px; flex-shrink:0;
+  padding:4px 12px 2px; display:none;
+}
+.darts-leaderboard.has-rows { display:block; }
+.dart-lb-title {
+  font-size:0.65rem; text-transform:uppercase; letter-spacing:0.07em;
+  color:#64748b; padding:4px 0 3px;
+}
+.dart-lb-row {
+  display:flex; align-items:center; gap:8px;
+  padding:5px 8px; border-radius:8px; margin-bottom:3px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.05);
+}
+.dart-lb-row.lb-active { border-color:rgba(192,132,252,0.35); background:rgba(192,132,252,0.06); }
+.dart-lb-player { font-size:0.82rem; font-weight:800; color:#c084fc; min-width:24px; }
+.dart-lb-turns  { flex:1; font-size:0.7rem; color:#64748b; }
+.dart-lb-shots  { font-size:0.72rem; color:#94a3b8; }
+.dart-lb-total  { font-size:0.95rem; font-weight:800; min-width:48px; text-align:right; }
 #darts-hit-layer { position:absolute; inset:0; pointer-events:none; }
 .dart-hit-dot {
   position:absolute;
@@ -1322,7 +1384,7 @@ body {
 <!-- Camera area (hidden by default) -->
 <div class="camera-area" id="camera-area">
   <div class="cam-feed-wrap">
-    <img id="cam-img" alt="Camera" style="display:none">
+    <img id="cam-img" alt="Camera" draggable="false" style="display:none;-webkit-user-drag:none;">
     <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
   </div>
   <div class="cam-toolbar">
@@ -1335,16 +1397,26 @@ body {
 <!-- Darts area (hidden by default) -->
 <div class="darts-area" id="darts-area">
   <div class="cam-feed-wrap" id="darts-feed-wrap">
-    <img id="darts-img" alt="Darts camera" style="display:none">
+    <img id="darts-img" alt="Darts camera" draggable="false" style="display:none;-webkit-user-drag:none;">
     <div class="cam-offline" id="darts-offline">📷 Camera offline or not started</div>
-    <!-- Hit markers rendered by JS -->
     <div id="darts-hit-layer"></div>
   </div>
-  <div class="darts-toolbar">
-    <button class="darts-btn speak-btn" id="dart-speak-btn" onclick="dartSpeak()" title="Speak the last dart score aloud">🔊 Speak Last</button>
-    <button class="darts-btn cal-btn"   id="dart-cal-btn"   onclick="calibrateLaser()" title="Point laser at bullseye, then tap">🎯 Set Bullseye</button>
-    <button class="darts-btn clear-btn" id="dart-clear-btn" onclick="dartClear()" title="Clear all recorded hits">🗑️ Clear</button>
+  <!-- Game status bar: current player + shot dots + turn total -->
+  <div class="darts-gamebar">
+    <span class="dgb-player" id="dgb-player">P1</span>
+    <span class="dgb-dots"   id="dgb-dots">○○○○○</span>
+    <span class="dgb-score"  id="dgb-score">0 pts</span>
   </div>
+  <!-- Controls -->
+  <div class="darts-toolbar">
+    <button class="darts-btn speak-btn" id="dart-speak-btn" onclick="dartSpeak()" title="Speak last score">🔊</button>
+    <button class="darts-btn next-btn"  id="dart-next-btn"  onclick="dartNextPlayer()">→ Next Player</button>
+    <button class="darts-btn cal-btn"   id="dart-cal-btn"   onclick="calibrateLaser()" title="Point laser at bullseye">🎯 Calibrate</button>
+    <button class="darts-btn new-btn"   id="dart-new-btn"   onclick="dartNewGame()">✕ New Game</button>
+  </div>
+  <!-- Leaderboard (shown once rounds exist) -->
+  <div class="darts-leaderboard" id="darts-leaderboard"></div>
+  <!-- Individual shot log -->
   <div class="darts-score-list" id="darts-score-list"></div>
 </div>
 
@@ -1700,6 +1772,87 @@ async function loadDartHits() {
   } catch(e) { console.warn('dart hits load failed', e); }
 }
 
+// ── Game bar / leaderboard ────────────────────────────────────────────────────
+function updateGameBar(g) {
+  const playerEl = document.getElementById('dgb-player');
+  const dotsEl   = document.getElementById('dgb-dots');
+  const scoreEl  = document.getElementById('dgb-score');
+  if (!playerEl) return;
+
+  playerEl.textContent = 'P' + g.player;
+
+  // Shot progress dots ●/○
+  let dh = '';
+  for (let i = 0; i < (g.shots_total || 5); i++)
+    dh += i < g.shots_done
+      ? '<span style="color:#4ade80">●</span>'
+      : '<span style="color:#334155">○</span>';
+  dotsEl.innerHTML = dh;
+
+  scoreEl.textContent = (g.turn_total || 0) + ' pts';
+
+  // Next-player button pulse when turn is done
+  const nb = document.getElementById('dart-next-btn');
+  if (nb) {
+    nb.classList.toggle('awaiting', !!g.awaiting);
+    nb.textContent = g.awaiting ? '→ Next Player ⚡' : '→ Next Player';
+  }
+
+  if (g.rounds) updateLeaderboard(g.rounds, g.player);
+}
+
+function updateLeaderboard(rounds, currentPlayer) {
+  const el = document.getElementById('darts-leaderboard');
+  if (!el) return;
+  if (!rounds || !rounds.length) { el.classList.remove('has-rows'); el.innerHTML = ''; return; }
+
+  // Group by player
+  const players = {};
+  rounds.forEach(r => {
+    if (!players[r.player]) players[r.player] = { turns: 0, total: 0, lastShots: [] };
+    players[r.player].turns++;
+    players[r.player].total += r.total;
+    players[r.player].lastShots = r.shots || [];
+  });
+
+  // Sort by total descending
+  const sorted = Object.entries(players).sort((a, b) => b[1].total - a[1].total);
+
+  el.classList.add('has-rows');
+  el.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div>' +
+    sorted.map(([pid, p]) => {
+      const col = dartColor(p.total / Math.max(1, p.turns));
+      const active = Number(pid) === currentPlayer;
+      return `<div class="dart-lb-row${active ? ' lb-active' : ''}">
+        <span class="dart-lb-player">P${pid}</span>
+        <span class="dart-lb-turns">${p.turns} turn${p.turns > 1 ? 's' : ''}</span>
+        <span class="dart-lb-shots">${p.lastShots.map(s => s.score).join(' · ')}</span>
+        <span class="dart-lb-total" style="color:${col}">${p.total}</span>
+      </div>`;
+    }).join('');
+}
+
+async function loadDartGame() {
+  try {
+    const g = await fetch('/api/dart/game').then(r => r.json());
+    updateGameBar(g);
+  } catch(e) {}
+}
+
+function dartNextPlayer() {
+  document.getElementById('darts-hit-layer').innerHTML = '';
+  apiAction('dart_next_player');
+}
+
+function dartNewGame() {
+  if (!confirm('Start a new game? This clears all scores.')) return;
+  document.getElementById('darts-hit-layer').innerHTML = '';
+  document.getElementById('darts-score-list').innerHTML = '';
+  const lb = document.getElementById('darts-leaderboard');
+  if (lb) { lb.innerHTML = ''; lb.classList.remove('has-rows'); }
+  apiAction('dart_new_game');
+}
+
 function dartSpeak() {
   const btn = document.getElementById('dart-speak-btn');
   btn.disabled = true;
@@ -1854,7 +2007,7 @@ function showTab(name) {
       setTimeout(() => box.scrollTop = box.scrollHeight, 80);
     });
   }
-  if (name === 'darts') loadDartHits();
+  if (name === 'darts') { loadDartHits(); loadDartGame(); }
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -1897,8 +2050,15 @@ function connect() {
       } else if (data.type === 'dart_reset') {
         const layer = document.getElementById('darts-hit-layer');
         const list  = document.getElementById('darts-score-list');
+        const lb    = document.getElementById('darts-leaderboard');
         if (layer) layer.innerHTML = '';
         if (list)  list.innerHTML  = '';
+        if (lb)  { lb.innerHTML = ''; lb.classList.remove('has-rows'); }
+      } else if (data.type === 'dart_hits_clear') {
+        const layer = document.getElementById('darts-hit-layer');
+        if (layer) layer.innerHTML = '';
+      } else if (data.type === 'dart_game') {
+        updateGameBar(data);
       }
     } catch(_) {}
   };

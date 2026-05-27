@@ -428,6 +428,13 @@ import json as _json
 _laser_was_present: bool = False   # True while a dot is on the wall
 _dart_hits: list[dict] = []        # [{x, y, score, callout}] — last 20 throws
 
+# ── Dart game state ───────────────────────────────────────────────────────────
+_GAME_SHOTS = 5                    # shots per turn
+_game_shots:   list[dict] = []     # current player's shots this turn
+_game_rounds:  list[dict] = []     # completed turns [{player, shots, total}]
+_game_player:  int  = 1            # current player number (1-based)
+_game_awaiting: bool = False       # True after 5 shots — waiting for "Next Player"
+
 # ── Laser calibration ─────────────────────────────────────────────────────────
 # Bullseye centre in normalised frame coords (0-1).
 # Loaded from ~/.pinku_laser_cal.json; defaults to frame-centre (0.5, 0.5).
@@ -513,6 +520,10 @@ def _handle_laser(dots: list[dict]):
     if _laser_was_present:
         return   # dot still on wall, just moved — don't rescore
 
+    # Ignore new shots while waiting for "Next Player" tap
+    if _game_awaiting:
+        return
+
     # Fresh appearance — record hit, show on screen (no auto-callout)
     _laser_was_present = True
     _dart_hits.append({"x": x, "y": y, "score": score, "callout": callout})
@@ -520,6 +531,60 @@ def _handle_laser(dots: list[dict]):
         _dart_hits[:] = _dart_hits[-20:]
     _log("laser", f"🎯 ({x:.2f},{y:.2f}) → {score} pts")
     dashboard.push_dart_hit({"x": x, "y": y, "score": score, "callout": callout})
+
+    # ── Game tracking ─────────────────────────────────────────────────────────
+    _game_shots.append({"x": x, "y": y, "score": score})
+    _push_game_state()
+    if len(_game_shots) >= _GAME_SHOTS:
+        _end_dart_turn()
+
+
+def _push_game_state():
+    dashboard.push_game_update({
+        "player":     _game_player,
+        "shots_done": len(_game_shots),
+        "shots_total": _GAME_SHOTS,
+        "turn_total": sum(s["score"] for s in _game_shots),
+        "awaiting":   _game_awaiting,
+        "rounds":     _game_rounds,
+    })
+
+
+def _end_dart_turn():
+    global _game_awaiting
+    total = sum(s["score"] for s in _game_shots)
+    _game_rounds.append({
+        "player": _game_player,
+        "shots":  list(_game_shots),
+        "total":  total,
+    })
+    _game_awaiting = True
+    _log("laser", f"🎯 P{_game_player} turn done: {len(_game_shots)} shots → {total} pts")
+    _push_game_state()
+
+
+def _dart_next_player():
+    global _game_player, _game_awaiting
+    # If turn ended manually before 5 shots, record it first
+    if not _game_awaiting and _game_shots:
+        _end_dart_turn()
+    _game_shots.clear()
+    _game_player += 1
+    _game_awaiting = False
+    dashboard.push_dart_hits_clear()   # wipe dots on overlay for new turn
+    _push_game_state()
+    _log("laser", f"🎯 P{_game_player}'s turn — ready")
+
+
+def _dart_new_game():
+    global _game_player, _game_awaiting
+    _game_shots.clear()
+    _game_rounds.clear()
+    _game_player  = 1
+    _game_awaiting = False
+    _dart_reset()   # also clears _dart_hits + broadcasts dart_reset
+    _push_game_state()
+    _log("laser", "🎯 New dart game — P1's turn")
 
 
 def _dart_speak_last():
@@ -983,6 +1048,8 @@ def main():
         dashboard.register_action("laser_calibrate",  _handle_laser_calibrate)
         dashboard.register_action("dart_speak",       _dart_speak_last)
         dashboard.register_action("dart_reset",       _dart_reset)
+        dashboard.register_action("dart_next_player", _dart_next_player)
+        dashboard.register_action("dart_new_game",    _dart_new_game)
 
     # ── Laser calibration ─────────────────────────────────────────────────────
     _load_laser_cal()
