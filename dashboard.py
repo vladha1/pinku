@@ -46,6 +46,24 @@ def record_conversation(transcript: str, reply: str,
             print(f"[Dashboard] history write error: {e}")
     _broadcast({"type": "history", **entry})
 
+# ── Dart hit state ───────────────────────────────────────────────────────────
+_dart_hits: list = []   # [{x, y, score, callout}] — last 20 throws (mirrored from pinku.py)
+_dart_lock = threading.Lock()
+
+def push_dart_hit(hit: dict):
+    """Record a dart hit and broadcast it to all dashboard clients."""
+    with _dart_lock:
+        _dart_hits.append(hit)
+        if len(_dart_hits) > 20:
+            _dart_hits[:] = _dart_hits[-20:]
+    _broadcast({"type": "dart_hit", **hit})
+
+def dart_reset():
+    """Clear all dart hits and notify clients."""
+    with _dart_lock:
+        _dart_hits.clear()
+    _broadcast({"type": "dart_reset"})
+
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -187,6 +205,13 @@ def camera_snapshot():
     except Exception as e:
         return (str(e), 503)
 
+@_app.route("/api/dart/hits")
+def dart_hits():
+    from flask import jsonify
+    with _dart_lock:
+        return jsonify(list(_dart_hits))
+
+
 @_app.route("/restart")
 def restart_page():
     """Simple tap-to-restart page — works from any browser including iPad Safari."""
@@ -309,6 +334,24 @@ def laser_debug():
     except Exception as e:
         import traceback
         return (traceback.format_exc(), 500)
+
+
+@_app.route("/api/laser/calibrate", methods=["POST"])
+def laser_calibrate():
+    """
+    Set bullseye = current laser dot position.
+    Body: {} (empty) — reads current dot from camera overlay.
+    Returns {"ok": bool, "bull_x"?, "bull_y"?, "error"?}
+    """
+    from flask import jsonify
+    fn = _actions.get("laser_calibrate")
+    if fn is None:
+        return jsonify({"ok": False, "error": "Calibrate action not registered"}), 503
+    result = fn()
+    if result is None:
+        result = {"ok": True}
+    code = 200 if result.get("ok") else 400
+    return jsonify(result), code
 
 
 @_app.route("/api/camera/request-permission")
@@ -1023,17 +1066,6 @@ body {
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-size:0.88rem; color:var(--muted); background:rgba(0,0,0,0.6);
 }
-#laser-dot {
-  position:absolute; width:18px; height:18px; border-radius:50%;
-  background:rgba(74,222,128,0.9); box-shadow:0 0 8px #4ade80, 0 0 18px rgba(74,222,128,0.6);
-  transform:translate(-50%,-50%); pointer-events:none;
-  display:none; transition:left 0.08s, top 0.08s;
-}
-#laser-zone-label {
-  position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
-  background:rgba(0,0,0,0.65); color:#4ade80; font-size:0.72rem;
-  padding:2px 8px; border-radius:6px; pointer-events:none; display:none;
-}
 .cam-toolbar {
   width:100%; max-width:640px; padding:5px 10px;
   display:flex; justify-content:space-between; align-items:center;
@@ -1058,6 +1090,70 @@ body {
 .det-chip.person { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
 .det-chip.gesture{ background:rgba(192,132,252,0.15); color:#c084fc; border:1px solid rgba(192,132,252,0.3); }
 .det-chip.object { background:rgba(251,191,36,0.13); color:#fbbf24; border:1px solid rgba(251,191,36,0.28); }
+
+/* Darts panel */
+.darts-area {
+  flex:1; display:none; flex-direction:column;
+  align-items:center; overflow:hidden; gap:0;
+}
+.darts-area.open { display:flex; }
+.darts-toolbar {
+  width:100%; max-width:640px; padding:6px 10px;
+  display:flex; justify-content:center; align-items:center; gap:8px;
+  border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2);
+  flex-shrink:0;
+}
+.darts-btn {
+  padding:5px 12px; border-radius:8px; font-size:0.8rem; cursor:pointer;
+  border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text);
+  transition:background 0.15s;
+}
+.darts-btn:hover  { background:rgba(255,255,255,0.1); }
+.darts-btn:disabled{ opacity:0.5; cursor:default; }
+.darts-btn.speak-btn { border-color:rgba(192,132,252,0.45); color:#c084fc; }
+.darts-btn.cal-btn   { border-color:rgba(251,191,36,0.45);  color:#fbbf24; }
+.darts-btn.clear-btn { border-color:rgba(248,113,113,0.4);  color:#f87171; }
+#darts-hit-layer { position:absolute; inset:0; pointer-events:none; }
+.dart-hit-dot {
+  position:absolute;
+  width:28px; height:28px; border-radius:50%;
+  transform:translate(-50%,-50%);
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.6rem; font-weight:800; color:#fff;
+  border:2px solid rgba(255,255,255,0.8);
+  box-shadow:0 0 10px rgba(0,0,0,0.7);
+  animation:dart-land 0.28s cubic-bezier(0.34,1.56,0.64,1);
+  pointer-events:none;
+}
+@keyframes dart-land {
+  0%   { transform:translate(-50%,-50%) scale(0.2); opacity:0.5; }
+  70%  { transform:translate(-50%,-50%) scale(1.18); }
+  100% { transform:translate(-50%,-50%) scale(1); opacity:1; }
+}
+.dart-score-badge {
+  position:absolute; top:-16px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.75); color:#fff; font-size:0.58rem; font-weight:700;
+  padding:1px 5px; border-radius:4px; white-space:nowrap;
+  border:1px solid rgba(255,255,255,0.2);
+}
+.darts-score-list {
+  width:100%; max-width:640px; flex:1; overflow-y:auto;
+  padding:8px 14px; display:flex; flex-direction:column; gap:4px;
+}
+.darts-score-list::-webkit-scrollbar { width:3px; }
+.darts-score-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.dart-score-row {
+  display:flex; align-items:center; gap:10px;
+  padding:5px 8px; border-radius:8px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  font-size:0.82rem;
+}
+.dart-score-num {
+  font-size:1.1rem; font-weight:800; min-width:38px; text-align:center;
+}
+.dart-score-label { flex:1; color:var(--muted); }
+.dart-score-pos   { font-size:0.7rem; color:#64748b; font-family:monospace; }
 
 /* Log panel */
 .log-area {
@@ -1228,14 +1324,28 @@ body {
   <div class="cam-feed-wrap">
     <img id="cam-img" alt="Camera" style="display:none">
     <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
-    <div id="laser-dot"></div>
-    <div id="laser-zone-label"></div>
   </div>
   <div class="cam-toolbar">
     <span id="cam-status-text" style="font-size:0.72rem;color:#64748b">Checking…</span>
-    <button class="log-clear-btn" id="cam-perm-btn" onclick="requestCameraPermission()">🔓 Request Permission</button>
+    <button class="log-clear-btn" id="cam-perm-btn" onclick="requestCameraPermission()">🔓 Permission</button>
   </div>
   <div class="cam-detect-feed" id="cam-detect-feed"></div>
+</div>
+
+<!-- Darts area (hidden by default) -->
+<div class="darts-area" id="darts-area">
+  <div class="cam-feed-wrap" id="darts-feed-wrap">
+    <img id="darts-img" alt="Darts camera" style="display:none">
+    <div class="cam-offline" id="darts-offline">📷 Camera offline or not started</div>
+    <!-- Hit markers rendered by JS -->
+    <div id="darts-hit-layer"></div>
+  </div>
+  <div class="darts-toolbar">
+    <button class="darts-btn speak-btn" id="dart-speak-btn" onclick="dartSpeak()" title="Speak the last dart score aloud">🔊 Speak Last</button>
+    <button class="darts-btn cal-btn"   id="dart-cal-btn"   onclick="calibrateLaser()" title="Point laser at bullseye, then tap">🎯 Set Bullseye</button>
+    <button class="darts-btn clear-btn" id="dart-clear-btn" onclick="dartClear()" title="Clear all recorded hits">🗑️ Clear</button>
+  </div>
+  <div class="darts-score-list" id="darts-score-list"></div>
 </div>
 
 <!-- Log area (hidden by default) -->
@@ -1257,6 +1367,9 @@ body {
   </button>
   <button class="pinky-nav-item" id="nav-cam" onclick="showTab('cam')">
     <span class="pinky-nav-ic">📷</span>Camera
+  </button>
+  <button class="pinky-nav-item" id="nav-darts" onclick="showTab('darts')">
+    <span class="pinky-nav-ic">🎯</span>Darts
   </button>
   <button class="pinky-nav-item" id="nav-log" onclick="showTab('log')">
     <span class="pinky-nav-ic">📋</span>Log
@@ -1343,25 +1456,6 @@ function applyStatus(data) {
   document.getElementById('mute-btn').textContent = isMuted ? '🎙️' : '🔇';
   document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
   document.getElementById('mute-btn').classList.toggle('active', isMuted);
-
-  // Laser dot overlay (data.laser = {x,y,score} from pinku.py status update)
-  if (data.laser !== undefined) {
-    const dot   = document.getElementById('laser-dot');
-    const label = document.getElementById('laser-zone-label');
-    if (data.laser && data.laser.x !== undefined) {
-      dot.style.left    = (data.laser.x * 100) + '%';
-      dot.style.top     = (data.laser.y * 100) + '%';
-      dot.style.display = 'block';
-      const s = data.laser.score;
-      label.textContent = s === 100 ? '🎯 BULLSEYE! 100'
-                        : s === 0   ? '💨 Miss'
-                        : '🎯 ' + s + ' pts';
-      label.style.display = 'block';
-    } else {
-      dot.style.display   = 'none';
-      label.style.display = 'none';
-    }
-  }
 
   // Camera status (included in initial SSE push and whenever camera.py changes state)
   if (data.cam_status !== undefined || data.det_status !== undefined) {
@@ -1520,6 +1614,128 @@ function startCamera() {
   }).catch(() => {});
 }
 
+// ── Darts tab ─────────────────────────────────────────────────────────────────
+let _dartsActive = false;
+let _dartsTimer  = null;
+const DART_COLORS = {
+  100: '#ef4444',   // bullseye — red
+   75: '#f97316',   // orange
+   50: '#eab308',   // yellow
+   25: '#84cc16',   // lime
+   10: '#22d3ee',   // cyan
+    0: '#6b7280',   // miss — gray
+};
+function dartColor(score) {
+  for (const [s, c] of Object.entries(DART_COLORS).sort((a,b) => b[0]-a[0]))
+    if (score >= Number(s)) return c;
+  return '#6b7280';
+}
+
+function startDartsCamera() {
+  _dartsActive = true;
+  refreshDartsCam();
+}
+function stopDartsCamera() {
+  _dartsActive = false;
+  clearTimeout(_dartsTimer);
+}
+function refreshDartsCam() {
+  if (!_dartsActive) return;
+  const img = document.getElementById('darts-img');
+  const tmp = new Image();
+  tmp.onload = () => {
+    img.src = tmp.src;
+    img.style.display = 'block';
+    document.getElementById('darts-offline').style.display = 'none';
+    _dartsTimer = setTimeout(refreshDartsCam, 200);
+  };
+  tmp.onerror = () => {
+    img.style.display = 'none';
+    document.getElementById('darts-offline').style.display = 'flex';
+    _dartsTimer = setTimeout(refreshDartsCam, 2000);
+  };
+  tmp.src = '/api/camera.jpg?t=' + Date.now();
+}
+
+function addDartHitDot(hit) {
+  const layer = document.getElementById('darts-hit-layer');
+  const wrap  = document.getElementById('darts-feed-wrap');
+  if (!layer || !wrap) return;
+  const col = dartColor(hit.score);
+  const dot = document.createElement('div');
+  dot.className = 'dart-hit-dot';
+  dot.style.left       = (hit.x * 100) + '%';
+  dot.style.top        = (hit.y * 100) + '%';
+  dot.style.background = col;
+  dot.style.boxShadow  = `0 0 10px ${col}, 0 0 20px ${col}60`;
+  dot.innerHTML = `<span class="dart-score-badge">${hit.score === 100 ? '🎯' : hit.score === 0 ? '💨' : hit.score}</span>`;
+  layer.appendChild(dot);
+}
+
+function addDartScoreRow(hit, prepend) {
+  const list = document.getElementById('darts-score-list');
+  if (!list) return;
+  const col   = dartColor(hit.score);
+  const label = hit.score === 100 ? 'Bullseye!' : hit.score === 0 ? 'Miss' : hit.score + ' pts';
+  const row   = document.createElement('div');
+  row.className = 'dart-score-row';
+  row.innerHTML =
+    `<span class="dart-score-num" style="color:${col}">${hit.score}</span>` +
+    `<span class="dart-score-label">${esc(label)}</span>` +
+    `<span class="dart-score-pos">(${(hit.x||0).toFixed(2)}, ${(hit.y||0).toFixed(2)})</span>`;
+  if (prepend) list.insertBefore(row, list.firstChild);
+  else         list.appendChild(row);
+}
+
+async function loadDartHits() {
+  try {
+    const resp = await fetch('/api/dart/hits');
+    const hits = await resp.json();
+    // Clear current overlays
+    const layer = document.getElementById('darts-hit-layer');
+    const list  = document.getElementById('darts-score-list');
+    if (layer) layer.innerHTML = '';
+    if (list)  list.innerHTML  = '';
+    hits.forEach(h => { addDartHitDot(h); addDartScoreRow(h, false); });
+  } catch(e) { console.warn('dart hits load failed', e); }
+}
+
+function dartSpeak() {
+  const btn = document.getElementById('dart-speak-btn');
+  btn.disabled = true;
+  apiAction('dart_speak');
+  setTimeout(() => btn.disabled = false, 1500);
+}
+
+function dartClear() {
+  document.getElementById('darts-hit-layer').innerHTML = '';
+  document.getElementById('darts-score-list').innerHTML = '';
+  apiAction('dart_reset');
+}
+
+function calibrateLaser() {
+  const btn = document.getElementById('cal-btn');
+  btn.textContent = '⏳ Setting…';
+  btn.disabled = true;
+  fetch('/api/laser/calibrate', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:'{}'})
+  .then(r => r.json()).then(d => {
+    if (d.ok) {
+      btn.textContent = '✅ Set!';
+      addLog('laser', `🎯 Bullseye calibrated → (${(d.bull_x||0).toFixed(3)}, ${(d.bull_y||0).toFixed(3)})`);
+    } else {
+      btn.textContent = '❌ Failed';
+      addLog('warn', '🎯 Cal failed: ' + (d.error || 'unknown'));
+    }
+    setTimeout(() => { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; }, 3000);
+  }).catch(err => {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+    addLog('error', 'Calibrate error: ' + err);
+    setTimeout(() => { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; }, 3000);
+  });
+}
+
 function requestCameraPermission() {
   const btn = document.getElementById('cam-perm-btn');
   btn.textContent = '⏳ Requesting…';
@@ -1585,13 +1801,13 @@ const LOG_ICONS = {
   stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊',
   camera:'📷', gesture:'✋', error:'🔴', warn:'🟡',
   info:'⚪', you:'🧑', pinku:'🤖', cam:'📷',
-  user:'🧑', source:'📖', llm:'🤖',
+  user:'🧑', source:'📖', llm:'🤖', laser:'🎯',
 };
 const LOG_COLORS = {
   stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
   tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
   warn:'#fbbf24', info:'#64748b', you:'#93c5fd', pinku:'#c084fc', cam:'#67e8f9',
-  user:'#93c5fd', source:'#86efac', llm:'#64748b',
+  user:'#93c5fd', source:'#86efac', llm:'#64748b', laser:'#4ade80',
 };
 
 function addLog(level, msg, ts) {
@@ -1619,24 +1835,27 @@ function formatDetEvent(e) {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-const _TABS = ['home', 'history', 'cam', 'log'];
+const _TABS = ['home', 'history', 'cam', 'darts', 'log'];
 function showTab(name) {
   document.getElementById('main-area').style.display       = name === 'home'    ? '' : 'none';
   document.getElementById('history-area').className        = 'history-area'   + (name === 'history' ? ' open' : '');
   document.getElementById('camera-area').className         = 'camera-area'    + (name === 'cam'     ? ' open' : '');
+  document.getElementById('darts-area').className          = 'darts-area'     + (name === 'darts'   ? ' open' : '');
   document.getElementById('log-area').className            = 'log-area'       + (name === 'log'     ? ' open' : '');
   _TABS.forEach(t => {
     const el = document.getElementById('nav-' + t);
     if (el) el.classList.toggle('active', t === name);
   });
-  if (name === 'cam') startCamera();
-  else                stopCamera();
+  if (name === 'cam')        startCamera();
+  else if (name === 'darts') startDartsCamera();
+  else                       { stopCamera(); stopDartsCamera(); }
   if (name === 'history') {
     loadHistory().then(() => {
       const box = document.getElementById('history-area');
       setTimeout(() => box.scrollTop = box.scrollHeight, 80);
     });
   }
+  if (name === 'darts') loadDartHits();
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -1673,6 +1892,14 @@ function connect() {
           appendHistoryEntry(data);
           box.scrollTop = box.scrollHeight;
         }
+      } else if (data.type === 'dart_hit') {
+        addDartHitDot(data);
+        addDartScoreRow(data, true);
+      } else if (data.type === 'dart_reset') {
+        const layer = document.getElementById('darts-hit-layer');
+        const list  = document.getElementById('darts-score-list');
+        if (layer) layer.innerHTML = '';
+        if (list)  list.innerHTML  = '';
       }
     } catch(_) {}
   };

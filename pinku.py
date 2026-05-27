@@ -423,17 +423,51 @@ def _dispatch_gestures(event: dict):
 # ── Laser dot handler ────────────────────────────────────────────────────────
 
 import math as _math
+import json as _json
 
 _laser_was_present: bool = False   # True while a dot is on the wall
+_dart_hits: list[dict] = []        # [{x, y, score, callout}] — last 20 throws
+
+# ── Laser calibration ─────────────────────────────────────────────────────────
+# Bullseye centre in normalised frame coords (0-1).
+# Loaded from ~/.pinku_laser_cal.json; defaults to frame-centre (0.5, 0.5).
+_laser_bull_x: float = 0.5
+_laser_bull_y: float = 0.5
+_LASER_CAL_FILE = os.path.expanduser("~/.pinku_laser_cal.json")
+
+
+def _load_laser_cal():
+    """Load saved bullseye calibration from disk (called at startup)."""
+    global _laser_bull_x, _laser_bull_y
+    try:
+        with open(_LASER_CAL_FILE) as f:
+            cal = _json.load(f)
+        _laser_bull_x = float(cal.get("bull_x", 0.5))
+        _laser_bull_y = float(cal.get("bull_y", 0.5))
+        _log("laser", f"🎯 Cal loaded: bull=({_laser_bull_x:.3f},{_laser_bull_y:.3f})")
+    except FileNotFoundError:
+        pass   # first run — use defaults
+    except Exception as e:
+        _log("warn", f"Laser cal load failed: {e}")
+
+
+def _save_laser_cal():
+    """Persist current bullseye to disk."""
+    try:
+        with open(_LASER_CAL_FILE, "w") as f:
+            _json.dump({"bull_x": _laser_bull_x, "bull_y": _laser_bull_y}, f)
+    except Exception as e:
+        _log("warn", f"Laser cal save failed: {e}")
+
 
 def _dart_score(x: float, y: float) -> tuple[int, str]:
     """
-    Map a normalised (x, y) position to a dartboard score centred in the frame.
-    100 = bullseye, decreasing rings outward, 0 = off-board.
+    Map a normalised (x, y) position to a dartboard score using the calibrated
+    bullseye centre.  100 = bullseye, decreasing rings outward, 0 = off-board.
     Returns (score, callout_text).
     """
-    dx = (x - 0.5) * 2
-    dy = (y - 0.5) * 2
+    dx = (x - _laser_bull_x) * 2
+    dy = (y - _laser_bull_y) * 2
     dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
 
     if   dist < 0.07: return 100, "Bullseye! One hundred!"
@@ -479,14 +513,74 @@ def _handle_laser(dots: list[dict]):
     if _laser_was_present:
         return   # dot still on wall, just moved — don't rescore
 
-    # Fresh appearance — score it
+    # Fresh appearance — record hit, show on screen (no auto-callout)
     _laser_was_present = True
+    _dart_hits.append({"x": x, "y": y, "score": score, "callout": callout})
+    if len(_dart_hits) > 20:
+        _dart_hits[:] = _dart_hits[-20:]
     _log("laser", f"🎯 ({x:.2f},{y:.2f}) → {score} pts")
+    dashboard.push_dart_hit({"x": x, "y": y, "score": score, "callout": callout})
+
+
+def _dart_speak_last():
+    """Speak the most recent dart score aloud — triggered by dashboard button."""
+    if not _dart_hits:
+        threading.Thread(target=tts.speak,
+            kwargs={"text": "No dart hits recorded yet.", "block": False},
+            daemon=True, name="dart-speak").start()
+        return
+    hit = _dart_hits[-1]
+    threading.Thread(target=tts.speak,
+        kwargs={"text": hit["callout"], "block": False},
+        daemon=True, name="dart-speak").start()
+
+
+def _dart_reset():
+    """Clear all recorded dart hits — triggered by dashboard button."""
+    _dart_hits.clear()
+    dashboard.dart_reset()
+    _log("laser", "🎯 Dart hits cleared")
+
+
+def _handle_laser_calibrate():
+    """
+    Set the scoring bullseye to wherever the laser dot currently is.
+    Called from dashboard 'laser_calibrate' action or /api/laser/calibrate.
+    Returns a dict so the REST endpoint can relay the result to the browser.
+    """
+    global _laser_bull_x, _laser_bull_y
+    try:
+        from camera import _laser_overlay_dots, _laser_overlay_lock
+        with _laser_overlay_lock:
+            dots = list(_laser_overlay_dots)
+    except Exception as e:
+        _log("warn", f"Laser calibrate: camera error — {e}")
+        return {"ok": False, "error": str(e)}
+
+    if not dots:
+        _log("warn", "🎯 Calibrate failed — no dot detected (point laser at bullseye first)")
+        return {"ok": False, "error": "No laser dot detected — point your laser at the bullseye and try again."}
+
+    dot = dots[0]
+    _laser_bull_x = dot["x"]
+    _laser_bull_y = dot["y"]
+    _save_laser_cal()
+
+    # Update camera overlay so the bullseye ring redraws immediately
+    try:
+        from camera import set_laser_bull
+        set_laser_bull(_laser_bull_x, _laser_bull_y)
+    except Exception:
+        pass
+
+    _log("laser", f"🎯 Bullseye set → ({_laser_bull_x:.3f},{_laser_bull_y:.3f})")
     if not _user_muted.is_set():
         threading.Thread(
-            target=tts.speak, kwargs={"text": callout, "block": False},
-            daemon=True, name="laser-score",
+            target=tts.speak,
+            kwargs={"text": "Bullseye calibrated.", "block": False},
+            daemon=True, name="laser-cal",
         ).start()
+    return {"ok": True, "bull_x": _laser_bull_x, "bull_y": _laser_bull_y}
 
 
 # ── Detection callback ────────────────────────────────────────────────────────
@@ -880,21 +974,29 @@ def main():
     if not args.no_dashboard:
         dashboard.start(logger=_det_logger, port=args.port)
         # Wire dashboard buttons → pinku actions
-        dashboard.register_action("wake",         _extend_session)
-        dashboard.register_action("mute",         _handle_mute)
-        dashboard.register_action("unmute",       _handle_unmute)
-        dashboard.register_action("pause",        _handle_pause)
-        dashboard.register_action("stop",         _handle_pause)   # alias
-        dashboard.register_action("mute_toggle",  lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
+        dashboard.register_action("wake",             _extend_session)
+        dashboard.register_action("mute",             _handle_mute)
+        dashboard.register_action("unmute",           _handle_unmute)
+        dashboard.register_action("pause",            _handle_pause)
+        dashboard.register_action("stop",             _handle_pause)   # alias
+        dashboard.register_action("mute_toggle",      lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
+        dashboard.register_action("laser_calibrate",  _handle_laser_calibrate)
+        dashboard.register_action("dart_speak",       _dart_speak_last)
+        dashboard.register_action("dart_reset",       _dart_reset)
+
+    # ── Laser calibration ─────────────────────────────────────────────────────
+    _load_laser_cal()
 
     # ── Camera ────────────────────────────────────────────────────────────────
     cam = None
     if not args.no_camera:
         global _camera_enabled
-        from camera import CameraDetector
+        from camera import CameraDetector, set_laser_bull
         cam = CameraDetector(on_detection=on_detection)
         cam.start()
         _camera_enabled = True
+        # Push calibrated bull to camera overlay renderer
+        set_laser_bull(_laser_bull_x, _laser_bull_y)
 
     # ── Mic ───────────────────────────────────────────────────────────────────
     recorder = stt.AudioRecorder()

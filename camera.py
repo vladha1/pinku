@@ -44,13 +44,39 @@ _det_status = "starting"
 _laser_overlay_lock = threading.Lock()
 _laser_overlay_dots: list[dict] = []   # list of {px, py, r}
 
+# Calibrated bullseye centre in normalised coords — updated by pinku.py
+_laser_bull: tuple[float, float] = (0.5, 0.5)
+
+
+def set_laser_bull(x: float, y: float):
+    """Update the bullseye position drawn on the annotated camera feed."""
+    global _laser_bull
+    _laser_bull = (float(x), float(y))
+
 
 def get_frame(annotated: bool = False) -> np.ndarray | None:
-    """Return current frame. If annotated=True, draws laser dot overlay."""
+    """Return current frame. If annotated=True, draws laser dot + bullseye overlay."""
     with _frame_lock:
         frame = _last_frame.copy() if _last_frame is not None else None
     if frame is None or not annotated:
         return frame
+
+    h, w = frame.shape[:2]
+
+    # ── Bullseye calibration target ───────────────────────────────────────────
+    bx = int(_laser_bull[0] * w)
+    by = int(_laser_bull[1] * h)
+    # Target rings (concentric circles in translucent amber)
+    for radius, thickness in [(6, -1), (18, 1), (38, 1), (62, 1)]:
+        cv2.circle(frame, (bx, by), radius, (0, 165, 255), thickness, cv2.LINE_AA)
+    # Cross-hair lines
+    cv2.line(frame, (bx - 72, by), (bx + 72, by), (0, 165, 255), 1, cv2.LINE_AA)
+    cv2.line(frame, (bx, by - 72), (bx, by + 72), (0, 165, 255), 1, cv2.LINE_AA)
+    # "BULL" label
+    cv2.putText(frame, "BULL", (bx + 10, by - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 165, 255), 1, cv2.LINE_AA)
+
+    # ── Detected laser dot(s) ─────────────────────────────────────────────────
     with _laser_overlay_lock:
         dots = list(_laser_overlay_dots)
     for d in dots:
