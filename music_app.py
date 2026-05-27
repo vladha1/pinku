@@ -302,63 +302,61 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
   padding-bottom: 10px;
 }
 .library-title {
-  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #64748b;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b;
 }
-.library-count {
-  font-size: 0.68rem; color: #475569;
-}
+.library-count { font-size: 0.68rem; color: #475569; }
 .library-empty {
-  padding: 18px 0; text-align: center; color: #475569; font-size: 0.82rem;
+  padding: 20px; text-align: center; color: #475569; font-size: 0.82rem;
   border: 1px dashed rgba(255,255,255,0.08); border-radius: 11px;
 }
+
+/* Card layout: info row on top, buttons row below */
 .lib-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 11px; border-radius: 11px; margin-bottom: 7px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 11px 13px; border-radius: 11px; margin-bottom: 8px;
   background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
   transition: border-color 0.15s;
 }
 .lib-item:hover   { border-color: rgba(192,132,252,0.3); }
 .lib-item.playing { border-color: rgba(74,222,128,0.45); background: rgba(74,222,128,0.06); }
-.lib-info { flex: 1; min-width: 0; }
-.lib-theme { font-size: 0.9rem; font-weight: 600; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-.lib-meta  { font-size: 0.68rem; color: #64748b; margin-top: 1px; }
-.lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.lib-play  {
-  padding: 6px 13px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
-  cursor: pointer; flex-shrink: 0;
-  border: 1px solid rgba(192,132,252,0.4); background: rgba(192,132,252,0.1); color: var(--accent);
+.lib-info  { min-width: 0; }
+.lib-theme { font-size: 0.92rem; font-weight: 600;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-meta  { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+
+/* Button row — always full width, never overflows */
+.lib-actions { display: flex; gap: 7px; }
+.lib-actions button {
+  flex: 1; padding: 7px 4px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; border-width: 1px; border-style: solid; transition: background 0.15s;
+  white-space: nowrap;
 }
-.lib-play:hover { background: rgba(192,132,252,0.22); }
-.lib-del {
-  padding: 6px 11px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
-  cursor: pointer; flex-shrink: 0;
-  border: 1px solid rgba(248,113,113,0.3); background: transparent; color: #f87171;
-}
-.lib-del:hover { background: rgba(248,113,113,0.12); }
-.lib-rename {
-  padding: 6px 11px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
-  cursor: pointer; flex-shrink: 0;
-  border: 1px solid rgba(148,163,184,0.25); background: transparent; color: #94a3b8;
-}
+.lib-play   { border-color: rgba(192,132,252,0.4); background: rgba(192,132,252,0.1); color: var(--accent); }
+.lib-play:hover   { background: rgba(192,132,252,0.22); }
+.lib-play.stop    { border-color: rgba(74,222,128,0.45); background: rgba(74,222,128,0.1); color: #4ade80; }
+.lib-play.stop:hover { background: rgba(74,222,128,0.22); }
+.lib-rename { border-color: rgba(148,163,184,0.25); background: transparent; color: #94a3b8; }
 .lib-rename:hover { background: rgba(148,163,184,0.1); color: var(--text); }
+.lib-del    { border-color: rgba(248,113,113,0.3); background: transparent; color: #f87171; }
+.lib-del:hover    { background: rgba(248,113,113,0.12); }
 
 /* inline rename edit row */
-.lib-edit-wrap { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
+.lib-edit-wrap  { display: flex; gap: 7px; align-items: center; }
 .lib-edit-input {
-  flex: 1; min-width: 0; padding: 5px 10px; border-radius: 8px; font-size: 0.88rem;
-  font-weight: 600; background: rgba(255,255,255,0.07);
-  border: 1px solid rgba(192,132,252,0.5); color: var(--text); outline: none;
+  flex: 1; padding: 6px 10px; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(192,132,252,0.5);
+  color: var(--text); outline: none;
 }
 .lib-edit-input:focus { border-color: var(--accent); }
 .lib-edit-ok {
-  padding: 5px 10px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  padding: 6px 13px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
   border: 1px solid rgba(74,222,128,0.45); background: rgba(74,222,128,0.1); color: #4ade80;
 }
 .lib-edit-ok:hover { background: rgba(74,222,128,0.22); }
 .lib-edit-cancel {
-  padding: 5px 9px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  padding: 6px 11px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
   border: 1px solid rgba(248,113,113,0.3); background: transparent; color: #f87171;
 }
 .lib-edit-cancel:hover { background: rgba(248,113,113,0.12); }
@@ -638,10 +636,13 @@ function renderLibrary() {
         <div class="lib-meta">${esc(item.created_at)}${mins ? ' · ' + mins : ''} · ${size}</div>
       </div>
       <div class="lib-actions">
-        <button class="lib-play"   onclick="playLibrary('${id}')">${active ? '■ Stop' : '▶ Play'}</button>
-        <button class="lib-rename" data-id="${id}" data-theme="${esc(item.theme)}"
+        <button class="lib-play ${active ? 'stop' : ''}"
+                onclick="playLibrary('${id}')">${active ? '■ Stop' : '▶ Play'}</button>
+        <button class="lib-rename"
+                data-id="${id}" data-theme="${esc(item.theme)}"
                 onclick="startRename(this.dataset.id, this.dataset.theme)">✏ Rename</button>
-        <button class="lib-del"    onclick="deleteLibrary('${id}')">🗑 Delete</button>
+        <button class="lib-del"
+                onclick="deleteLibrary('${id}')">🗑 Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -651,12 +652,12 @@ function renderLibrary() {
 function startRename(id, currentTheme) {
   const infoEl = document.getElementById('li-info-' + id);
   if (!infoEl) return;
-  // Swap info block for an edit row (keep meta line hidden so row height is stable)
+  // Replace the info block content with an inline edit row
   infoEl.innerHTML = `
     <div class="lib-edit-wrap">
       <input class="lib-edit-input" id="re-inp-${id}"
              value="${currentTheme.replace(/"/g,'&quot;')}" maxlength="80">
-      <button class="lib-edit-ok"     onclick="confirmRename('${id}')">✓</button>
+      <button class="lib-edit-ok"     onclick="confirmRename('${id}')">✓ Save</button>
       <button class="lib-edit-cancel" onclick="loadLibrary()">✗</button>
     </div>`;
   const inp = document.getElementById('re-inp-' + id);
