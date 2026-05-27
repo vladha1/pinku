@@ -54,6 +54,12 @@ def _push_library():
     _broadcast({"type": "music_library_updated"})
 
 
+# Register _push_state as the permanent default so state changes during
+# preload (e.g. loading → idle after model ready) reach SSE clients even
+# before the user has pressed Play for the first time.
+music._on_state_change = _push_state
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @_app.route("/events")

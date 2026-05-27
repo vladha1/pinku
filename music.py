@@ -455,8 +455,12 @@ def start(
 
     stop()   # cancel any in-progress playback first
 
-    _on_state_change   = on_state_change
-    _on_library_change = on_library_change
+    # Only overwrite the callbacks if the caller explicitly provides one.
+    # This preserves the permanent default registered by music_app at startup.
+    if on_state_change is not None:
+        _on_state_change   = on_state_change
+    if on_library_change is not None:
+        _on_library_change = on_library_change
     _stop_event      = threading.Event()
     dur              = max(0, int(duration_sec))
 
