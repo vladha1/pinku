@@ -16,71 +16,25 @@ Pinku dashboard:  http://localhost:5100
 from __future__ import annotations
 import argparse
 import json
-import queue
-import threading
 import time
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, jsonify, request
 
 import music
 
 _app  = Flask(__name__)
 _PORT = 5101
 
-# ── SSE broadcast ─────────────────────────────────────────────────────────────
-
-_clients: list[queue.SimpleQueue] = []
-_clients_lock = threading.Lock()
-
-
-def _broadcast(data: dict):
-    msg = "data: " + json.dumps(data) + "\n\n"
-    with _clients_lock:
-        dead = []
-        for q in _clients:
-            try:
-                q.put_nowait(msg)
-            except Exception:
-                dead.append(q)
-        for q in dead:
-            _clients.remove(q)
-
 
 def _push_state(state: dict | None = None):
-    _broadcast({"type": "music_state", **(state or music.get_state())})
+    pass   # polling — no push needed; kept so music.py callback wiring still works
 
 
 def _push_library():
-    _broadcast({"type": "music_library_updated"})
-
-
-# Register _push_state as the permanent default so state changes during
-# preload (e.g. loading → idle after model ready) reach SSE clients even
-# before the user has pressed Play for the first time.
-music._on_state_change = _push_state
+    pass   # polling — clients refresh on their own schedule
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-
-@_app.route("/events")
-def sse():
-    q: queue.SimpleQueue = queue.SimpleQueue()
-    with _clients_lock:
-        _clients.append(q)
-    init = json.dumps({"type": "music_state", **music.get_state()})
-
-    def stream():
-        yield f"data: {init}\n\n"
-        while True:
-            try:
-                msg = q.get(timeout=25)
-                yield msg
-            except queue.Empty:
-                yield ": ping\n\n"   # keep-alive
-    return Response(stream(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache",
-                              "X-Accel-Buffering": "no"})
-
 
 @_app.route("/api/state")
 def api_state():
@@ -527,6 +481,7 @@ function deleteLibrary(id) {
 }
 
 function loadLibrary() {
+  _lastLibraryTs = Date.now();
   fetch('/api/library').then(r => r.json()).then(items => {
     _library = items || [];
     renderLibrary();
@@ -685,22 +640,31 @@ function confirmRename(id) {
   }).catch(() => { inp.disabled = false; });
 }
 
-// ── SSE ───────────────────────────────────────────────────────────────────────
-function connectSSE() {
-  const es = new EventSource('/events');
-  es.onmessage = e => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type === 'music_state')       applyState(data);
-      if (data.type === 'music_library_updated') loadLibrary();
-    } catch(_) {}
-  };
-  es.onerror = () => setTimeout(connectSSE, 3000);
+// ── Polling (replaces SSE — no spinning browser tab) ─────────────────────────
+let _lastLibraryTs = 0;
+
+function pollState() {
+  fetch('/api/state')
+    .then(r => r.json())
+    .then(s => {
+      applyState(s);
+      // Refresh library when a new track finishes (state goes playing → idle)
+      const wasPlaying = _lastState && ['playing','generating'].includes(_lastState.state);
+      const nowIdle    = s.state === 'idle';
+      const libAge     = Date.now() - _lastLibraryTs;
+      if ((wasPlaying && nowIdle) || libAge > 15000) loadLibrary();
+    })
+    .catch(() => {});
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-connectSSE();
+pollState();
 loadLibrary();
+// While generating/playing poll every 1s for live progress; otherwise every 2s
+setInterval(() => {
+  const active = _lastState && ['loading','generating','playing'].includes(_lastState.state);
+  pollState();
+}, 1000);
 </script>
 </body>
 </html>
