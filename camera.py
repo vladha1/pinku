@@ -64,17 +64,32 @@ def get_frame(annotated: bool = False) -> np.ndarray | None:
     h, w = frame.shape[:2]
 
     # ── Bullseye calibration target ───────────────────────────────────────────
+    # Rings match the scoring thresholds in pinku.py _dart_score().
+    # dist formula: dist = sqrt((dx*2)²+(dy*2)²) / sqrt(2)
+    # → pixel_rx = dist * w / sqrt(2),  pixel_ry = dist * h / sqrt(2)
+    # Drawn as ellipses so they look circular on 4:3 frames.
     bx = int(_laser_bull[0] * w)
     by = int(_laser_bull[1] * h)
-    # Target rings (concentric circles in translucent amber)
-    for radius, thickness in [(6, -1), (18, 1), (38, 1), (62, 1)]:
-        cv2.circle(frame, (bx, by), radius, (0, 165, 255), thickness, cv2.LINE_AA)
-    # Cross-hair lines
-    cv2.line(frame, (bx - 72, by), (bx + 72, by), (0, 165, 255), 1, cv2.LINE_AA)
-    cv2.line(frame, (bx, by - 72), (bx, by + 72), (0, 165, 255), 1, cv2.LINE_AA)
-    # "BULL" label
-    cv2.putText(frame, "BULL", (bx + 10, by - 8),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 165, 255), 1, cv2.LINE_AA)
+    _RINGS = [
+        (0.035, 100, "BULL"),
+        (0.09,   75, "75"),
+        (0.16,   50, "50"),
+        (0.24,   25, "25"),
+        (0.35,   10, "10"),
+    ]
+    for i, (dist_t, score, lbl) in enumerate(_RINGS):
+        rx = max(4, int(dist_t * w / 1.414))
+        ry = max(4, int(dist_t * h / 1.414))
+        thickness = -1 if i == 0 else 1
+        cv2.ellipse(frame, (bx, by), (rx, ry), 0, 0, 360,
+                    (0, 165, 255), thickness, cv2.LINE_AA)
+        # Score label at right edge of each ring
+        cv2.putText(frame, lbl, (bx + rx + 3, by + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 165, 255), 1, cv2.LINE_AA)
+    # Cross-hair (extends just past the outermost ring)
+    arm = max(4, int(0.35 * w / 1.414)) + 12
+    cv2.line(frame, (bx - arm, by), (bx + arm, by), (0, 165, 255), 1, cv2.LINE_AA)
+    cv2.line(frame, (bx, by - arm), (bx, by + arm), (0, 165, 255), 1, cv2.LINE_AA)
 
     # ── Detected laser dot(s) ─────────────────────────────────────────────────
     with _laser_overlay_lock:

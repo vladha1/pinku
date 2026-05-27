@@ -470,12 +470,12 @@ def _dart_score(x: float, y: float) -> tuple[int, str]:
     dy = (y - _laser_bull_y) * 2
     dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
 
-    if   dist < 0.07: return 100, "Bullseye! One hundred!"
-    elif dist < 0.18: return  75, "Seventy five!"
-    elif dist < 0.32: return  50, "Fifty!"
-    elif dist < 0.48: return  25, "Twenty five."
-    elif dist < 0.65: return  10, "Ten."
-    else:             return   0, "Miss."
+    if   dist < 0.035: return 100, "Bullseye! One hundred!"
+    elif dist < 0.09:  return  75, "Seventy five!"
+    elif dist < 0.16:  return  50, "Fifty!"
+    elif dist < 0.24:  return  25, "Twenty five."
+    elif dist < 0.35:  return  10, "Ten."
+    else:              return   0, "Miss."
 
 
 def _handle_laser(dots: list[dict]):
