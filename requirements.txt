@@ -21,6 +21,12 @@ flask>=3.0.0
 # ── Utilities ─────────────────────────────────────────────────────────────────
 numpy>=1.26.0
 
+# ── Music generation ─────────────────────────────────────────────────────────
+audiocraft                     # Meta MusicGen — local AI music (pip install audiocraft)
+# Note: audiocraft pulls in torch + torchaudio automatically.
+# ABC/MIDI fallback (optional, lightweight):
+#   brew install abcmidi fluidsynth fluid-soundfont-gm
+
 # ── Optional / future ─────────────────────────────────────────────────────────
 # face-recognition             # face ID (requires dlib — brew install cmake first)
 # openai-whisper               # alternative to faster-whisper (slower but official)
