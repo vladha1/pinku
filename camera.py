@@ -526,12 +526,14 @@ class CameraDetector:
                 event["persons"] = 1
 
         # ── Dedup ─────────────────────────────────────────────────────────────
+        # Dedup on persons + gestures only — objects are excluded so that
+        # TV content changing (different objects on screen every 3 s) doesn't
+        # spam the log or fire on_detection when nobody is actually present.
         snap = (
             event["persons"],
-            tuple(sorted(o["label"] for o in event["objects"])),
             tuple(sorted(g["gesture"] for g in event["gestures"])),
         )
-        has_det = event["objects"] or event["persons"] or event["gestures"]
-        if has_det and snap != self._last_snapshot:
+        has_actionable = bool(event["persons"] or event["gestures"])
+        if has_actionable and snap != self._last_snapshot:
             self.on_detection(event)
-        self._last_snapshot = snap if has_det else None
+        self._last_snapshot = snap if has_actionable else None
