@@ -305,6 +305,51 @@ def _handle_scripture(action: dict):
     )
 
 
+# ── Music handlers ───────────────────────────────────────────────────────────
+
+def _on_music_state(state: dict):
+    """Callback from music.py — push state to dashboard and log notable changes."""
+    dashboard.push_music_state(state)
+    s = state.get("state", "")
+    if s == "playing" and state.get("chunk", 0) == 1:
+        _log("music", f"♪ Playing: {state.get('theme','')}")
+    elif s == "idle" and state.get("elapsed", 0) > 5:
+        _log("music", "♪ Playback finished")
+    elif s == "error":
+        _log("error", f"Music error: {state.get('error','')}")
+
+
+def _handle_music_play(action: dict):
+    import music as _music
+    theme    = (action.get("theme") or action.get("transcript") or "chill").strip()
+    dur_str  = str(action.get("duration_sec") or action.get("duration") or "300")
+    try:
+        dur = int(float(dur_str))
+    except (ValueError, TypeError):
+        dur = 300
+    _log("music", f"♪ Starting: theme={theme!r}  duration={dur}s")
+    dashboard.update_status(last_transcript=action.get("transcript", ""), last_reply="")
+    _music.start(theme, duration_sec=dur, on_state_change=_on_music_state)
+    # Speak brief confirmation while MusicGen loads (non-blocking)
+    label = theme if theme not in _music.PRESETS else theme
+    dur_label = f"for {dur // 60} minute{'s' if dur >= 120 else ''}" if dur > 0 else "until you say stop"
+    threading.Thread(
+        target=tts.speak,
+        kwargs={"text": f"Starting {label} music, {dur_label}.", "block": False},
+        daemon=True, name="music-confirm",
+    ).start()
+
+
+def _handle_music_stop():
+    import music as _music
+    if _music.is_playing():
+        _music.stop()
+        _log("music", "♪ Music stopped")
+        tts.speak("Music stopped.", block=False)
+    else:
+        tts.speak("Nothing is playing.", block=False)
+
+
 def _handle_mute():
     global _settle_until
     _user_muted.set()    # track user intent separately from speaking-mute
@@ -798,9 +843,13 @@ def _dispatch_action(action: dict):
         _handle_scripture(action)
     elif act == "weather":
         _handle_weather(action)
-    elif act in ("music_play", "music_stop", "lights_on", "lights_off"):
+    elif act == "music_play":
+        _handle_music_play(action)
+    elif act == "music_stop":
+        _handle_music_stop()
+    elif act in ("lights_on", "lights_off"):
         _log("warn", f'Action "{act}" not yet implemented')
-        tts.speak(f"Sorry, {act.replace('_', ' ')} isn't set up yet.")
+        tts.speak(f"Sorry, lights control isn't set up yet.")
     else:
         _handle_chat(action)
 

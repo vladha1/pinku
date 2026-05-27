@@ -55,6 +55,14 @@ VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "400"))  # ignore clips
 MIC_SAMPLE_RATE   = 16000
 MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
 
+# ── Music generation ──────────────────────────────────────────────────────────
+# Backend: "musicgen" (local Meta AudioCraft) or "abc" (Ollama → MIDI, lightweight)
+MUSIC_BACKEND     = os.getenv("MUSIC_BACKEND",  "musicgen")
+# MusicGen model size: "facebook/musicgen-small"  (~300 MB, ~15s/chunk on M4)
+#                      "facebook/musicgen-medium" (~1.5 GB, ~45s/chunk, higher quality)
+MUSICGEN_MODEL    = os.getenv("MUSICGEN_MODEL", "facebook/musicgen-small")
+MUSIC_CHUNK_SEC   = int(os.getenv("MUSIC_CHUNK_SEC", "30"))   # seconds per generated clip
+
 # ── Web dashboard ─────────────────────────────────────────────────────────────
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
