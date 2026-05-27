@@ -496,13 +496,18 @@ def _dart_score(x: float, y: float) -> tuple[int, str]:
     else:              return   0, "Miss."
 
 
+_LASER_MUTE_DOTS    = 10     # need this many simultaneous dots to trigger mute toggle
+_LASER_MUTE_COOLDOWN = 5.0  # seconds — ignore repeated multi-dot events
+_laser_mute_last_at: float = 0.0
+
+
 def _handle_laser(dots: list[dict]):
     """
-    0 dots  → mark absent (next appearance will rescore).
-    1 dot   → score only on fresh appearance; ignore while dot stays on wall.
-    2+ dots → mute / unmute toggle.
+    0 dots   → mark absent (next appearance will rescore).
+    1–9 dots → dart scoring only (single dot = throw; few dots = reflections, ignored).
+    10+ dots → mute / unmute toggle, with 5-second cooldown to avoid accidental re-fires.
     """
-    global _laser_was_present
+    global _laser_was_present, _laser_mute_last_at
 
     # ── Dot gone — reset so next throw rescores ───────────────────────────────
     if not dots:
@@ -512,9 +517,14 @@ def _handle_laser(dots: list[dict]):
         _laser_was_present = False
         return
 
-    # ── Multi-dot: toggle mute (no score) ────────────────────────────────────
-    if len(dots) >= 2:
-        _log("laser", f"🔴🔴 {len(dots)} dots → mute toggle")
+    # ── Many dots: toggle mute (no score) ────────────────────────────────────
+    if len(dots) >= _LASER_MUTE_DOTS:
+        now = time.time()
+        if now - _laser_mute_last_at < _LASER_MUTE_COOLDOWN:
+            _laser_was_present = True
+            return   # within cooldown — ignore
+        _laser_mute_last_at = now
+        _log("laser", f"🔴×{len(dots)} → mute toggle")
         if _user_muted.is_set():
             _handle_unmute()
         else:
