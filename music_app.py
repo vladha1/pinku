@@ -86,7 +86,9 @@ def api_start():
     data     = request.get_json(silent=True) or {}
     theme    = (data.get("theme") or "chill").strip()
     duration = int(data.get("duration_sec") or 300)
-    music.start(theme, duration_sec=duration, on_state_change=_push_state)
+    music.start(theme, duration_sec=duration,
+                on_state_change=_push_state,
+                on_library_change=_push_library)
     return jsonify({"ok": True, "theme": theme, "duration_sec": duration})
 
 

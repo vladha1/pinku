@@ -137,7 +137,8 @@ _state: dict = {
     "error":        "",
 }
 
-_on_state_change: Callable[[dict], None] | None = None
+_on_state_change:   Callable[[dict], None] | None = None
+_on_library_change: Callable[[], None] | None = None
 _stop_event  = threading.Event()
 _play_thread: threading.Thread | None = None
 _afplay_lock = threading.Lock()
@@ -205,6 +206,10 @@ def _load_musicgen():
             MUSICGEN_MODEL
         )
         print("[Music] MusicGen ready ✓")
+        # If we just preloaded (nobody started playback), go back to idle
+        # so the UI shows "Ready to play" instead of staying on "Loading model…"
+        if get_state()["state"] == "loading":
+            _set_state(state="idle")
     return _mg_model, _mg_processor
 
 
@@ -391,16 +396,19 @@ def start(
     theme: str,
     duration_sec: int = 0,
     on_state_change: Callable[[dict], None] | None = None,
+    on_library_change: Callable[[], None] | None = None,
 ):
     """
     Begin generating and playing music.
     duration_sec=0 → play until stop() is called.
+    on_library_change: called (no args) when a new session is saved to the library.
     """
-    global _on_state_change, _play_thread, _stop_event
+    global _on_state_change, _on_library_change, _play_thread, _stop_event
 
     stop()   # cancel any in-progress playback first
 
-    _on_state_change = on_state_change
+    _on_state_change   = on_state_change
+    _on_library_change = on_library_change
     _stop_event      = threading.Event()
     dur              = max(0, int(duration_sec))
 
@@ -527,12 +535,13 @@ def start(
         if saved_chunks:
             entry = _add_to_library(session_id, theme, prompt, final_elapsed, saved_chunks)
             _dlog(f"saved to library: {entry['id']} ({entry['size_kb']} KB)")
-            # Notify dashboard to refresh library list
-            try:
-                import dashboard as _db
-                _db.push_music_library()
-            except Exception:
-                pass
+            # Notify music_app.py to refresh the library list via the library callback
+            cb = _on_library_change
+            if cb:
+                try:
+                    cb()
+                except Exception:
+                    pass
 
         _set_state(state="idle", elapsed=final_elapsed, chunk=0, chunks_total=0)
         print(f"[Music] ■ done  elapsed={final_elapsed}s")
