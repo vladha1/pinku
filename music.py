@@ -98,6 +98,24 @@ def delete_library_item(item_id: str) -> bool:
     return True
 
 
+def rename_library_item(item_id: str, new_theme: str) -> bool:
+    """Rename a saved session. Returns True if found."""
+    new_theme = new_theme.strip()
+    if not new_theme:
+        return False
+    with _lib_lock:
+        items = _load_index()
+        found = False
+        for item in items:
+            if item["id"] == item_id:
+                item["theme"] = new_theme
+                found = True
+                break
+        if found:
+            _save_index(items)
+    return found
+
+
 # ── Preset themes ─────────────────────────────────────────────────────────────
 # Keys are shown as dashboard buttons; values are MusicGen prompts.
 

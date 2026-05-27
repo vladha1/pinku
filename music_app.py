@@ -114,6 +114,18 @@ def api_play_library():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@_app.route("/api/library/<item_id>", methods=["PATCH"])
+def api_rename_library(item_id):
+    data      = request.get_json(silent=True) or {}
+    new_theme = (data.get("theme") or "").strip()
+    if not new_theme:
+        return jsonify({"ok": False, "error": "theme required"}), 400
+    ok = music.rename_library_item(item_id, new_theme)
+    if ok:
+        _push_library()
+    return jsonify({"ok": ok})
+
+
 @_app.route("/api/library/<item_id>", methods=["DELETE"])
 def api_delete_library(item_id):
     ok = music.delete_library_item(item_id)
@@ -280,6 +292,30 @@ main { flex: 1; overflow-y: auto; padding: 0 0 32px;
   border: 1px solid rgba(248,113,113,0.3); background: transparent; color: #f87171;
 }
 .lib-del:hover { background: rgba(248,113,113,0.12); }
+.lib-rename {
+  padding: 5px 9px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(148,163,184,0.2); background: transparent; color: #64748b;
+}
+.lib-rename:hover { background: rgba(148,163,184,0.1); color: #94a3b8; }
+
+/* inline rename edit row */
+.lib-edit-wrap { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
+.lib-edit-input {
+  flex: 1; min-width: 0; padding: 5px 10px; border-radius: 8px; font-size: 0.88rem;
+  font-weight: 600; background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(192,132,252,0.5); color: var(--text); outline: none;
+}
+.lib-edit-input:focus { border-color: var(--accent); }
+.lib-edit-ok {
+  padding: 5px 10px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(74,222,128,0.45); background: rgba(74,222,128,0.1); color: #4ade80;
+}
+.lib-edit-ok:hover { background: rgba(74,222,128,0.22); }
+.lib-edit-cancel {
+  padding: 5px 9px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(248,113,113,0.3); background: transparent; color: #f87171;
+}
+.lib-edit-cancel:hover { background: rgba(248,113,113,0.12); }
 
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 .status-label.generating { animation: pulse 1.4s ease-in-out infinite; }
@@ -503,18 +539,59 @@ function renderLibrary() {
   section.style.display = '';
   const curTheme = _lastState && _lastState.state === 'playing' ? _lastState.theme : null;
   list.innerHTML = _library.map(item => {
-    const mins = item.duration_sec > 0 ? Math.round(item.duration_sec/60)+' min' : '';
-    const size = item.size_kb > 1024 ? (item.size_kb/1024).toFixed(1)+'MB' : item.size_kb+'KB';
+    const mins   = item.duration_sec > 0 ? Math.round(item.duration_sec/60)+' min' : '';
+    const size   = item.size_kb > 1024 ? (item.size_kb/1024).toFixed(1)+'MB' : item.size_kb+'KB';
     const active = curTheme === item.theme;
-    return `<div class="lib-item${active?' playing':''}" id="li-${esc(item.id)}">
-      <div class="lib-info">
+    const id     = esc(item.id);
+    // store theme in data attr to avoid inline quote escaping issues
+    return `<div class="lib-item${active?' playing':''}" id="li-${id}">
+      <div class="lib-info" id="li-info-${id}">
         <div class="lib-theme">${esc(item.theme)}</div>
         <div class="lib-meta">${esc(item.created_at)}${mins?' · '+mins:''} · ${size}</div>
       </div>
-      <button class="lib-play" onclick="playLibrary('${esc(item.id)}')">▶ Play</button>
-      <button class="lib-del"  onclick="deleteLibrary('${esc(item.id)}')">🗑</button>
+      <button class="lib-play"   onclick="playLibrary('${id}')">▶ Play</button>
+      <button class="lib-rename" data-id="${id}" data-theme="${esc(item.theme)}"
+              onclick="startRename(this.dataset.id, this.dataset.theme)">✏</button>
+      <button class="lib-del"    onclick="deleteLibrary('${id}')">🗑</button>
     </div>`;
   }).join('');
+}
+
+// ── Inline rename ─────────────────────────────────────────────────────────────
+function startRename(id, currentTheme) {
+  const infoEl = document.getElementById('li-info-' + id);
+  if (!infoEl) return;
+  // Swap info block for an edit row (keep meta line hidden so row height is stable)
+  infoEl.innerHTML = `
+    <div class="lib-edit-wrap">
+      <input class="lib-edit-input" id="re-inp-${id}"
+             value="${currentTheme.replace(/"/g,'&quot;')}" maxlength="80">
+      <button class="lib-edit-ok"     onclick="confirmRename('${id}')">✓</button>
+      <button class="lib-edit-cancel" onclick="loadLibrary()">✗</button>
+    </div>`;
+  const inp = document.getElementById('re-inp-' + id);
+  if (!inp) return;
+  inp.focus(); inp.select();
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); confirmRename(id); }
+    if (e.key === 'Escape') loadLibrary();
+  });
+}
+
+function confirmRename(id) {
+  const inp = document.getElementById('re-inp-' + id);
+  if (!inp) return;
+  const newTheme = inp.value.trim();
+  if (!newTheme) { inp.focus(); return; }
+  inp.disabled = true;
+  fetch('/api/library/' + id, {
+    method:  'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body:    JSON.stringify({theme: newTheme}),
+  }).then(r => r.json()).then(d => {
+    if (d.ok) loadLibrary();
+    else { inp.disabled = false; inp.focus(); alert('Rename failed'); }
+  }).catch(() => { inp.disabled = false; });
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
