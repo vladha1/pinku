@@ -80,14 +80,6 @@ def push_dart_hits_clear():
     """Clear hit-dot overlay only (not scoreboard) — used on Next Player."""
     _broadcast({"type": "dart_hits_clear"})
 
-def push_music_state(state: dict):
-    """Broadcast current music generation/playback state to all clients."""
-    _broadcast({"type": "music_state", **state})
-
-def push_music_library():
-    """Tell clients to refresh the music library list."""
-    _broadcast({"type": "music_library_updated"})
-
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -245,73 +237,6 @@ def dart_game():
         return jsonify(dict(_game_state))
 
 
-@_app.route("/api/music/state")
-def music_state_api():
-    from flask import jsonify
-    try:
-        import music as _music
-        return jsonify(_music.get_state())
-    except Exception:
-        return jsonify({"state": "idle", "error": "music module not loaded"})
-
-@_app.route("/api/music/start", methods=["POST"])
-def music_start_api():
-    from flask import request as _req, jsonify
-    data     = _req.get_json(silent=True) or {}
-    theme    = data.get("theme", "chill").strip()
-    duration = int(data.get("duration_sec", 300))
-    try:
-        import music as _music
-        _music.start(theme, duration_sec=duration,
-                     on_state_change=push_music_state)
-        return jsonify({"ok": True, "theme": theme, "duration_sec": duration})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@_app.route("/api/music/stop", methods=["POST"])
-def music_stop_api():
-    from flask import jsonify
-    try:
-        import music as _music
-        _music.stop()
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@_app.route("/api/music/library")
-def music_library_api():
-    from flask import jsonify
-    try:
-        import music as _music
-        return jsonify(_music.list_library())
-    except Exception as e:
-        return jsonify([])
-
-@_app.route("/api/music/play_library", methods=["POST"])
-def music_play_library_api():
-    from flask import request as _req, jsonify
-    data    = _req.get_json(silent=True) or {}
-    item_id = data.get("id", "")
-    try:
-        import music as _music
-        _music.play_library_item(item_id, on_state_change=push_music_state)
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-
-@_app.route("/api/music/library/<item_id>", methods=["DELETE"])
-def music_delete_library_api(item_id):
-    from flask import jsonify
-    try:
-        import music as _music
-        ok = _music.delete_library_item(item_id)
-        if ok:
-            push_music_library()
-        return jsonify({"ok": ok})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @_app.route("/restart")
 def restart_page():
     """Simple tap-to-restart page — works from any browser including iPad Safari."""
@@ -377,6 +302,8 @@ def api_restart():
             )
         except Exception as e:
             print(f"[Restart] git pull failed: {e}")
+        # Also kill music_app.py so start_pinku.command restarts it with new code
+        subprocess.run(["pkill", "-f", "music_app.py"], capture_output=True)
         os.kill(os.getpid(), 15)   # SIGTERM → triggers the finally block in main()
 
     threading.Thread(target=_do_restart, daemon=True).start()
@@ -1305,135 +1232,6 @@ body {
 .dart-score-label { flex:1; color:var(--muted); }
 .dart-score-pos   { font-size:0.7rem; color:#64748b; font-family:monospace; }
 
-/* Music panel */
-.music-area {
-  flex:1; display:none; flex-direction:column; align-items:center;
-  overflow-y:auto; padding:0 0 24px; gap:0; width:100%;
-}
-.music-area.open { display:flex; }
-
-.music-status-bar {
-  width:100%; max-width:640px; display:flex; align-items:center; gap:12px;
-  padding:12px 16px; background:rgba(192,132,252,0.06);
-  border-bottom:1px solid rgba(192,132,252,0.18); flex-shrink:0;
-}
-.music-status-icon { font-size:1.6rem; line-height:1; flex-shrink:0; }
-.music-status-text { flex:1; min-width:0; }
-.music-status-label {
-  display:block; font-size:0.95rem; font-weight:700; color:#c084fc;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.music-status-sub {
-  display:block; font-size:0.72rem; color:#64748b; margin-top:1px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.music-stop-fab {
-  padding:6px 14px; border-radius:8px; font-size:0.82rem; font-weight:700;
-  border:1px solid rgba(248,113,113,0.5); background:rgba(248,113,113,0.12);
-  color:#f87171; cursor:pointer; flex-shrink:0; transition:background 0.15s;
-}
-.music-stop-fab:hover { background:rgba(248,113,113,0.22); }
-
-.music-presets {
-  width:100%; max-width:640px; display:grid;
-  grid-template-columns:repeat(4, 1fr); gap:8px; padding:14px 16px 6px;
-}
-.music-preset-btn {
-  display:flex; flex-direction:column; align-items:center; gap:3px;
-  padding:10px 4px 8px; border-radius:12px; cursor:pointer;
-  border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.04);
-  color:var(--text); font-size:0.7rem; transition:all 0.15s; user-select:none;
-}
-.music-preset-btn:hover { background:rgba(192,132,252,0.12); border-color:rgba(192,132,252,0.35); }
-.music-preset-btn.active {
-  background:rgba(192,132,252,0.18); border-color:rgba(192,132,252,0.55);
-  color:#c084fc; font-weight:700;
-}
-.music-preset-emoji { font-size:1.5rem; line-height:1; }
-
-.music-custom-row {
-  width:100%; max-width:640px; padding:8px 16px 0;
-}
-.music-theme-input {
-  width:100%; box-sizing:border-box; padding:9px 12px; border-radius:10px;
-  border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05);
-  color:var(--text); font-size:0.88rem; outline:none; transition:border 0.15s;
-}
-.music-theme-input:focus { border-color:rgba(192,132,252,0.45); }
-.music-theme-input::placeholder { color:#475569; }
-
-.music-dur-row {
-  width:100%; max-width:640px; padding:10px 16px 0;
-  display:flex; align-items:center; gap:10px;
-}
-.music-dur-label { font-size:0.75rem; color:#64748b; flex-shrink:0; }
-.music-dur-btns  { display:flex; gap:6px; flex-wrap:wrap; }
-.music-dur-btn {
-  padding:4px 11px; border-radius:8px; font-size:0.78rem; cursor:pointer;
-  border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.04);
-  color:#94a3b8; transition:all 0.15s;
-}
-.music-dur-btn:hover  { background:rgba(255,255,255,0.1); color:var(--text); }
-.music-dur-btn.active {
-  background:rgba(251,191,36,0.15); border-color:rgba(251,191,36,0.45); color:#fbbf24;
-}
-
-.music-play-row {
-  width:100%; max-width:640px; padding:12px 16px 0;
-}
-.music-play-btn {
-  width:100%; padding:12px; border-radius:12px; font-size:1rem; font-weight:700;
-  border:1px solid rgba(192,132,252,0.45); background:rgba(192,132,252,0.14);
-  color:#c084fc; cursor:pointer; transition:all 0.15s; letter-spacing:0.02em;
-}
-.music-play-btn:hover    { background:rgba(192,132,252,0.25); }
-.music-play-btn:disabled { opacity:0.45; cursor:default; }
-.music-play-btn.playing  {
-  background:rgba(74,222,128,0.14); border-color:rgba(74,222,128,0.45); color:#4ade80;
-}
-
-.music-progress-wrap {
-  width:100%; max-width:640px; padding:10px 16px 0;
-}
-.music-progress-bar {
-  height:4px; border-radius:2px; background:rgba(192,132,252,0.5);
-  transition:width 0.5s linear; width:0%;
-}
-@keyframes music-pulse {
-  0%,100% { opacity:1; } 50% { opacity:0.55; }
-}
-.music-status-label.generating { animation:music-pulse 1.4s ease-in-out infinite; }
-
-.music-library-section {
-  width:100%; max-width:640px; padding:12px 16px 0;
-}
-.music-library-title {
-  font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em;
-  color:#64748b; padding-bottom:6px;
-}
-.music-lib-item {
-  display:flex; align-items:center; gap:8px;
-  padding:8px 10px; border-radius:10px; margin-bottom:6px;
-  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
-  transition:border-color 0.15s;
-}
-.music-lib-item:hover { border-color:rgba(192,132,252,0.3); }
-.music-lib-item.playing { border-color:rgba(74,222,128,0.45); background:rgba(74,222,128,0.06); }
-.music-lib-theme { flex:1; font-size:0.88rem; font-weight:600; min-width:0;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.music-lib-meta  { font-size:0.68rem; color:#64748b; flex-shrink:0; }
-.music-lib-play  {
-  padding:4px 10px; border-radius:7px; font-size:0.78rem; cursor:pointer;
-  border:1px solid rgba(192,132,252,0.4); background:rgba(192,132,252,0.1);
-  color:#c084fc; transition:background 0.15s; flex-shrink:0;
-}
-.music-lib-play:hover { background:rgba(192,132,252,0.22); }
-.music-lib-del {
-  padding:4px 8px; border-radius:7px; font-size:0.78rem; cursor:pointer;
-  border:1px solid rgba(248,113,113,0.3); background:transparent;
-  color:#f87171; transition:background 0.15s; flex-shrink:0;
-}
-.music-lib-del:hover { background:rgba(248,113,113,0.12); }
 
 /* Log panel */
 .log-area {
@@ -1643,54 +1441,6 @@ body {
   <div class="darts-score-list" id="darts-score-list"></div>
 </div>
 
-<!-- Music area (hidden by default) -->
-<div class="music-area" id="music-area">
-
-  <!-- Status bar -->
-  <div class="music-status-bar" id="music-status-bar">
-    <span class="music-status-icon" id="music-status-icon">🎵</span>
-    <div class="music-status-text">
-      <span class="music-status-label" id="music-status-label">Ready to play</span>
-      <span class="music-status-sub"   id="music-status-sub">Choose a theme below</span>
-    </div>
-    <button class="music-stop-fab" id="music-stop-fab" onclick="musicStop()" style="display:none">■ Stop</button>
-  </div>
-
-  <!-- Preset grid -->
-  <div class="music-presets" id="music-presets"></div>
-
-  <!-- Custom theme + duration -->
-  <div class="music-custom-row">
-    <input class="music-theme-input" id="music-theme-input"
-           type="text" placeholder="Custom theme… e.g. rainy Bollywood evening" maxlength="80">
-  </div>
-  <div class="music-dur-row">
-    <span class="music-dur-label">Duration</span>
-    <div class="music-dur-btns" id="music-dur-btns">
-      <button class="music-dur-btn" data-sec="60">1 min</button>
-      <button class="music-dur-btn active" data-sec="300">5 min</button>
-      <button class="music-dur-btn" data-sec="600">10 min</button>
-      <button class="music-dur-btn" data-sec="1800">30 min</button>
-      <button class="music-dur-btn" data-sec="0">∞</button>
-    </div>
-  </div>
-  <div class="music-play-row">
-    <button class="music-play-btn" id="music-play-btn" onclick="musicPlay()">▶ Generate &amp; Play</button>
-  </div>
-
-  <!-- Progress bar (shown while playing) -->
-  <div class="music-progress-wrap" id="music-progress-wrap" style="display:none">
-    <div class="music-progress-bar" id="music-progress-bar"></div>
-  </div>
-
-  <!-- Library -->
-  <div class="music-library-section" id="music-library-section" style="display:none">
-    <div class="music-library-title">📂 Saved</div>
-    <div class="music-library-list" id="music-library-list"></div>
-  </div>
-
-</div>
-
 <!-- Log area (hidden by default) -->
 <div class="log-area" id="log-area">
   <div class="log-toolbar">
@@ -1714,9 +1464,6 @@ body {
   <button class="pinky-nav-item" id="nav-darts" onclick="showTab('darts')">
     <span class="pinky-nav-ic">🎯</span>Darts
   </button>
-  <button class="pinky-nav-item" id="nav-music" onclick="showTab('music')">
-    <span class="pinky-nav-ic">🎵</span>Music
-  </button>
   <button class="pinky-nav-item" id="nav-log" onclick="showTab('log')">
     <span class="pinky-nav-ic">📋</span>Log
   </button>
@@ -1733,7 +1480,7 @@ const STATE_UI = {
   awake:    { icon:'👂', label:'Listening…', sub:'Speak freely — or tap 🎙️' },
   thinking: { icon:'⚡', label:'On it…',     sub:'Processing your request' },
   speaking: { icon:'🗣️', label:'Speaking…',  sub:'Tap ⏹ to stop' },
-  paused:   { icon:'🔇', label:'Muted',      sub:'Tap mic or show ✊ to unmute' },
+  paused:   { icon:'🔇', label:'Muted',      sub:'Tap 🎙️ to unmute — or show 🙌 Hands Up' },
   triggered:{ icon:'⚡', label:'On it…',     sub:'Running your command' },
   listening:{ icon:'👁️', label:'Watching',   sub:'Step into view' },
 };
@@ -2263,13 +2010,12 @@ function formatDetEvent(e) {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-const _TABS = ['home', 'history', 'cam', 'darts', 'music', 'log'];
+const _TABS = ['home', 'history', 'cam', 'darts', 'log'];
 function showTab(name) {
   document.getElementById('main-area').style.display       = name === 'home'    ? '' : 'none';
   document.getElementById('history-area').className        = 'history-area'   + (name === 'history' ? ' open' : '');
   document.getElementById('camera-area').className         = 'camera-area'    + (name === 'cam'     ? ' open' : '');
   document.getElementById('darts-area').className          = 'darts-area'     + (name === 'darts'   ? ' open' : '');
-  document.getElementById('music-area').className          = 'music-area'     + (name === 'music'   ? ' open' : '');
   document.getElementById('log-area').className            = 'log-area'       + (name === 'log'     ? ' open' : '');
   _TABS.forEach(t => {
     const el = document.getElementById('nav-' + t);
@@ -2285,7 +2031,6 @@ function showTab(name) {
     });
   }
   if (name === 'darts') { loadDartHits(); loadDartGame(); }
-  if (name === 'music')  initMusicTab();
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -2337,11 +2082,6 @@ function connect() {
         if (layer) layer.innerHTML = '';
       } else if (data.type === 'dart_game') {
         updateGameBar(data);
-      } else if (data.type === 'music_state') {
-        applyMusicState(data);
-        renderLibrary();
-      } else if (data.type === 'music_library_updated') {
-        loadMusicLibrary();
       }
     } catch(_) {}
   };
@@ -2353,204 +2093,6 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Music tab ─────────────────────────────────────────────────────────────────
-
-const MUSIC_PRESETS = [
-  {key:'chill',      emoji:'☁️'},  {key:'focus',      emoji:'🎯'},
-  {key:'bollywood',  emoji:'🪘'},  {key:'jazz',       emoji:'🎷'},
-  {key:'classical',  emoji:'🎻'},  {key:'ambient',    emoji:'🌊'},
-  {key:'party',      emoji:'🎉'},  {key:'meditation', emoji:'🧘'},
-  {key:'sleep',      emoji:'🌙'},  {key:'bhajan',     emoji:'🪔'},
-  {key:'folk',       emoji:'🪈'},  {key:'rock',       emoji:'🎸'},
-];
-let _musicDurSec    = 300;
-let _musicTheme     = 'chill';
-let _musicTabInited = false;
-
-function initMusicTab() {
-  if (_musicTabInited) { loadMusicState(); return; }
-  _musicTabInited = true;
-
-  // Build preset buttons
-  const grid = document.getElementById('music-presets');
-  if (grid) {
-    grid.innerHTML = MUSIC_PRESETS.map(p =>
-      `<button class="music-preset-btn${p.key === _musicTheme ? ' active' : ''}"
-               id="mpb-${p.key}" onclick="selectPreset('${p.key}')">
-         <span class="music-preset-emoji">${p.emoji}</span>${p.key}
-       </button>`
-    ).join('');
-  }
-
-  // Duration button handlers
-  document.querySelectorAll('.music-dur-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.music-dur-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      _musicDurSec = parseInt(btn.dataset.sec) || 0;
-    });
-  });
-
-  // Custom theme input clears preset selection
-  const inp = document.getElementById('music-theme-input');
-  if (inp) inp.addEventListener('input', () => {
-    if (inp.value.trim()) {
-      document.querySelectorAll('.music-preset-btn').forEach(b => b.classList.remove('active'));
-      _musicTheme = inp.value.trim();
-    }
-  });
-
-  loadMusicState();
-  loadMusicLibrary();
-}
-
-function selectPreset(key) {
-  _musicTheme = key;
-  document.querySelectorAll('.music-preset-btn').forEach(b =>
-    b.classList.toggle('active', b.id === 'mpb-' + key)
-  );
-  const inp = document.getElementById('music-theme-input');
-  if (inp) inp.value = '';
-}
-
-function loadMusicState() {
-  fetch('/api/music/state').then(r => r.json()).then(applyMusicState).catch(() => {});
-}
-
-function applyMusicState(s) {
-  if (!s) return;
-  _lastMusicState = s;
-  const state   = s.state || 'idle';
-  const label   = document.getElementById('music-status-label');
-  const sub     = document.getElementById('music-status-sub');
-  const icon    = document.getElementById('music-status-icon');
-  const stopFab = document.getElementById('music-stop-fab');
-  const playBtn = document.getElementById('music-play-btn');
-  const progWrap= document.getElementById('music-progress-wrap');
-  const progBar = document.getElementById('music-progress-bar');
-
-  const active = ['loading','generating','playing'].includes(state);
-  if (stopFab) stopFab.style.display = active ? '' : 'none';
-  if (playBtn) {
-    playBtn.disabled = active;
-    playBtn.textContent = active ? '♪ Playing…' : '▶ Generate & Play';
-    playBtn.classList.toggle('playing', state === 'playing');
-  }
-  if (progWrap) progWrap.style.display = active ? '' : 'none';
-
-  if (label) label.classList.toggle('generating', state === 'generating' || state === 'loading');
-
-  if (state === 'loading') {
-    if (icon)  icon.textContent  = '⏳';
-    if (label) label.textContent = 'Loading model…';
-    if (sub)   sub.textContent   = 'First run downloads MusicGen (~300 MB)';
-  } else if (state === 'generating') {
-    if (icon)  icon.textContent  = '🎼';
-    if (label) label.textContent = `Generating "${s.theme || ''}"…`;
-    if (sub)   sub.textContent   = `Chunk ${(s.chunk||0)+1} of ${s.chunks_total||'?'} · please wait`;
-  } else if (state === 'playing') {
-    if (icon)  icon.textContent  = '♪';
-    if (label) { label.textContent = `♪ ${s.theme || ''}`; label.classList.remove('generating'); }
-    const elapsed = s.elapsed || 0;
-    const total   = s.total   || 0;
-    const pct     = total > 0 ? Math.min(100, (elapsed / total) * 100).toFixed(1) : 0;
-    if (sub) sub.textContent = total > 0
-      ? `${_fmtTime(elapsed)} / ${_fmtTime(total)}  · chunk ${s.chunk||1}`
-      : `${_fmtTime(elapsed)} elapsed`;
-    if (progBar) progBar.style.width = (total > 0 ? pct : 50) + '%';
-  } else if (state === 'error') {
-    if (icon)  icon.textContent  = '⚠️';
-    if (label) label.textContent = 'Error';
-    if (sub)   sub.textContent   = s.error || 'Check log';
-  } else {
-    // idle
-    if (icon)  icon.textContent  = '🎵';
-    if (label) label.textContent = 'Ready to play';
-    if (sub)   sub.textContent   = 'Choose a theme below';
-    if (progBar) progBar.style.width = '0%';
-  }
-}
-
-function _fmtTime(sec) {
-  const m = Math.floor(sec / 60), s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-function musicPlay() {
-  const inp = document.getElementById('music-theme-input');
-  const theme = (inp && inp.value.trim()) ? inp.value.trim() : _musicTheme;
-  fetch('/api/music/start', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({theme, duration_sec: _musicDurSec}),
-  }).then(r => r.json()).then(d => {
-    if (!d.ok) console.error('music start error', d.error);
-    loadMusicState();
-  }).catch(e => console.error(e));
-}
-
-function musicStop() {
-  fetch('/api/music/stop', {method:'POST'})
-    .then(() => loadMusicState())
-    .catch(e => console.error(e));
-}
-
-// ── Music library ─────────────────────────────────────────────────────────────
-
-let _musicLibrary = [];
-
-function loadMusicLibrary() {
-  fetch('/api/music/library').then(r => r.json()).then(items => {
-    _musicLibrary = items || [];
-    renderLibrary();
-  }).catch(() => {});
-}
-
-function renderLibrary() {
-  const section = document.getElementById('music-library-section');
-  const list    = document.getElementById('music-library-list');
-  if (!list) return;
-  if (!_musicLibrary.length) {
-    if (section) section.style.display = 'none';
-    return;
-  }
-  if (section) section.style.display = '';
-  const currentTheme = _lastMusicState && _lastMusicState.state === 'playing'
-    ? _lastMusicState.theme : null;
-  list.innerHTML = _musicLibrary.map(item => {
-    const mins = item.duration_sec > 0 ? Math.round(item.duration_sec / 60) + ' min' : '';
-    const size = item.size_kb > 1024 ? (item.size_kb/1024).toFixed(1)+'MB' : item.size_kb+'KB';
-    const active = currentTheme === item.theme;
-    return `<div class="music-lib-item${active ? ' playing' : ''}" id="mli-${esc(item.id)}">
-      <div style="flex:1;min-width:0">
-        <div class="music-lib-theme">${esc(item.theme)}</div>
-        <div class="music-lib-meta">${esc(item.created_at)}${mins ? ' · '+mins : ''} · ${size} · ${item.chunks ? item.chunks.length : 1} chunk${(item.chunks||[]).length !== 1 ? 's':''}</div>
-      </div>
-      <button class="music-lib-play" onclick="musicPlayLibrary('${esc(item.id)}')">▶ Play</button>
-      <button class="music-lib-del"  onclick="musicDeleteLibrary('${esc(item.id)}')">🗑</button>
-    </div>`;
-  }).join('');
-}
-
-let _lastMusicState = null;
-
-function musicPlayLibrary(id) {
-  fetch('/api/music/play_library', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id}),
-  }).then(r => r.json()).then(d => {
-    if (!d.ok) alert('Error: ' + d.error);
-    loadMusicState();
-  }).catch(e => console.error(e));
-}
-
-function musicDeleteLibrary(id) {
-  if (!confirm('Delete this saved track?')) return;
-  fetch(`/api/music/library/${id}`, {method:'DELETE'})
-    .then(() => loadMusicLibrary())
-    .catch(e => console.error(e));
-}
 </script>
 </body>
 </html>

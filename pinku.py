@@ -123,13 +123,17 @@ def _speak_reply(reply: str, is_hi: bool):
     dashboard.update_status(speaking=True)
     _muted.set()
 
+    # Conservative upper-bound for _settle_until (in case TTS runs long).
+    # After tts.speak() returns we re-anchor to actual end-of-speech so the
+    # user only waits 'settle' seconds after the last word — not up to
+    # (known_duration + settle) seconds from when TTS started.
+    # Edge-tts can speak noticeably faster than the 95 WPM word-count estimate,
+    # so without re-anchoring the mic would be dead for several extra seconds.
     known_duration = tts.known_duration(reply)
-    settle          = max(1.5, min(known_duration * 0.25, 3.5))
-    print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s  total_mute={known_duration+settle:.1f}s")
+    settle          = max(1.5, min(known_duration * 0.12, 2.5))   # 1.5 – 2.5 s
+    _settle_until   = time.time() + known_duration + settle        # upper bound
 
-    # Block the voice loop for the FULL TTS+settle window, even if the mute
-    # timer fires early or the processing lock is released early.
-    _settle_until = time.time() + known_duration + settle
+    print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
 
     # Release the processing lock now so the voice loop can re-enter once the
     # settle window expires (it checks _settle_until separately).
@@ -138,27 +142,20 @@ def _speak_reply(reply: str, is_hi: bool):
     except RuntimeError:
         pass
 
-    def _unmute_after():
-        time.sleep(known_duration + settle)
-        if not _user_muted.is_set():
-            _muted.clear()
-    threading.Thread(target=_unmute_after, daemon=True, name="tts-settle").start()
-
     tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
-    # Safety: if the estimate was short, the timer may have fired while TTS was
-    # still playing. Extend _settle_until and re-mute for a fresh settle period.
-    if not _muted.is_set() and not _user_muted.is_set():
-        print(f"[TTS] timer fired early — re-muting for {settle:.1f}s settle")
-        _muted.set()
+    # TTS is done. Re-anchor settle window to actual end of speech.
+    # This corrects for edge-tts speaking faster than the word-count estimate.
+    if not _user_muted.is_set():
         _settle_until = time.time() + settle
-        def _re_settle():
+        _muted.set()   # keep muted during settle (may already be set)
+        def _clear_after_settle():
             time.sleep(settle)
             if not _user_muted.is_set():
                 _muted.clear()
-        threading.Thread(target=_re_settle, daemon=True, name="tts-resiltle").start()
+        threading.Thread(target=_clear_after_settle, daemon=True, name="tts-settle").start()
 
 
 def _handle_chat(action: dict):
@@ -304,50 +301,6 @@ def _handle_scripture(action: dict):
         log_fn       = _log,
     )
 
-
-# ── Music handlers ───────────────────────────────────────────────────────────
-
-def _on_music_state(state: dict):
-    """Callback from music.py — push state to dashboard and log notable changes."""
-    dashboard.push_music_state(state)
-    s = state.get("state", "")
-    if s == "playing" and state.get("chunk", 0) == 1:
-        _log("music", f"♪ Playing: {state.get('theme','')}")
-    elif s == "idle" and state.get("elapsed", 0) > 5:
-        _log("music", "♪ Playback finished")
-    elif s == "error":
-        _log("error", f"Music error: {state.get('error','')}")
-
-
-def _handle_music_play(action: dict):
-    import music as _music
-    theme    = (action.get("theme") or action.get("transcript") or "chill").strip()
-    dur_str  = str(action.get("duration_sec") or action.get("duration") or "300")
-    try:
-        dur = int(float(dur_str))
-    except (ValueError, TypeError):
-        dur = 300
-    _log("music", f"♪ Starting: theme={theme!r}  duration={dur}s")
-    dashboard.update_status(last_transcript=action.get("transcript", ""), last_reply="")
-    _music.start(theme, duration_sec=dur, on_state_change=_on_music_state)
-    # Speak brief confirmation while MusicGen loads (non-blocking)
-    label = theme if theme not in _music.PRESETS else theme
-    dur_label = f"for {dur // 60} minute{'s' if dur >= 120 else ''}" if dur > 0 else "until you say stop"
-    threading.Thread(
-        target=tts.speak,
-        kwargs={"text": f"Starting {label} music, {dur_label}.", "block": False},
-        daemon=True, name="music-confirm",
-    ).start()
-
-
-def _handle_music_stop():
-    import music as _music
-    if _music.is_playing():
-        _music.stop()
-        _log("music", "♪ Music stopped")
-        tts.speak("Music stopped.", block=False)
-    else:
-        tts.speak("Nothing is playing.", block=False)
 
 
 def _handle_mute():
@@ -843,10 +796,6 @@ def _dispatch_action(action: dict):
         _handle_scripture(action)
     elif act == "weather":
         _handle_weather(action)
-    elif act == "music_play":
-        _handle_music_play(action)
-    elif act == "music_stop":
-        _handle_music_stop()
     elif act in ("lights_on", "lights_off"):
         _log("warn", f'Action "{act}" not yet implemented')
         tts.speak(f"Sorry, lights control isn't set up yet.")
@@ -889,7 +838,7 @@ def _handle_gemini_result(result: dict):
     # system prompt instruction to leave reply:"" and generates text anyway).
     _PYTHON_ACTIONS = {
         "time", "weather", "mute", "unmute", "describe",
-        "music_play", "music_stop", "lights_on", "lights_off",
+        "lights_on", "lights_off",
     }
     # weather is handled by Python (_handle_weather fetches from wttr.in)
     # so force reply="" to always go through dispatch, not Gemini's reply

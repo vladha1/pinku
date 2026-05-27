@@ -609,6 +609,31 @@ def is_playing() -> bool:
     return get_state()["state"] in ("loading", "generating", "playing")
 
 
+def duck():
+    """Temporarily pause music playback (SIGSTOP) so Pinku's reply is audible.
+    Call unduck() to resume. Safe to call when nothing is playing."""
+    import signal
+    with _afplay_lock:
+        p = _afplay_proc
+    if p and p.poll() is None:
+        try:
+            p.send_signal(signal.SIGSTOP)
+        except Exception:
+            pass
+
+
+def unduck():
+    """Resume music playback (SIGCONT) after Pinku finishes speaking."""
+    import signal
+    with _afplay_lock:
+        p = _afplay_proc
+    if p and p.poll() is None:
+        try:
+            p.send_signal(signal.SIGCONT)
+        except Exception:
+            pass
+
+
 def preload():
     """Warm up the MusicGen model in the background (call at startup)."""
     if MUSIC_BACKEND == "musicgen":

@@ -64,8 +64,6 @@ Actions:
 - "mute"        → user wants you to stop listening / be quiet / sleep
 - "unmute"      → user wants you to start listening again / wake up
 - "describe"    → user asked you to look / describe what you see / camera
-- "music_play"  → user wants music played; include "query": "<search>"
-- "music_stop"  → user wants music stopped
 - "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
 - "lights_on"   → turn lights on
@@ -149,8 +147,6 @@ ACTION LIST (pick exactly one):
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
 "unmute"     → told Pinky to wake / start / listen → reply: ""
 "describe"   → asked Pinky to look / describe what it sees → reply: ""
-"music_play" → wants music played → reply: "", add "query": "<search term>" field
-"music_stop" → stop music → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
 
@@ -174,6 +170,7 @@ Is the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in
 _WAKE_RULE_SESSION = """\
 You are in an ACTIVE CONVERSATION SESSION — the person is already talking to you.
 No wake word is required. Respond to any clear question or command directed at you.
+Note: background music may be playing through a speaker — focus only on the human voice.
 - Clear question, request, or statement → pick the appropriate action.
 - Pure background noise, TV audio, or someone talking to another person → "ignore".
 - Silence / unintelligible → "ignore"."""
