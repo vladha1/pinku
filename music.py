@@ -15,18 +15,87 @@ Usage:
 """
 
 from __future__ import annotations
+import json
 import math
 import os
 import queue
 import subprocess
-import tempfile
 import threading
 import time
+import uuid
 from typing import Callable
 
 from config import (
     MUSIC_BACKEND, MUSICGEN_MODEL, MUSIC_CHUNK_SEC,
 )
+
+# ── Library (persistent saved sessions) ──────────────────────────────────────
+
+LIBRARY_DIR  = os.path.expanduser("~/pinku/music_library")
+_INDEX_FILE  = os.path.join(LIBRARY_DIR, "_index.json")
+_lib_lock    = threading.Lock()
+
+def _ensure_library():
+    os.makedirs(LIBRARY_DIR, exist_ok=True)
+
+def _load_index() -> list[dict]:
+    try:
+        with open(_INDEX_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_index(items: list[dict]):
+    _ensure_library()
+    with open(_INDEX_FILE, "w") as f:
+        json.dump(items, f, indent=2)
+
+def list_library() -> list[dict]:
+    """Return all saved sessions, newest first."""
+    with _lib_lock:
+        items = _load_index()
+    # Attach live file sizes and filter out missing files
+    valid = []
+    for item in items:
+        chunks = [c for c in item.get("chunks", []) if os.path.exists(c)]
+        if chunks:
+            item["chunks"]   = chunks
+            item["size_kb"]  = sum(os.path.getsize(c) for c in chunks) // 1024
+            valid.append(item)
+    return sorted(valid, key=lambda x: x.get("created_at", ""), reverse=True)
+
+def _add_to_library(session_id: str, theme: str, prompt: str,
+                    duration_sec: int, chunk_paths: list[str]) -> dict:
+    entry = {
+        "id":          session_id,
+        "theme":       theme,
+        "prompt":      prompt,
+        "duration_sec": duration_sec,
+        "chunks":      chunk_paths,
+        "size_kb":     sum(os.path.getsize(p) for p in chunk_paths) // 1024,
+        "created_at":  time.strftime("%Y-%m-%d %H:%M"),
+    }
+    with _lib_lock:
+        items = _load_index()
+        items.append(entry)
+        _save_index(items)
+    return entry
+
+def delete_library_item(item_id: str) -> bool:
+    """Delete a saved session (files + index entry). Returns True if found."""
+    with _lib_lock:
+        items = _load_index()
+        found = next((x for x in items if x["id"] == item_id), None)
+        if not found:
+            return False
+        items = [x for x in items if x["id"] != item_id]
+        _save_index(items)
+    for path in found.get("chunks", []):
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+    return True
 
 
 # ── Preset themes ─────────────────────────────────────────────────────────────
@@ -339,13 +408,16 @@ def start(
         prompt        = resolve_prompt(theme)
         chunk_sec     = MUSIC_CHUNK_SEC
         chunks_needed = math.ceil(dur / chunk_sec) if dur > 0 else 10_000
-        tmp_files: list[str] = []
+        session_id    = uuid.uuid4().hex[:10]
+        saved_chunks: list[str] = []
+
+        _ensure_library()
 
         _set_state(
             state="generating", theme=theme, prompt=prompt,
             elapsed=0, total=dur, chunk=0, chunks_total=chunks_needed, error="",
         )
-        print(f"[Music] ▶ theme={theme!r}  prompt={prompt!r}  dur={dur}s  chunks={chunks_needed}")
+        print(f"[Music] ▶ theme={theme!r}  dur={dur}s  session={session_id}")
 
         chunk_q: queue.Queue[str | None] = queue.Queue(maxsize=2)
 
@@ -357,15 +429,47 @@ def start(
                     return
                 try:
                     _set_state(state="generating")
+                    # Save directly to library dir with stable filename
+                    lib_path = os.path.join(LIBRARY_DIR, f"{session_id}_{i}.wav")
                     if MUSIC_BACKEND == "abc":
-                        path = _generate_chunk_abc(theme, i)
+                        tmp = _generate_chunk_abc(theme, i)
+                        if tmp:
+                            import shutil
+                            shutil.move(tmp, lib_path)
+                            path = lib_path
+                        else:
+                            path = None
                     else:
-                        path = _generate_chunk_musicgen(prompt, chunk_sec, i)
+                        # Override the /tmp path to go straight to library
+                        import scipy.io.wavfile, numpy as np, torch
+                        model, processor = _load_musicgen()
+                        inputs = processor(text=[prompt], padding=True, return_tensors="pt")
+                        _dlog(f"generating chunk {i} ({chunk_sec*50} tokens)…")
+                        with torch.no_grad():
+                            audio_values = model.generate(**inputs, max_new_tokens=chunk_sec * 50)
+                        _dlog(f"raw shape: {tuple(audio_values.shape)}")
+                        if audio_values.ndim == 3:
+                            data = audio_values[0, 0].cpu().numpy()
+                        elif audio_values.ndim == 2:
+                            data = audio_values[0].cpu().numpy()
+                        else:
+                            data = audio_values.cpu().numpy().flatten()
+                        try:
+                            sr = model.config.audio_encoder.sampling_rate
+                        except Exception:
+                            sr = 32000
+                        peak     = float(np.abs(data).max()) or 1.0
+                        data_i16 = (data / peak * 32767 * 0.82).astype(np.int16)
+                        scipy.io.wavfile.write(lib_path, rate=sr, data=data_i16)
+                        size_kb = os.path.getsize(lib_path) // 1024
+                        _dlog(f"saved {lib_path} ({size_kb} KB)")
+                        path = lib_path if size_kb >= 10 else None
+
                     if not path:
                         _set_state(error="Generation failed — see log")
                         chunk_q.put(None)
                         return
-                    tmp_files.append(path)
+                    saved_chunks.append(path)
                     chunk_q.put(path)
                 except Exception as e:
                     import traceback
@@ -417,8 +521,19 @@ def start(
 
         _kill_afplay()
         gen_t.join(timeout=5)
-        _cleanup(*tmp_files)
         final_elapsed = int(time.time() - start_ts) if start_ts else 0
+
+        # Save to library index (keep files — don't clean up)
+        if saved_chunks:
+            entry = _add_to_library(session_id, theme, prompt, final_elapsed, saved_chunks)
+            _dlog(f"saved to library: {entry['id']} ({entry['size_kb']} KB)")
+            # Notify dashboard to refresh library list
+            try:
+                import dashboard as _db
+                _db.push_music_library()
+            except Exception:
+                pass
+
         _set_state(state="idle", elapsed=final_elapsed, chunk=0, chunks_total=0)
         print(f"[Music] ■ done  elapsed={final_elapsed}s")
 
@@ -435,6 +550,59 @@ def stop():
     if t and t.is_alive():
         t.join(timeout=3)
     _set_state(state="idle", elapsed=0, chunk=0, chunks_total=0, error="")
+
+
+def play_library_item(
+    item_id: str,
+    on_state_change: Callable[[dict], None] | None = None,
+):
+    """Play a saved library session by ID (no generation — instant playback)."""
+    global _on_state_change, _play_thread, _stop_event
+
+    items = list_library()
+    entry = next((x for x in items if x["id"] == item_id), None)
+    if not entry:
+        raise ValueError(f"Library item {item_id!r} not found")
+
+    chunks = entry["chunks"]
+    theme  = entry["theme"]
+    total  = sum(os.path.getsize(c) for c in chunks) / (32000 * 2)  # approx seconds
+
+    stop()
+
+    _on_state_change = on_state_change
+    _stop_event      = threading.Event()
+
+    def _run_lib():
+        _set_state(state="playing", theme=theme, prompt=entry.get("prompt",""),
+                   elapsed=0, total=int(total), chunk=0,
+                   chunks_total=len(chunks), error="")
+        _dlog(f"▶ library play: {theme!r}  {len(chunks)} chunk(s)")
+
+        start_ts  = time.time()
+        for idx, path in enumerate(chunks, 1):
+            if _stop_event.is_set():
+                break
+            if not os.path.exists(path):
+                _dlog(f"chunk missing: {path}", level="error")
+                continue
+            _set_state(state="playing", chunk=idx,
+                       elapsed=int(time.time() - start_ts))
+            proc = _play_wav_async(path)
+            while proc.poll() is None:
+                if _stop_event.is_set():
+                    proc.terminate()
+                    break
+                _set_state(elapsed=int(time.time() - start_ts))
+                time.sleep(0.4)
+
+        _kill_afplay()
+        _set_state(state="idle", elapsed=int(time.time() - start_ts),
+                   chunk=0, chunks_total=0)
+        _dlog(f"■ library playback done")
+
+    _play_thread = threading.Thread(target=_run_lib, daemon=True, name="music-lib-play")
+    _play_thread.start()
 
 
 def is_playing() -> bool:

@@ -84,6 +84,10 @@ def push_music_state(state: dict):
     """Broadcast current music generation/playback state to all clients."""
     _broadcast({"type": "music_state", **state})
 
+def push_music_library():
+    """Tell clients to refresh the music library list."""
+    _broadcast({"type": "music_library_updated"})
+
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -271,6 +275,39 @@ def music_stop_api():
         import music as _music
         _music.stop()
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@_app.route("/api/music/library")
+def music_library_api():
+    from flask import jsonify
+    try:
+        import music as _music
+        return jsonify(_music.list_library())
+    except Exception as e:
+        return jsonify([])
+
+@_app.route("/api/music/play_library", methods=["POST"])
+def music_play_library_api():
+    from flask import request as _req, jsonify
+    data    = _req.get_json(silent=True) or {}
+    item_id = data.get("id", "")
+    try:
+        import music as _music
+        _music.play_library_item(item_id, on_state_change=push_music_state)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+@_app.route("/api/music/library/<item_id>", methods=["DELETE"])
+def music_delete_library_api(item_id):
+    from flask import jsonify
+    try:
+        import music as _music
+        ok = _music.delete_library_item(item_id)
+        if ok:
+            push_music_library()
+        return jsonify({"ok": ok})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1367,6 +1404,37 @@ body {
 }
 .music-status-label.generating { animation:music-pulse 1.4s ease-in-out infinite; }
 
+.music-library-section {
+  width:100%; max-width:640px; padding:12px 16px 0;
+}
+.music-library-title {
+  font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em;
+  color:#64748b; padding-bottom:6px;
+}
+.music-lib-item {
+  display:flex; align-items:center; gap:8px;
+  padding:8px 10px; border-radius:10px; margin-bottom:6px;
+  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
+  transition:border-color 0.15s;
+}
+.music-lib-item:hover { border-color:rgba(192,132,252,0.3); }
+.music-lib-item.playing { border-color:rgba(74,222,128,0.45); background:rgba(74,222,128,0.06); }
+.music-lib-theme { flex:1; font-size:0.88rem; font-weight:600; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.music-lib-meta  { font-size:0.68rem; color:#64748b; flex-shrink:0; }
+.music-lib-play  {
+  padding:4px 10px; border-radius:7px; font-size:0.78rem; cursor:pointer;
+  border:1px solid rgba(192,132,252,0.4); background:rgba(192,132,252,0.1);
+  color:#c084fc; transition:background 0.15s; flex-shrink:0;
+}
+.music-lib-play:hover { background:rgba(192,132,252,0.22); }
+.music-lib-del {
+  padding:4px 8px; border-radius:7px; font-size:0.78rem; cursor:pointer;
+  border:1px solid rgba(248,113,113,0.3); background:transparent;
+  color:#f87171; transition:background 0.15s; flex-shrink:0;
+}
+.music-lib-del:hover { background:rgba(248,113,113,0.12); }
+
 /* Log panel */
 .log-area {
   flex:1; overflow-y:auto; padding:0; display:none; flex-direction:column;
@@ -1613,6 +1681,12 @@ body {
   <!-- Progress bar (shown while playing) -->
   <div class="music-progress-wrap" id="music-progress-wrap" style="display:none">
     <div class="music-progress-bar" id="music-progress-bar"></div>
+  </div>
+
+  <!-- Library -->
+  <div class="music-library-section" id="music-library-section" style="display:none">
+    <div class="music-library-title">📂 Saved</div>
+    <div class="music-library-list" id="music-library-list"></div>
   </div>
 
 </div>
@@ -2265,6 +2339,9 @@ function connect() {
         updateGameBar(data);
       } else if (data.type === 'music_state') {
         applyMusicState(data);
+        renderLibrary();
+      } else if (data.type === 'music_library_updated') {
+        loadMusicLibrary();
       }
     } catch(_) {}
   };
@@ -2324,6 +2401,7 @@ function initMusicTab() {
   });
 
   loadMusicState();
+  loadMusicLibrary();
 }
 
 function selectPreset(key) {
@@ -2341,6 +2419,7 @@ function loadMusicState() {
 
 function applyMusicState(s) {
   if (!s) return;
+  _lastMusicState = s;
   const state   = s.state || 'idle';
   const label   = document.getElementById('music-status-label');
   const sub     = document.getElementById('music-status-sub');
@@ -2413,6 +2492,63 @@ function musicPlay() {
 function musicStop() {
   fetch('/api/music/stop', {method:'POST'})
     .then(() => loadMusicState())
+    .catch(e => console.error(e));
+}
+
+// ── Music library ─────────────────────────────────────────────────────────────
+
+let _musicLibrary = [];
+
+function loadMusicLibrary() {
+  fetch('/api/music/library').then(r => r.json()).then(items => {
+    _musicLibrary = items || [];
+    renderLibrary();
+  }).catch(() => {});
+}
+
+function renderLibrary() {
+  const section = document.getElementById('music-library-section');
+  const list    = document.getElementById('music-library-list');
+  if (!list) return;
+  if (!_musicLibrary.length) {
+    if (section) section.style.display = 'none';
+    return;
+  }
+  if (section) section.style.display = '';
+  const currentTheme = _lastMusicState && _lastMusicState.state === 'playing'
+    ? _lastMusicState.theme : null;
+  list.innerHTML = _musicLibrary.map(item => {
+    const mins = item.duration_sec > 0 ? Math.round(item.duration_sec / 60) + ' min' : '';
+    const size = item.size_kb > 1024 ? (item.size_kb/1024).toFixed(1)+'MB' : item.size_kb+'KB';
+    const active = currentTheme === item.theme;
+    return `<div class="music-lib-item${active ? ' playing' : ''}" id="mli-${esc(item.id)}">
+      <div style="flex:1;min-width:0">
+        <div class="music-lib-theme">${esc(item.theme)}</div>
+        <div class="music-lib-meta">${esc(item.created_at)}${mins ? ' · '+mins : ''} · ${size} · ${item.chunks ? item.chunks.length : 1} chunk${(item.chunks||[]).length !== 1 ? 's':''}</div>
+      </div>
+      <button class="music-lib-play" onclick="musicPlayLibrary('${esc(item.id)}')">▶ Play</button>
+      <button class="music-lib-del"  onclick="musicDeleteLibrary('${esc(item.id)}')">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+let _lastMusicState = null;
+
+function musicPlayLibrary(id) {
+  fetch('/api/music/play_library', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id}),
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) alert('Error: ' + d.error);
+    loadMusicState();
+  }).catch(e => console.error(e));
+}
+
+function musicDeleteLibrary(id) {
+  if (!confirm('Delete this saved track?')) return;
+  fetch(`/api/music/library/${id}`, {method:'DELETE'})
+    .then(() => loadMusicLibrary())
     .catch(e => console.error(e));
 }
 </script>
