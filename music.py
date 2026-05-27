@@ -197,37 +197,67 @@ def get_state() -> dict:
 
 _mg_model     = None
 _mg_processor = None
+_mg_device    = "cpu"
 _mg_lock      = threading.Lock()
 
 
+def _best_device() -> str:
+    """Return 'mps' on Apple Silicon, 'cuda' if available, else 'cpu'."""
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def _load_musicgen():
-    global _mg_model, _mg_processor
+    """Load MusicGen model onto the best available device.
+    Returns (model, processor) or raises RuntimeError with a user-friendly message.
+    On failure the state is set to 'error' so the UI doesn't stay on 'Loading model…'.
+    """
+    global _mg_model, _mg_processor, _mg_device
     if _mg_model is not None:
         return _mg_model, _mg_processor
     with _mg_lock:
         if _mg_model is not None:
             return _mg_model, _mg_processor
         _set_state(state="loading")
-        print(f"[Music] Loading MusicGen {MUSICGEN_MODEL!r} …")
+        device = _best_device()
+        print(f"[Music] Loading MusicGen {MUSICGEN_MODEL!r} on {device} …")
         try:
             from transformers import (          # type: ignore
                 MusicgenForConditionalGeneration,
                 AutoProcessor,
             )
-        except ImportError:
-            raise RuntimeError(
-                "transformers not installed — run: "
-                ".venv/bin/pip install transformers scipy accelerate"
+            import torch
+            _mg_processor = AutoProcessor.from_pretrained(MUSICGEN_MODEL)
+            _mg_model     = MusicgenForConditionalGeneration.from_pretrained(
+                MUSICGEN_MODEL,
+                low_cpu_mem_usage=True,
             )
-        _mg_processor = AutoProcessor.from_pretrained(MUSICGEN_MODEL)
-        _mg_model     = MusicgenForConditionalGeneration.from_pretrained(
-            MUSICGEN_MODEL
-        )
-        print("[Music] MusicGen ready ✓")
-        # If we just preloaded (nobody started playback), go back to idle
-        # so the UI shows "Ready to play" instead of staying on "Loading model…"
-        if get_state()["state"] == "loading":
-            _set_state(state="idle")
+            _mg_model = _mg_model.to(device)
+            _mg_device = device
+            print(f"[Music] MusicGen ready ✓  device={device}")
+            # If preload() finished and nobody started playback yet, go back to idle
+            if get_state()["state"] == "loading":
+                _set_state(state="idle")
+        except ImportError:
+            err = "transformers not installed — run: pip install transformers scipy accelerate"
+            _set_state(state="error", error=err)
+            raise RuntimeError(err)
+        except Exception as exc:
+            import traceback
+            err = f"Model load failed: {exc}"
+            print(f"[Music] ERROR loading model:\n{traceback.format_exc()}")
+            _set_state(state="error", error=str(exc)[:200])
+            # Reset so the user can retry by pressing Play
+            _mg_model     = None
+            _mg_processor = None
+            raise RuntimeError(err) from exc
     return _mg_model, _mg_processor
 
 
@@ -469,8 +499,10 @@ def start(
                         # Override the /tmp path to go straight to library
                         import scipy.io.wavfile, numpy as np, torch
                         model, processor = _load_musicgen()
+                        # Move inputs to the same device as the model (MPS / CPU)
                         inputs = processor(text=[prompt], padding=True, return_tensors="pt")
-                        _dlog(f"generating chunk {i} ({chunk_sec*50} tokens)…")
+                        inputs = {k: v.to(_mg_device) for k, v in inputs.items()}
+                        _dlog(f"generating chunk {i} ({chunk_sec*50} tokens) on {_mg_device}…")
                         with torch.no_grad():
                             audio_values = model.generate(**inputs, max_new_tokens=chunk_sec * 50)
                         _dlog(f"raw shape: {tuple(audio_values.shape)}")
@@ -663,5 +695,14 @@ def unduck():
 
 def preload():
     """Warm up the MusicGen model in the background (call at startup)."""
-    if MUSIC_BACKEND == "musicgen":
-        threading.Thread(target=_load_musicgen, daemon=True, name="music-preload").start()
+    if MUSIC_BACKEND != "musicgen":
+        return
+
+    def _do_preload():
+        try:
+            _load_musicgen()
+        except Exception as e:
+            # Error is already reflected in state; just log here so terminal shows it
+            print(f"[Music] preload failed: {e}")
+
+    threading.Thread(target=_do_preload, daemon=True, name="music-preload").start()

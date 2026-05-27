@@ -512,8 +512,12 @@ function applyState(s) {
     progFill.style.width = (tot > 0 ? Math.min(100,(el/tot*100)).toFixed(1) : 50) + '%';
   } else if (state === 'error') {
     icon.textContent  = '⚠️';
-    label.textContent = 'Error';
+    label.textContent = 'Error — tap Generate to retry';
+    label.classList.remove('generating');
     sub.textContent   = s.error || 'Check terminal for details';
+    playBtn.disabled  = false;
+    playBtn.textContent = '↺ Retry';
+    playBtn.classList.remove('playing');
   } else {
     icon.textContent  = '🎵';
     label.textContent = 'Ready to play';
