@@ -317,6 +317,7 @@ def _handle_mute():
 
 
 def _handle_unmute():
+    global _settle_until
     tts.set_silent(False)  # re-enable tones before playing wake sound
     _user_muted.clear()
     _muted.clear()
@@ -324,6 +325,11 @@ def _handle_unmute():
     dashboard.update_status(state="idle", muted=False)
     _log("info", "Unmuted 🎙️")
     _extend_session()
+    # Settle: the recorder buffer may still contain audio from the gesture /
+    # voice command that triggered unmute.  Block the voice loop for 1.5s so
+    # that stale audio is not immediately sent to Gemini as a new command.
+    _settle_until = time.time() + 1.5
+    _brief_mute(1.5)
 
 
 def _handle_pause():
@@ -930,7 +936,32 @@ def _voice_loop(recorder: stt.AudioRecorder):
     global _last_speech_at
 
     while not _stop_all.is_set():
-        if is_muted() or tts.is_speaking():
+        if tts.is_speaking():
+            time.sleep(0.2)
+            continue
+
+        # ── User-explicitly-muted: listen for wake word only ─────────────────
+        # Brief automatic mutes (TTS settle, post-action pause) fall through to
+        # the next block and just sleep.  But when the user intentionally muted
+        # (gesture / button), we keep Whisper running so they can say
+        # "hey Pinku" to unmute hands-free instead of needing a gesture.
+        if _user_muted.is_set():
+            pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
+            if pcm and not tts.is_speaking():
+                try:
+                    text = stt.transcribe(pcm)
+                except Exception:
+                    text = ""
+                if text:
+                    triggered, _ = _check_wake(text)
+                    if triggered:
+                        _log("wake", "🔤 Wake word heard while muted → unmuting")
+                        threading.Thread(target=_handle_unmute, daemon=True,
+                                         name="voice-unmute").start()
+            continue
+
+        # ── Brief/automatic mute (TTS settle, post-action pause) — skip ──────
+        if _muted.is_set():
             time.sleep(0.2)
             continue
 
