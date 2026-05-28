@@ -82,4 +82,4 @@ DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # ── Wake / session ────────────────────────────────────────────────────────────
 SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "60.0"))  # seconds of silence before going idle (60 = enough time to think + respond)
-LOG_DIR           = os.getenv("LOG_DIR", "logs")
+LOG_DIR           = os.getenv("LOG_DIR", os.path.join(os.path.expanduser("~"), "pinku", "logs"))
