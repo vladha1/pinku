@@ -420,10 +420,11 @@ const PRESETS = [
   {key:'folk',       emoji:'🪈'},  {key:'rock',       emoji:'🎸'},
 ];
 
-let _theme   = 'chill';
-let _durSec  = 300;
-let _library = [];
-let _lastState = null;
+let _theme      = 'chill';
+let _durSec     = 300;
+let _library    = [];
+let _lastState  = null;
+let _renamingId = null;   // set while an inline rename input is visible
 
 // ── Build preset buttons ──────────────────────────────────────────────────────
 const grid = document.getElementById('presets');
@@ -495,9 +496,17 @@ function playLibrary(id) {
 
 function deleteLibrary(id) {
   if (!confirm('Delete this saved track?')) return;
+  // Optimistic remove — update local state immediately so the 1s poller
+  // doesn't re-show the item while the DELETE request is in-flight.
+  _library = _library.filter(x => x.id !== id);
+  renderLibrary();
   fetch('/api/library/' + id, {method: 'DELETE'})
-    .then(() => loadLibrary())
-    .catch(console.error);
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) console.warn('Delete returned ok=false for', id);
+      loadLibrary();   // confirm server state
+    })
+    .catch(err => { console.error(err); loadLibrary(); });
 }
 
 function loadLibrary() {
@@ -616,6 +625,10 @@ function esc(s) {
 }
 
 function renderLibrary() {
+  // Don't rebuild the list while an inline rename input is open —
+  // the 1s poller would destroy the text field the user is typing in.
+  if (_renamingId) return;
+
   const list      = document.getElementById('library-list');
   const countEl   = document.getElementById('library-count');
   const playingId = _lastState ? (_lastState.playing_id || '') : '';
@@ -656,23 +669,29 @@ function renderLibrary() {
 }
 
 // ── Inline rename ─────────────────────────────────────────────────────────────
+function cancelRename() {
+  _renamingId = null;
+  loadLibrary();
+}
+
 function startRename(id, currentTheme) {
   const infoEl = document.getElementById('li-info-' + id);
   if (!infoEl) return;
+  _renamingId = id;   // block renderLibrary() while input is open
   // Replace the info block content with an inline edit row
   infoEl.innerHTML = `
     <div class="lib-edit-wrap">
       <input class="lib-edit-input" id="re-inp-${id}"
              value="${currentTheme.replace(/"/g,'&quot;')}" maxlength="80">
       <button class="lib-edit-ok"     onclick="confirmRename('${id}')">✓ Save</button>
-      <button class="lib-edit-cancel" onclick="loadLibrary()">✗</button>
+      <button class="lib-edit-cancel" onclick="cancelRename()">✗</button>
     </div>`;
   const inp = document.getElementById('re-inp-' + id);
   if (!inp) return;
   inp.focus(); inp.select();
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter')  { e.preventDefault(); confirmRename(id); }
-    if (e.key === 'Escape') loadLibrary();
+    if (e.key === 'Escape') cancelRename();
   });
 }
 
@@ -687,9 +706,10 @@ function confirmRename(id) {
     headers: {'Content-Type': 'application/json'},
     body:    JSON.stringify({theme: newTheme}),
   }).then(r => r.json()).then(d => {
+    _renamingId = null;   // allow re-render before loadLibrary rebuilds
     if (d.ok) loadLibrary();
     else { inp.disabled = false; inp.focus(); alert('Rename failed'); }
-  }).catch(() => { inp.disabled = false; });
+  }).catch(() => { _renamingId = null; inp.disabled = false; loadLibrary(); });
 }
 
 // ── Polling (replaces SSE — no spinning browser tab) ─────────────────────────
