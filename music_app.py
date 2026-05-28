@@ -18,6 +18,9 @@ import argparse
 import json
 import time
 
+import logging
+logging.getLogger("werkzeug").setLevel(logging.ERROR)   # suppress per-request access logs
+
 from flask import Flask, jsonify, request
 
 import music
