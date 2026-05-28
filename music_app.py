@@ -94,14 +94,7 @@ def api_rename_library(item_id):
 
 @_app.route("/api/library/<item_id>", methods=["DELETE"])
 def api_delete_library(item_id):
-    print(f"[MusicApp] DELETE /api/library/{item_id!r}", flush=True)
-    try:
-        ok = music.delete_library_item(item_id)
-        print(f"[MusicApp] delete_library_item returned {ok!r}", flush=True)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"ok": False, "error": str(exc)}), 500
+    ok = music.delete_library_item(item_id)
     if ok:
         _push_library()
     return jsonify({"ok": ok})
@@ -502,7 +495,6 @@ function playLibrary(id) {
 }
 
 function deleteLibrary(id) {
-  if (!confirm('Delete this saved track?')) return;
   // Optimistic remove — update local state immediately so the 1s poller
   // doesn't re-show the item while the DELETE request is in-flight.
   _library = _library.filter(x => x.id !== id);
