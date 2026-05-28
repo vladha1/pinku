@@ -94,7 +94,14 @@ def api_rename_library(item_id):
 
 @_app.route("/api/library/<item_id>", methods=["DELETE"])
 def api_delete_library(item_id):
-    ok = music.delete_library_item(item_id)
+    print(f"[MusicApp] DELETE /api/library/{item_id!r}", flush=True)
+    try:
+        ok = music.delete_library_item(item_id)
+        print(f"[MusicApp] delete_library_item returned {ok!r}", flush=True)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(exc)}), 500
     if ok:
         _push_library()
     return jsonify({"ok": ok})

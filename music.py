@@ -85,16 +85,20 @@ def delete_library_item(item_id: str) -> bool:
     """Delete a saved session (files + index entry). Returns True if found."""
     with _lib_lock:
         items = _load_index()
+        print(f"[Music] delete_library_item: id={item_id!r}  index has {len(items)} entries: {[x['id'] for x in items]}", flush=True)
         found = next((x for x in items if x["id"] == item_id), None)
         if not found:
+            print(f"[Music] delete_library_item: id {item_id!r} NOT found in index", flush=True)
             return False
         items = [x for x in items if x["id"] != item_id]
         _save_index(items)
+        print(f"[Music] delete_library_item: index saved ({len(items)} entries remain)", flush=True)
     for path in found.get("chunks", []):
         try:
             os.unlink(path)
-        except Exception:
-            pass
+            print(f"[Music] delete_library_item: removed chunk {path}", flush=True)
+        except Exception as e:
+            print(f"[Music] delete_library_item: could not remove {path}: {e}", flush=True)
     return True
 
 
