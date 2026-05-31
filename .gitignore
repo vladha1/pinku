@@ -12,3 +12,8 @@ build/
 venv/
 .venv/
 *.log
+
+# Large model / data files — never commit these
+models/
+music_library/
+*.task
