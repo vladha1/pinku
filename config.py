@@ -10,7 +10,7 @@ OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")   # fast on M4; swap to llama3.1:8b for depth
 
 # ── STT (faster-whisper) ──────────────────────────────────────────────────────
-WHISPER_MODEL     = os.getenv("WHISPER_MODEL", "base")   # "base" = multilingual (Hindi+English); "base.en" = English-only
+WHISPER_MODEL     = os.getenv("WHISPER_MODEL", "small")  # "small" = better accuracy for idle wake-word; "base" = faster
 WHISPER_DEVICE    = "auto"      # "auto" picks mps on Apple Silicon, cpu otherwise
 WHISPER_LANGUAGE  = None        # None = auto-detect; "en" / "hi" to force
 

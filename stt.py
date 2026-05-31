@@ -204,7 +204,7 @@ _HALLUCINATION_EXACT = {
     # Whisper echoing its own prompt
     "pinku is the name of a home ai assistant",
     "the ai assistant is the name of a home ai assistant",
-    "wake word pinku", "pinku",
+    "wake word pinku",
     # Common cricket/TV hallucinations
     "virat kohli", "india indians", "india indians.", "india india",
     "rohit sharma", "ms dhoni", "sachin tendulkar",
@@ -225,7 +225,12 @@ def _is_hallucination(text: str) -> bool:
     if any(t.startswith(p) for p in _HALLUCINATION_STARTS):
         return True
     if len(t.split()) <= 1:     # single word → almost always noise
-        return True
+        # Exception: let wake-word variants through so _check_wake can act on them.
+        # Silence-triggered echoes are already caught above by no_speech_prob.
+        _WAKE_VARIANTS = {"pinku", "pinky", "pinko", "pink", "pingu", "pinkoo", "penku", "penko",
+                          "पिंकू", "पिंकु", "पिंको", "पिंकी"}
+        if t not in _WAKE_VARIANTS:
+            return True
     # Pinku's own TTS output being picked up by mic
     if any(phrase in t for phrase in ("going quiet", "going quite", "pinku ready", "okay bye")):
         return True
@@ -274,7 +279,7 @@ def transcribe(pcm: bytes) -> str:
         compression_ratio_threshold=2.4,
         # Short prompt to bias wake-word recognition — do NOT include full sentences
         # (Whisper sometimes echoes long prompts as hallucinations)
-        initial_prompt="Pinku. IPL cricket match score. Virat Kohli. Mumbai Indians. CSK.",
+        initial_prompt="Pinku, IPL cricket match score. Virat Kohli. Mumbai Indians. CSK.",
     )
 
     segs = list(segments)

@@ -5,10 +5,11 @@ http://<mac-mini-ip>:5100
 """
 
 import json
+import os
 import time
 import threading
 from flask import Flask, Response, render_template_string
-from config import DASHBOARD_PORT, DASHBOARD_HOST
+from config import DASHBOARD_PORT, DASHBOARD_HOST, LOG_DIR
 
 _app    = Flask(__name__)
 _logger = None
@@ -110,14 +111,37 @@ def push_detection(event: dict):
         _status["detections"] = _status["detections"][-50:]
     _broadcast({"type": "detection", **event})
 
+_log_file_lock = threading.Lock()
+_log_file_path: str = ""
+_log_fh = None
+
+def _get_log_fh():
+    """Return an open file handle for today's pinku log, rotating at midnight."""
+    global _log_file_path, _log_fh
+    today_path = os.path.join(LOG_DIR, f"pinku_{time.strftime('%Y-%m-%d')}.log")
+    if _log_file_path != today_path:
+        if _log_fh:
+            _log_fh.close()
+        os.makedirs(LOG_DIR, exist_ok=True)
+        _log_fh = open(today_path, "a", buffering=1)
+        _log_file_path = today_path
+    return _log_fh
+
+
 def log_message(level: str, msg: str):
-    """Stream a log line to all dashboard clients (shown in Log tab)."""
+    """Stream a log line to all dashboard clients and append to daily log file."""
+    ts = time.strftime("%H:%M:%S")
     _broadcast({
         "type":  "log",
         "level": level,
         "msg":   msg,
-        "ts":    time.strftime("%H:%M:%S"),
+        "ts":    ts,
     })
+    with _log_file_lock:
+        try:
+            _get_log_fh().write(f"{time.strftime('%Y-%m-%d')} {ts} [{level.upper():8s}] {msg}\n")
+        except Exception:
+            pass
 
 # ── Laser-active flag (set by browser when darts tab is open) ────────────────
 _laser_active = False

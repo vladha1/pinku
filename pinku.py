@@ -466,7 +466,6 @@ def _load_laser_cal():
             cal = _json.load(f)
         _laser_bull_x = float(cal.get("bull_x", 0.5))
         _laser_bull_y = float(cal.get("bull_y", 0.5))
-        _log("laser", f"🎯 Cal loaded: bull=({_laser_bull_x:.3f},{_laser_bull_y:.3f})")
     except FileNotFoundError:
         pass   # first run — use defaults
     except Exception as e:
@@ -717,6 +716,7 @@ _WAKE_PHRASES = [
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
     "hey pink", "hi pink", "ok pink", "pink",
     "hey pingu", "pingu",
+    "hey pintu", "hi pintu", "pintu",
 ]
 
 # End-session phrases — only checked when already in session AND utterance
@@ -733,18 +733,23 @@ import re as _re
 # Catches Whisper mishearings of "Pinku" at the very start of an utterance.
 # Handles punctuation in prefix ("Hey, Pinku"), leading dots/spaces Whisper adds,
 # and Devanagari पिंकू (Hindi wake word).
-_PINKU_RE = _re.compile(
+_PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                            # strip leading dots/spaces Whisper adds
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे)[,.\s]+)?'   # optional prefix + any punctuation/space
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[,\s।]*',
+    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[,\s।]*',
+    _re.IGNORECASE,
+)
+# Wake word anywhere in the utterance — "what's the time Pinky?"
+_PINKU_RE_ANY = _re.compile(
+    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[\W]*$',
     _re.IGNORECASE,
 )
 
 def _check_wake(text: str) -> tuple[bool, str]:
     """
     Returns (triggered, command).
-    Matches wake word at START of utterance only — mid-sentence ignored.
-    Handles Whisper mishearings via regex (pinko, pink, pingo, etc.).
+    Matches wake word at start OR end of utterance.
+    e.g. "Pinky what's the time" and "what's the time Pinky" both work.
     """
     t = text.strip()
     # Strip leading filler
@@ -752,18 +757,24 @@ def _check_wake(text: str) -> tuple[bool, str]:
         if t.lower().startswith(filler):
             t = t[len(filler):]
 
-    # Regex match — catches all Whisper mishearings in one shot
-    m = _PINKU_RE.match(t)
+    # Wake word at START — "Pinky, what's the time?"
+    m = _PINKU_RE_START.match(t)
     if m:
         rest = t[m.end():].strip(" ,.")
         return True, rest
 
-    # Exact phrase fallback
+    # Exact phrase fallback (start)
     tl = t.lower()
     for phrase in _WAKE_PHRASES:
         if tl.startswith(phrase):
             rest = t[len(phrase):].strip(" ,.")
             return True, rest
+
+    # Wake word at END — "what's the time Pinky?"
+    m = _PINKU_RE_ANY.search(t)
+    if m:
+        command = t[:m.start()].strip(" ,.")
+        return True, command
 
     return False, text
 
@@ -819,6 +830,10 @@ def _handle_gemini_result(result: dict):
     transcript = result.get("transcript", "").strip()
     action     = result.get("action", "ignore")
     lang       = result.get("lang", "en")
+    # Correct Gemini language misclassification: if transcript has no Devanagari
+    # characters, it can't be Hindi — force English.
+    if lang == "hi" and not _re.search(r'[ऀ-ॿ]', transcript):
+        lang = "en"
     is_hi      = lang == "hi"
 
     if not transcript:
@@ -831,6 +846,14 @@ def _handle_gemini_result(result: dict):
     _transcript_words = [w.strip(".,!?।").lower() for w in transcript.split()]
     _content_words = [w for w in _transcript_words if w not in _WAKE_WORDS]
     if not _content_words:
+        if _human_is_present() or _awake.is_set():
+            # Person is present — intentional wake-word call, open/extend session
+            _log("wake", f'🔤 Wake word heard — waiting for command')
+            _awake.set()
+            _last_speech_at = time.time()
+            dashboard.update_status(state="awake")
+            _brief_mute(0.8)   # throttle: prevents rapid re-processing if Gemini hallucinates
+            return
         _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
         _brief_mute(1.0)
         return
@@ -1028,11 +1051,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
 
             if not command:
-                # Just the wake word — silently activate and wait for next utterance.
-                # No beep: Whisper hallucinations on background noise would cause
-                # spurious chimes. play_think() fires when actual command is processed.
+                # Wake word only — play beep so user knows Pinku heard them.
+                tts.play_beep()
                 dashboard.update_status(state="awake")
-                _brief_mute(1.2)
+                _brief_mute(0.6)   # just enough to clear the beep echo (~0.5s chime)
                 continue
 
             # Wake word + inline command — send audio to Gemini for quality response
