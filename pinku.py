@@ -1033,6 +1033,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 continue
 
             # ── Gate: idle mode — Whisper locally for wake word only ─────────
+            # Wake word is always < 3s — skip longer utterances (TV monologues)
+            if len(pcm) / (16000 * 2) > 3.5:
+                continue
             try:
                 text = stt.transcribe(pcm)
             except Exception as e:
