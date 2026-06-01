@@ -334,13 +334,14 @@ def _handle_unmute():
 
 def _handle_pause():
     """Pause / stop button — toggles user-mute for reliability.
-    Muted → unmute + reopen session.  Unmuted → stop speech + user-mute
-    (stays muted until voice wake-word or gesture, unlike brief mute)."""
+    Muted → unmute + reopen session immediately (no wake word needed).
+    Unmuted → stop speech + user-mute (stays muted until voice/gesture)."""
     if _user_muted.is_set():
         _handle_unmute()
+        _extend_session()   # re-open session so you can talk right away
     else:
         tts.stop_speaking()
-        _log("info", "Paused ⏸ — say 'hey Pinku' or wave to resume")
+        _log("info", "Paused ⏸ — press again, wave, or say 'Pinku' to resume")
         _handle_mute()
 
 
@@ -968,16 +969,20 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if _user_muted.is_set():
             pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
             if pcm and not tts.is_speaking():
-                try:
-                    text = stt.transcribe(pcm)
-                except Exception:
-                    text = ""
-                if text:
-                    triggered, _ = _check_wake(text)
-                    if triggered:
-                        _log("wake", "🔤 Wake word heard while muted → unmuting")
-                        threading.Thread(target=_handle_unmute, daemon=True,
-                                         name="voice-unmute").start()
+                # Skip long utterances — wake word is always < 3s; TV speech is long.
+                # 16-bit mono: bytes / (rate * 2 bytes/sample) = seconds
+                duration_est = len(pcm) / (16000 * 2)
+                if duration_est <= 3.5:
+                    try:
+                        text = stt.transcribe(pcm)
+                    except Exception:
+                        text = ""
+                    if text:
+                        triggered, _ = _check_wake(text)
+                        if triggered:
+                            _log("wake", "🔤 Wake word heard while muted → unmuting + opening session")
+                            _handle_unmute()
+                            _extend_session()
             continue
 
         # ── Brief/automatic mute (TTS settle, post-action pause) — skip ──────
