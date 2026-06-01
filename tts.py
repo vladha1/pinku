@@ -128,8 +128,13 @@ def _is_hindi(text: str) -> bool:
 
 
 def _play(path: str):
-    """Non-blocking afplay of a WAV file. No-op: tones disabled."""
-    return
+    """Non-blocking afplay of a WAV file."""
+    if not os.path.exists(path):
+        return
+    subprocess.Popen(
+        ["afplay", path],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
