@@ -1169,12 +1169,11 @@ body {
 .cam-feed-wrap {
   position: relative; width: 100%; max-width: 640px; -webkit-flex-shrink: 0; flex-shrink: 0;
   background: #000; overflow: hidden;
-  padding-top: 75%;
 }
-.cam-feed-wrap > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-.cam-feed-wrap img { object-fit: contain; display: none; }
+.cam-feed-wrap img { width: 100%; height: auto; display: none; }
 .cam-feed-wrap img.visible { display: block; }
 .cam-offline {
+  min-height: 180px;
   display: -webkit-flex; display: flex;
   -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
   font-size: 0.88rem; color: #666683; background: rgba(0,0,0,0.6);
@@ -1760,10 +1759,10 @@ function DartsTab({ active, hits, game }) {
 
   return React.createElement('div', { className: 'darts-area open' },
     React.createElement('div', { className: 'darts-top-row' },
-      React.createElement('div', { className: 'cam-feed-wrap', style: { flex: 1 } },
+      React.createElement('div', { className: 'cam-feed-wrap', style: { flex: 1, position: 'relative' } },
         React.createElement('img', { ref: imgRef, alt: 'Darts camera', draggable: false }),
         !camOnline && React.createElement('div', { className: 'cam-offline' }, '📷 Camera offline or not started'),
-        React.createElement('div', { className: 'darts-hit-layer' },
+        React.createElement('div', { className: 'darts-hit-layer', style: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' } },
           hits.map(function(hit, i) {
             const col = dartColor(hit.score);
             return React.createElement('div', {
