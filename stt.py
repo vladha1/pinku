@@ -209,6 +209,11 @@ _HALLUCINATION_EXACT = {
     "virat kohli", "india indians", "india indians.", "india india",
     "rohit sharma", "ms dhoni", "sachin tendulkar",
     "kishu lai", "k r k r", "r k r k",
+    # Whisper echoing the old initial_prompt
+    "ipl cricket match score. virat kohli. mumbai indians. csk",
+    "ipl cricket match score. virat kohli. mumbai indians",
+    "virat kohli, ipl cricket match score. virat kohli. mumbai indians. csk",
+    "pinku, ipl cricket match score",
 }
 
 _HALLUCINATION_STARTS = (
@@ -277,9 +282,10 @@ def transcribe(pcm: bytes) -> str:
         no_speech_threshold=0.55,
         log_prob_threshold=-0.8,
         compression_ratio_threshold=2.4,
-        # Short prompt to bias wake-word recognition — do NOT include full sentences
-        # (Whisper sometimes echoes long prompts as hallucinations)
-        initial_prompt="Pinku, IPL cricket match score. Virat Kohli. Mumbai Indians. CSK.",
+        # Minimal prompt — just the wake word so Whisper spells it right.
+        # Longer prompts (cricket names etc.) get echoed back as hallucinations
+        # when TV audio is in the room.
+        initial_prompt="Pinku.",
     )
 
     segs = list(segments)

@@ -333,17 +333,15 @@ def _handle_unmute():
 
 
 def _handle_pause():
-    """Stop Pinky mid-sentence — mic re-opens after a short settle so user can speak next."""
-    global _settle_until
-    was_speaking = tts.is_speaking()
-    tts.stop_speaking()
-    _settle_until = 0.0   # cancel any lingering settle window
-    if was_speaking:
-        _log("info", "Paused ⏸")
-    # Brief mute (1.5 s) so the mic doesn't re-open instantly and capture echo/room noise
-    _brief_mute(1.5)
-    dashboard.update_status(speaking=False,
-                            state="awake" if _awake.is_set() else "idle")
+    """Pause / stop button — toggles user-mute for reliability.
+    Muted → unmute + reopen session.  Unmuted → stop speech + user-mute
+    (stays muted until voice wake-word or gesture, unlike brief mute)."""
+    if _user_muted.is_set():
+        _handle_unmute()
+    else:
+        tts.stop_speaking()
+        _log("info", "Paused ⏸ — say 'hey Pinku' or wave to resume")
+        _handle_mute()
 
 
 def _extend_session():
@@ -371,9 +369,8 @@ _GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     # requires_session=False → fires even from muted/idle state
-    "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → ONLY wake from muted
-    # requires_session=True → only fires during an active (awake) session
-    "Open Hand": (True,  "_gesture_open_hand"),  # 🖐 wave while awake → stop speech
+    "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → unmute + wake
+    "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → mute toggle (any state)
     # Fist removed — too many false positives from normal resting hand
 }
 
@@ -395,16 +392,16 @@ def _gesture_hands_up():
 
 
 def _gesture_open_hand():
-    """🖐 Open hand / wave (arm down) — interrupts speech or extends session.
-    Only fires during an active session (requires_session=True)."""
-    if tts.is_speaking():
-        _log("wake", "🖐 Open Hand → stop speaking")
-        tts.stop_speaking()
-        _muted.clear()
-        _extend_session()
+    """🖐 Open hand / wave — mute toggle from any state.
+    Muted → unmute + open session.  Unmuted → stop speech + mute."""
+    if _user_muted.is_set():
+        _log("wake", "🖐 Open Hand → unmute")
+        _handle_unmute()
     else:
-        _log("wake", "🖐 Open Hand → extend session")
-        _extend_session()
+        if tts.is_speaking():
+            tts.stop_speaking()
+        _log("wake", "🖐 Open Hand → mute")
+        _handle_mute()
 
 
 def _gesture_fist():
