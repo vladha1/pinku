@@ -654,7 +654,7 @@ body {
 /* ── Question & reply clouds ── */
 .question-cloud {
   margin-bottom: 10px; width: 100%; max-width: 450px;
-  padding: 10px 14px 12px; font-size: 0.86rem; line-height: 1.4;
+  padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
   color: #0c1e2e; text-align: left;
   background: linear-gradient(165deg,#f8fcff 0%,#e8f4fc 45%,#dff0fb 100%);
   border: 2px solid rgba(56,189,248,0.55);
@@ -670,7 +670,7 @@ body {
 }
 .reply-cloud {
   margin-top: 10px; width: 100%; max-width: 450px;
-  padding: 10px 14px 12px; font-size: 0.86rem; line-height: 1.4;
+  padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
   color: #241830; text-align: left;
   background: linear-gradient(165deg,#fdfcff 0%,#f3e8ff 45%,#ede9fe 100%);
   border: 2px solid rgba(167,139,250,0.55);
@@ -726,8 +726,8 @@ body {
 .status-bar-icon.triggered { animation: notify-pulse 1.12s ease-in-out infinite; }
 @keyframes notify-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(0.9)} }
 .status-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.status-bar-label { font-size: 1.05rem; font-weight: 700; color: #e8e8f4; white-space: nowrap; }
-.status-bar-sub   { font-size: 0.88rem; color: #8a8aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.status-bar-label { font-size: 1.15rem; font-weight: 700; color: #e8e8f4; white-space: nowrap; }
+.status-bar-sub   { font-size: 0.98rem; color: #8a8aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .status-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .ws-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .ws-dot.on  { background: #4ade80; box-shadow: 0 0 5px rgba(74,222,128,0.6); }
@@ -1287,32 +1287,41 @@ body {
 .log-toolbar {
   flex-shrink:0; padding:8px 20px; border-bottom:1px solid var(--border);
   display:flex; justify-content:space-between; align-items:center;
-  background:rgba(0,0,0,0.25); font-size:0.75rem; color:var(--muted);
+  background:rgba(0,0,0,0.25); font-size:0.8rem; color:var(--muted);
 }
 .log-clear-btn {
-  font-size:0.72rem; padding:3px 10px; border-radius:6px; cursor:pointer;
+  font-size:0.75rem; padding:4px 12px; border-radius:6px; cursor:pointer;
   background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--muted);
 }
 .log-clear-btn:hover { background:rgba(255,255,255,0.1); }
 .log-entries {
-  flex:1; overflow-y:auto; padding:6px 20px;
+  flex:1; overflow-y:auto; padding:0;
   display:flex; flex-direction:column; gap:0;
   width:100%; box-sizing:border-box;
 }
 .log-entries::-webkit-scrollbar { width:4px; }
 .log-entries::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 .log-entry {
-  font-size:0.84rem; padding:5px 0;
-  border-bottom:1px solid rgba(255,255,255,0.05);
-  display:flex; gap:10px; align-items:baseline;
-  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
-  width:100%;
+  padding:10px 16px 8px 14px;
+  border-bottom:1px solid rgba(255,255,255,0.04);
+  display:flex; gap:12px; align-items:flex-start;
+  border-left:3px solid transparent;
+  width:100%; box-sizing:border-box;
 }
-.log-entry .log-ts  { flex-shrink:0; font-size:0.72rem; color:#7c85a0; min-width:66px; }
-.log-entry .log-lvl { flex-shrink:0; font-size:0.67rem; font-weight:600; padding:2px 7px;
-                       border-radius:4px; background:rgba(255,255,255,0.07);
-                       min-width:72px; text-align:center; letter-spacing:0.03em; }
-.log-entry .log-msg { flex:1; word-break:break-word; color:#d1d5db; line-height:1.4; }
+.log-entry:hover { background:rgba(255,255,255,0.02); }
+.log-entry.log-stt   { background:rgba(147,197,253,0.04); }
+.log-entry.log-pinku { background:rgba(192,132,252,0.04); }
+.log-entry.log-error { background:rgba(248,113,113,0.05); }
+.log-icon { font-size:1.15rem; flex-shrink:0; width:26px; text-align:center; line-height:1.5; }
+.log-body { flex:1; min-width:0; }
+.log-msg  { display:block; font-size:1rem; line-height:1.5; word-break:break-word; color:#c8ccdc; }
+.log-entry.log-stt   .log-msg { color:#bfdbfe; font-weight:500; font-size:1.05rem; }
+.log-entry.log-pinku .log-msg { color:#e9d5ff; font-weight:500; font-size:1.05rem; }
+.log-entry.log-error .log-msg { color:#fca5a5; }
+.log-entry.log-warn  .log-msg { color:#fde68a; }
+.log-entry.log-wake  .log-msg { color:#fde68a; }
+.log-ts { display:block; font-size:0.7rem; color:#44475a; margin-top:3px;
+          font-family:'SF Mono','Menlo','Consolas',monospace; }
 </style>
 </head>
 <body>
@@ -1437,9 +1446,6 @@ body {
   </div><!-- pinky-stage -->
 </div><!-- main-area -->
 
-<!-- History area (hidden by default) -->
-<div class="history-area" id="history-area"></div>
-
 <!-- Camera area (hidden by default) -->
 <div class="camera-area" id="camera-area">
   <div class="cam-feed-wrap">
@@ -1497,9 +1503,6 @@ body {
 <nav class="pinky-nav">
   <button class="pinky-nav-item active" id="nav-home" onclick="showTab('home')">
     <span class="pinky-nav-ic">🏠</span>Home
-  </button>
-  <button class="pinky-nav-item" id="nav-history" onclick="showTab('history')">
-    <span class="pinky-nav-ic">📜</span>History
   </button>
   <button class="pinky-nav-item" id="nav-cam" onclick="showTab('cam')">
     <span class="pinky-nav-ic">📷</span>Camera
@@ -2032,14 +2035,17 @@ function addLog(level, msg, ts) {
   const box = document.getElementById('log-entries');
   if (!box) return;
   const entry = document.createElement('div');
-  entry.className = 'log-entry';
+  entry.className = 'log-entry log-' + level;
   const t = ts || new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   const icon  = LOG_ICONS[level]  || '⚪';
   const color = LOG_COLORS[level] || '#94a3b8';
+  entry.style.borderLeftColor = color;
   entry.innerHTML =
-    `<span class="log-ts">${esc(t)}</span>` +
-    `<span class="log-lvl" style="color:${color};border:1px solid ${color}40">${icon} ${esc(level)}</span>` +
-    `<span class="log-msg">${esc(msg)}</span>`;
+    `<span class="log-icon">${icon}</span>` +
+    `<div class="log-body">` +
+      `<span class="log-msg">${esc(msg)}</span>` +
+      `<span class="log-ts">${esc(t)} · ${esc(level)}</span>` +
+    `</div>`;
   box.insertBefore(entry, box.firstChild);
   while (box.children.length > 200) box.removeChild(box.lastChild);
 }
@@ -2053,13 +2059,12 @@ function formatDetEvent(e) {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-const _TABS = ['home', 'history', 'cam', 'darts', 'log'];
+const _TABS = ['home', 'cam', 'darts', 'log'];
 function showTab(name) {
-  document.getElementById('main-area').style.display       = name === 'home'    ? '' : 'none';
-  document.getElementById('history-area').className        = 'history-area'   + (name === 'history' ? ' open' : '');
-  document.getElementById('camera-area').className         = 'camera-area'    + (name === 'cam'     ? ' open' : '');
-  document.getElementById('darts-area').className          = 'darts-area'     + (name === 'darts'   ? ' open' : '');
-  document.getElementById('log-area').className            = 'log-area'       + (name === 'log'     ? ' open' : '');
+  document.getElementById('main-area').style.display = name === 'home' ? '' : 'none';
+  document.getElementById('camera-area').className   = 'camera-area' + (name === 'cam'   ? ' open' : '');
+  document.getElementById('darts-area').className    = 'darts-area'  + (name === 'darts' ? ' open' : '');
+  document.getElementById('log-area').className      = 'log-area'    + (name === 'log'   ? ' open' : '');
   _TABS.forEach(t => {
     const el = document.getElementById('nav-' + t);
     if (el) el.classList.toggle('active', t === name);
@@ -2067,15 +2072,8 @@ function showTab(name) {
   if (name === 'cam')        startCamera();
   else if (name === 'darts') startDartsCamera();
   else                       { stopCamera(); stopDartsCamera(); }
-  // Tell server whether laser processing should run
   fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({active: name === 'darts'})}).catch(() => {});
-  if (name === 'history') {
-    loadHistory().then(() => {
-      const box = document.getElementById('history-area');
-      setTimeout(() => box.scrollTop = box.scrollHeight, 80);
-    });
-  }
   if (name === 'darts') { loadDartHits(); loadDartGame(); }
 }
 
@@ -2106,13 +2104,6 @@ function connect() {
         flashDetection(data);
       } else if (data.type === 'log') {
         addLog(data.level || 'info', data.msg || '', data.ts || '');
-      } else if (data.type === 'history') {
-        // Live append to history panel if it's currently open
-        const box = document.getElementById('history-area');
-        if (box.classList.contains('open')) {
-          appendHistoryEntry(data);
-          box.scrollTop = box.scrollHeight;
-        }
       } else if (data.type === 'dart_hit') {
         addDartHitDot(data);
         addDartScoreRow(data, true);
