@@ -492,61 +492,59 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pinku</title>
+<!-- React 17 + Babel for iOS 9 Safari compatibility -->
+<script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-/* ─────────────────────────────────────────────────────────────────────────────
-   BASE  (copied verbatim from Pinky's index.html, adapted for Pinku)
-───────────────────────────────────────────────────────────────────────────── */
-:root {
-  --bg:       #0a0a14;
-  --surface:  #12121e;
-  --border:   #24243a;
-  --text:     #e8e8f4;
-  --muted:    #666683;
-  --accent:   #c084fc;
-  --face-max: 440px;
-}
-@media (min-width: 500px) {
-  :root { --face-max: min(62vmin, 460px); }
-}
-@media (min-width: 900px) {
-  :root { --face-max: 520px; }
-}
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── Reset & Base ── */
+*, *:before, *:after { -webkit-box-sizing: border-box; box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: #0a0a14;
+  color: #e8e8f4;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-  display: flex; flex-direction: column;
-  height: 100dvh; overflow: hidden;
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  user-select: none; -webkit-user-select: none;
+  -webkit-user-select: none; user-select: none;
+}
+#root {
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+  overflow: hidden;
 }
 
 /* ── Header ── */
 .header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: space-between; justify-content: space-between;
   padding: 12px 16px 10px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  border-bottom: 1px solid #24243a;
+  -webkit-flex-shrink: 0; flex-shrink: 0;
+  background: -webkit-linear-gradient(top, rgba(124,92,191,0.07) 0%, transparent 100%);
   background: linear-gradient(180deg, rgba(124,92,191,0.07) 0%, transparent 100%);
 }
-.header-left { display: flex; align-items: center; gap: 10px; }
+.header-left { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px; }
 .dot-wrap { position: relative; }
 .avatar-ring {
   width: 36px; height: 36px; border-radius: 50%;
+  background: -webkit-linear-gradient(135deg, #7c3aed, #4c1d95);
   background: linear-gradient(135deg, #7c3aed, #4c1d95);
-  display: flex; align-items: center; justify-content: center;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
   font-weight: 700; font-size: 0.95rem; color: #fff;
-  box-shadow: 0 0 12px rgba(124,58,237,0.45);
+  -webkit-box-shadow: 0 0 12px rgba(124,58,237,0.45); box-shadow: 0 0 12px rgba(124,58,237,0.45);
 }
 .status-dot {
   position: absolute; bottom: -1px; right: -1px;
   width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid var(--bg);
+  border: 2px solid #0a0a14;
   background: #4ade80;
-  transition: background 0.5s ease;
+  -webkit-transition: background 0.5s ease; transition: background 0.5s ease;
 }
 .status-dot.sleeping  { background: #2a2a42; }
 .status-dot.paused    { background: #f87171; }
@@ -555,63 +553,73 @@ body {
 .status-dot.speaking  { background: #f472b6; }
 .app-name {
   font-size: 1.05rem; font-weight: 700;
+  background: -webkit-linear-gradient(left, #c9b1ff, #f472b6);
   background: linear-gradient(90deg, #c9b1ff, #f472b6);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-.status-pills { display: flex; gap: 5px; margin-top: 2px; }
+.status-pills { display: -webkit-flex; display: flex; gap: 5px; margin-top: 2px; }
 .spill {
   font-size: 0.72rem; padding: 1px 6px; border-radius: 8px;
-  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-  color: var(--muted); transition: background 0.3s, color 0.3s;
+  background: rgba(255,255,255,0.05); border: 1px solid #24243a;
+  color: #666683; -webkit-transition: background 0.3s, color 0.3s; transition: background 0.3s, color 0.3s;
 }
 .spill.on { background: rgba(74,222,128,0.12); color: #4ade80; border-color: rgba(74,222,128,0.3); }
-.header-btns { display: flex; gap: 8px; }
+.header-btns { display: -webkit-flex; display: flex; gap: 8px; }
 .hdr-btn {
   padding: 6px 12px; border-radius: 10px; font-size: 0.85rem;
-  border: 1px solid var(--border); background: rgba(255,255,255,0.05);
-  color: var(--text); cursor: pointer; transition: background 0.18s;
-  display: flex; align-items: center; justify-content: center;
-  min-width: 40px; min-height: 36px;
+  border: 1px solid #24243a; background: rgba(255,255,255,0.05);
+  color: #e8e8f4; cursor: pointer; -webkit-transition: background 0.18s; transition: background 0.18s;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+  min-width: 44px; min-height: 44px;
 }
 .hdr-btn:hover { background: rgba(255,255,255,0.1); }
 .hdr-btn.stop-btn  { border-color: rgba(248,113,113,0.4); color: #f87171; }
 .hdr-btn.mute-btn  { border-color: rgba(248,113,113,0.35); }
+.hdr-btn.mute-btn.active { background: rgba(192,132,252,0.18); border-color: rgba(192,132,252,0.5); }
 .hdr-btn.resume-btn{ border-color: rgba(74,222,128,0.4); color: #4ade80; }
-.hdr-btn.active    { background: rgba(192,132,252,0.18); border-color: rgba(192,132,252,0.5); }
+.hdr-btn.restart-btn { border-color: rgba(251,191,36,0.4); color: #fbbf24; font-size: 0.8rem; }
 
 /* ── Main area ── */
 .main-area {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  -webkit-flex: 1; flex: 1; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
   overflow: hidden; gap: 0;
   padding: 8px 0 4px;
 }
 
 /* ── Thought bubble ── */
 .face-bubble {
-  position: absolute;
-  top: 0%; right: -4%;
+  position: absolute; top: 0%; right: -4%;
   background: rgba(14, 12, 28, 0.92);
-  border: 1.5px solid var(--bubble-color, #c084fc);
+  border: 1.5px solid #c084fc;
   border-radius: 999px;
   padding: 5px 11px;
-  display: flex; align-items: center; gap: 4px;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center; gap: 4px;
   z-index: 8; pointer-events: none;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5), 0 0 12px rgba(192,132,252,0.18);
-  backdrop-filter: blur(10px);
+  -webkit-box-shadow: 0 4px 16px rgba(0,0,0,0.5); box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   opacity: 0;
-  transform: translateY(8px) scale(0.86);
-  transition: opacity 0.32s cubic-bezier(0.2,0.85,0.35,1), transform 0.34s cubic-bezier(0.34,1.15,0.52,1);
+  -webkit-transform: translateY(8px) scale(0.86); transform: translateY(8px) scale(0.86);
+  -webkit-transition: opacity 0.32s, -webkit-transform 0.34s; transition: opacity 0.32s, transform 0.34s;
 }
-.face-bubble.visible { opacity: 1; transform: translateY(0) scale(1); }
+.face-bubble.triggered { border-color: #fb923c; }
+.face-bubble.visible { opacity: 1; -webkit-transform: translateY(0) scale(1); transform: translateY(0) scale(1); }
 .bubble-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: var(--bubble-color, #c084fc);
-  display: inline-block;
-  animation: dot-bounce 1.22s cubic-bezier(0.45,0.05,0.55,0.95) infinite;
+  background: #c084fc; display: inline-block;
+  -webkit-animation: dot-bounce 1.22s ease-in-out infinite; animation: dot-bounce 1.22s ease-in-out infinite;
 }
-.bubble-dot.d2 { animation-delay: 0.16s; }
-.bubble-dot.d3 { animation-delay: 0.32s; }
+.face-bubble.triggered .bubble-dot { background: #fb923c; }
+.bubble-dot.d2 { -webkit-animation-delay: 0.16s; animation-delay: 0.16s; }
+.bubble-dot.d3 { -webkit-animation-delay: 0.32s; animation-delay: 0.32s; }
+@-webkit-keyframes dot-bounce {
+  0%,100% { -webkit-transform: translateY(0) scale(1); opacity: 0.82; }
+  22%     { -webkit-transform: translateY(0) scale(1.05); opacity: 1; }
+  48%     { -webkit-transform: translateY(-6px) scale(1.1); opacity: 1; }
+  72%     { -webkit-transform: translateY(-1px) scale(1); opacity: 0.9; }
+}
 @keyframes dot-bounce {
   0%,100% { transform: translateY(0) scale(1); opacity: 0.82; }
   22%     { transform: translateY(0) scale(1.05); opacity: 1; }
@@ -621,45 +629,53 @@ body {
 
 /* ── Stage & layout ── */
 .pinky-stage {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
   width: 100%; max-width: 720px; margin: 0 auto;
 }
 .face-with-actions {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  width: 100%; max-width: min(94vw, 720px);
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  width: 100%; max-width: 94vw;
   padding: 2px 4px 10px;
 }
-.face-with-actions .wake-btn-top { margin-bottom: 12px; }
 .face-with-actions .face-wrap {
-  flex: 0 1 auto; width: 100%;
-  max-width: min(92vw, var(--face-max));
+  -webkit-flex: 0 1 auto; flex: 0 1 auto; width: 100%;
+  max-width: 440px;
   margin-left: auto; margin-right: auto;
 }
+@media (min-width: 500px) {
+  .face-with-actions .face-wrap { max-width: 460px; }
+}
+@media (min-width: 900px) {
+  .face-with-actions .face-wrap { max-width: 520px; }
+}
 .wake-btn-top {
-  flex: 0 0 auto; width: 56px; height: 56px;
+  -webkit-flex: 0 0 auto; flex: 0 0 auto; width: 56px; height: 56px;
   border-radius: 50%;
   border: 2px solid rgba(216,180,254,0.9);
+  background: -webkit-linear-gradient(top, #7c3aed 0%, #5b21b6 52%, #4c1d95 100%);
   background: linear-gradient(180deg, #7c3aed 0%, #5b21b6 52%, #4c1d95 100%);
   color: #fff; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 0 rgba(49,10,90,0.75), 0 8px 18px rgba(91,33,182,0.38),
-              0 0 0 1px rgba(255,255,255,0.2) inset;
-  transition: transform 0.08s ease, filter 0.12s ease;
-  font-size: 1.55rem; line-height: 1;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  -webkit-box-shadow: 0 4px 0 rgba(49,10,90,0.75), 0 8px 18px rgba(91,33,182,0.38);
+  box-shadow: 0 4px 0 rgba(49,10,90,0.75), 0 8px 18px rgba(91,33,182,0.38);
+  -webkit-transition: -webkit-transform 0.08s ease; transition: transform 0.08s ease;
+  font-size: 1.55rem; line-height: 1; margin-bottom: 12px;
 }
-.wake-btn-top:active { transform: translateY(2px); }
+.wake-btn-top:active { -webkit-transform: translateY(2px); transform: translateY(2px); }
 
 /* ── Question & reply clouds ── */
 .question-cloud {
   margin-bottom: 10px; width: 100%; max-width: 450px;
   padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
   color: #0c1e2e; text-align: left;
+  background: -webkit-linear-gradient(top, #f8fcff 0%, #e8f4fc 45%, #dff0fb 100%);
   background: linear-gradient(165deg,#f8fcff 0%,#e8f4fc 45%,#dff0fb 100%);
   border: 2px solid rgba(56,189,248,0.55);
   border-radius: 26px; border-bottom-right-radius: 8px;
-  box-shadow: 0 8px 22px rgba(0,0,0,0.18), 0 2px 0 rgba(255,255,255,0.7) inset;
+  -webkit-box-shadow: 0 8px 22px rgba(0,0,0,0.18); box-shadow: 0 8px 22px rgba(0,0,0,0.18);
   display: none;
 }
 .question-cloud.has-text { display: block; }
@@ -672,10 +688,11 @@ body {
   margin-top: 10px; width: 100%; max-width: 450px;
   padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
   color: #241830; text-align: left;
+  background: -webkit-linear-gradient(top, #fdfcff 0%, #f3e8ff 45%, #ede9fe 100%);
   background: linear-gradient(165deg,#fdfcff 0%,#f3e8ff 45%,#ede9fe 100%);
   border: 2px solid rgba(167,139,250,0.55);
   border-radius: 26px; border-bottom-left-radius: 8px;
-  box-shadow: 0 10px 28px rgba(0,0,0,0.22), 0 2px 0 rgba(255,255,255,0.65) inset;
+  -webkit-box-shadow: 0 10px 28px rgba(0,0,0,0.22); box-shadow: 0 10px 28px rgba(0,0,0,0.22);
   cursor: pointer; display: none;
 }
 .reply-cloud.has-text { display: block; }
@@ -689,241 +706,247 @@ body {
 /* ── Person badge ── */
 .person-badge {
   margin-top: 6px;
-  display: flex; align-items: center; gap: 6px;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center; gap: 6px;
   background: rgba(74,222,128,0.10);
   border: 1px solid rgba(74,222,128,0.28);
   border-radius: 20px; padding: 4px 12px;
   font-size: 0.72rem; color: #4ade80;
-  opacity: 0; transition: opacity 0.4s; pointer-events: none;
+  opacity: 0; -webkit-transition: opacity 0.4s; transition: opacity 0.4s; pointer-events: none;
 }
 .person-badge.visible { opacity: 1; }
 .person-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #4ade80; animation: live-blink 1.6s ease-in-out infinite;
+  background: #4ade80;
+  -webkit-animation: live-blink 1.6s ease-in-out infinite; animation: live-blink 1.6s ease-in-out infinite;
 }
+@-webkit-keyframes live-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 @keyframes live-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 /* ── Status bar ── */
 .status-bar {
-  flex-shrink: 0; margin-top: 10px;
+  -webkit-flex-shrink: 0; flex-shrink: 0; margin-top: 10px;
   padding: 9px 14px 9px 12px; border-radius: 999px;
+  background: -webkit-linear-gradient(top, rgba(22,24,40,0.94), rgba(14,16,28,0.96));
   background: linear-gradient(180deg, rgba(22,24,40,0.94), rgba(14,16,28,0.96));
   border: 1px solid rgba(100,116,139,0.4);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset;
-  backdrop-filter: blur(12px);
-  max-width: min(96vw, 460px); width: 100%;
-  display: flex; align-items: center; gap: 10px;
-  transition: border-color 0.6s ease, box-shadow 0.6s ease;
+  -webkit-box-shadow: 0 8px 24px rgba(0,0,0,0.4); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-width: 460px; width: 96vw;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center; gap: 10px;
+  -webkit-transition: border-color 0.6s ease; transition: border-color 0.6s ease;
 }
-.status-bar.listening { border-color: rgba(74,222,128,0.4); }
+.status-bar.sleeping  { border-color: rgba(100,116,139,0.4); }
 .status-bar.awake     { border-color: rgba(192,132,252,0.5); }
 .status-bar.thinking,
 .status-bar.triggered { border-color: rgba(232,121,249,0.48); }
 .status-bar.speaking  { border-color: rgba(192,132,252,0.42); }
 .status-bar.paused    { border-color: rgba(248,113,113,0.42); }
-.status-bar-icon { font-size: 1.65rem; line-height: 1; flex-shrink: 0; }
+.status-bar-icon { font-size: 1.65rem; line-height: 1; -webkit-flex-shrink: 0; flex-shrink: 0; }
 .status-bar-icon.thinking,
-.status-bar-icon.triggered { animation: notify-pulse 1.12s ease-in-out infinite; }
+.status-bar-icon.triggered { -webkit-animation: notify-pulse 1.12s ease-in-out infinite; animation: notify-pulse 1.12s ease-in-out infinite; }
+@-webkit-keyframes notify-pulse { 0%,100%{opacity:1;-webkit-transform:scale(1)} 50%{opacity:0.7;-webkit-transform:scale(0.9)} }
 @keyframes notify-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(0.9)} }
-.status-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.status-bar-text { -webkit-flex: 1; flex: 1; min-width: 0; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; }
 .status-bar-label { font-size: 1.15rem; font-weight: 700; color: #e8e8f4; white-space: nowrap; }
 .status-bar-sub   { font-size: 0.98rem; color: #8a8aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-.status-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.status-bar-right { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 8px; -webkit-flex-shrink: 0; flex-shrink: 0; }
 .ws-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.ws-dot.on  { background: #4ade80; box-shadow: 0 0 5px rgba(74,222,128,0.6); }
+.ws-dot.on  { background: #4ade80; -webkit-box-shadow: 0 0 5px rgba(74,222,128,0.6); box-shadow: 0 0 5px rgba(74,222,128,0.6); }
 .ws-dot.off { background: #64748b; }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   FACE WRAP  (exact copy from Pinky)
-───────────────────────────────────────────────────────────────────────────── */
+/* ── Face wrap ── */
 .face-wrap {
-  position: relative; width: 100%; max-width: var(--face-max);
-  margin: 0 auto; flex-shrink: 0;
+  position: relative; width: 100%; max-width: 440px;
+  margin: 0 auto; -webkit-flex-shrink: 0; flex-shrink: 0;
   border-radius: 48% 48% 46% 46% / 44% 44% 56% 56%;
   border: 1px solid rgba(255,182,220,0.22);
   background:
+    -webkit-radial-gradient(50% 36% ellipse, rgba(255,210,232,0.22) 0%, transparent 58%),
+    -webkit-radial-gradient(32% 20%, #4a4478 0%, #322d58 38%, #1c1a34 100%);
+  background:
     radial-gradient(ellipse 72% 58% at 50% 36%, rgba(255,210,232,0.22) 0%, transparent 58%),
     radial-gradient(circle at 32% 20%, #4a4478 0%, #322d58 38%, #1c1a34 100%);
-  box-shadow: 0 24px 48px rgba(0,0,0,0.4),
-              0 0 0 1px rgba(255,255,255,0.08) inset,
-              inset 0 -16px 32px rgba(0,0,0,0.18);
+  -webkit-box-shadow: 0 24px 48px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08) inset;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08) inset;
   overflow: visible;
 }
-.face-wrap::before { content:''; display:block; padding-top:100%; }
-@supports (aspect-ratio:1) {
-  .face-wrap::before { display:none; padding-top:0; }
-  .face-wrap {
-    width: min(100%, var(--face-max));
-    max-height: min(56vh, var(--face-max));
-    aspect-ratio: 1; height: auto;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .face-wrap .face {
-    position: relative; left:auto; right:auto; top:auto; bottom:auto;
-    margin: 0 auto; transform: none;
-    width: 71%; height: 86%; max-width:none; max-height:none;
-  }
-}
-.face-wrap::after {
+.face-wrap:before { content:''; display:block; padding-top:100%; }
+.face-wrap:after {
   content:''; position:absolute; left:-8%; right:-8%; top:-8%; bottom:-8%;
   border-radius:50%;
   border: 1px solid rgba(96,165,250,0.36);
+  -webkit-box-shadow: 0 0 24px rgba(59,130,246,0.28), inset 0 0 12px rgba(147,51,234,0.25);
   box-shadow: 0 0 24px rgba(59,130,246,0.28), inset 0 0 12px rgba(147,51,234,0.25);
   pointer-events:none; opacity:0.52;
-  transition: opacity 0.5s ease;
+  -webkit-transition: opacity 0.5s ease; transition: opacity 0.5s ease;
 }
+@-webkit-keyframes face-ambient-ring { 0%,100%{opacity:0.38} 50%{opacity:0.72} }
 @keyframes face-ambient-ring { 0%,100%{opacity:0.38} 50%{opacity:0.72} }
-.face.listening .face-wrap::after, .face.awake .face-wrap::after { animation: face-ambient-ring 3.5s ease-in-out infinite; }
-.face.thinking .face-wrap::after, .face.triggered .face-wrap::after { animation: face-ambient-ring 2.35s ease-in-out infinite; }
-.face.paused .face-wrap::after, .face.sleeping .face-wrap::after { animation: none; opacity: 0.1; }
+.face-wrap.awake:after, .face-wrap.listening:after { -webkit-animation: face-ambient-ring 3.5s ease-in-out infinite; animation: face-ambient-ring 3.5s ease-in-out infinite; }
+.face-wrap.thinking:after, .face-wrap.triggered:after { -webkit-animation: face-ambient-ring 2.35s ease-in-out infinite; animation: face-ambient-ring 2.35s ease-in-out infinite; }
+.face-wrap.paused:after, .face-wrap.sleeping:after { -webkit-animation: none; animation: none; opacity: 0.1; }
 
 .face-wrap .face {
   position: absolute; left:0; right:0; top:0; bottom:0;
-  width:71%; height:86%; margin:auto; transform:none;
-  display:flex; flex-direction:column;
-  align-items:center; justify-content:flex-start;
+  width:71%; height:86%; margin:auto; -webkit-transform:none; transform:none;
+  display:-webkit-flex; display:flex; -webkit-flex-direction:column; flex-direction:column;
+  -webkit-align-items:center; align-items:center; -webkit-justify-content:flex-start; justify-content:flex-start;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   HEAD & FEATURES  (exact copy from Pinky)
-───────────────────────────────────────────────────────────────────────────── */
+/* ── Head & features ── */
 .head {
   position: relative; width: 100%; height: 88%;
   border-radius: 49% 49% 47% 47% / 47% 47% 55% 55%;
   background:
+    -webkit-radial-gradient(50% 22% ellipse, #fffefb 0%, #fff5f0 18%, #ffe8dc 38%, #ffd0c0 62%, #f5c4b0 92%);
+  background:
     radial-gradient(ellipse 120% 88% at 50% 22%,
       #fffefb 0%, #fff5f0 18%, #ffe8dc 38%, #ffd0c0 62%, #f5c4b0 92%);
   border: 1px solid rgba(240,180,165,0.35);
-  box-shadow: inset 0 -10px 22px rgba(200,120,110,0.1),
-              inset 12px 18px 32px rgba(255,255,255,0.55);
-  transition: filter 0.45s ease, box-shadow 0.45s ease;
+  -webkit-box-shadow: inset 0 -10px 22px rgba(200,120,110,0.1), inset 12px 18px 32px rgba(255,255,255,0.55);
+  box-shadow: inset 0 -10px 22px rgba(200,120,110,0.1), inset 12px 18px 32px rgba(255,255,255,0.55);
+  -webkit-transition: filter 0.45s ease, -webkit-box-shadow 0.45s ease; transition: filter 0.45s ease, box-shadow 0.45s ease;
 }
 .hair-side {
   position: absolute; top: 16%; width: 26%; height: 86%;
   z-index: 1; pointer-events: none;
-  background: linear-gradient(90deg,
-    rgba(255,255,255,0.12) 0%, #ffc8dd 22%,
-    #f9a8d4 50%, #f472b6 78%, #ec4899 100%);
+  background: -webkit-linear-gradient(left, rgba(255,255,255,0.12) 0%, #ffc8dd 22%, #f9a8d4 50%, #f472b6 78%, #ec4899 100%);
+  background: linear-gradient(90deg, rgba(255,255,255,0.12) 0%, #ffc8dd 22%, #f9a8d4 50%, #f472b6 78%, #ec4899 100%);
   border-radius: 58% 42% 55% 45% / 22% 30% 88% 72%;
-  box-shadow: inset -3px 0 8px rgba(255,255,255,0.25);
+  -webkit-box-shadow: inset -3px 0 8px rgba(255,255,255,0.25); box-shadow: inset -3px 0 8px rgba(255,255,255,0.25);
 }
-.hair-side.left  { left: -14%; transform: rotate(-5deg); }
-.hair-side.right { right: -14%; transform: rotate(5deg) scaleX(-1); }
+.hair-side.left  { left: -14%; -webkit-transform: rotate(-5deg); transform: rotate(-5deg); }
+.hair-side.right { right: -14%; -webkit-transform: rotate(5deg) scaleX(-1); transform: rotate(5deg) scaleX(-1); }
 .hair-fringe {
   position: absolute; top: -4%; left: 10%; width: 80%; height: 18%;
   z-index: 2; pointer-events: none;
+  background: -webkit-linear-gradient(top, #ffe4f0 0%, #fda4d0 45%, #f472b6 100%);
   background: linear-gradient(180deg, #ffe4f0 0%, #fda4d0 45%, #f472b6 100%);
   border-radius: 50% 50% 45% 45% / 85% 85% 28% 28%;
-  clip-path: ellipse(92% 100% at 50% 0%);
-  box-shadow: 0 2px 6px rgba(236,72,153,0.2);
+  -webkit-clip-path: ellipse(92% 100% at 50% 0%); clip-path: ellipse(92% 100% at 50% 0%);
+  -webkit-box-shadow: 0 2px 6px rgba(236,72,153,0.2); box-shadow: 0 2px 6px rgba(236,72,153,0.2);
 }
 .brows {
-  position: absolute; top: 30.5%; left: 50%; transform: translateX(-50%);
-  width: 58%; display: flex; justify-content: space-between; z-index: 4;
+  position: absolute; top: 30.5%; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
+  width: 58%; display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; z-index: 4;
 }
 .brow {
   width: 32%; height: 3px; border-radius: 999px;
-  background: linear-gradient(90deg, #b0887a, #8a5f52);
-  opacity: 0.9; transform-origin: 50% 50%;
+  background: -webkit-linear-gradient(left, #b0887a, #8a5f52); background: linear-gradient(90deg, #b0887a, #8a5f52);
+  opacity: 0.9; -webkit-transform-origin: 50% 50%; transform-origin: 50% 50%;
 }
-.brow.left  { transform: rotate(-5deg) translateY(1px); border-radius: 55% 45% 50% 50%; }
-.brow.right { transform: rotate(5deg) translateY(1px); border-radius: 45% 55% 50% 50%; }
+.brow.left  { -webkit-transform: rotate(-5deg) translateY(1px); transform: rotate(-5deg) translateY(1px); border-radius: 55% 45% 50% 50%; }
+.brow.right { -webkit-transform: rotate(5deg) translateY(1px); transform: rotate(5deg) translateY(1px); border-radius: 45% 55% 50% 50%; }
 .eyes {
   position: absolute; top: 39.5%; left: 18%; width: 64%;
-  display: flex; justify-content: space-between; align-items: center;
-  z-index: 4; transform-origin: 50% 45%; will-change: transform;
+  display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; -webkit-align-items: center; align-items: center;
+  z-index: 4; -webkit-transform-origin: 50% 45%; transform-origin: 50% 45%;
 }
 .eye {
-  width: clamp(34px, 9.2vmin, 60px); height: clamp(34px, 9.2vmin, 60px);
+  width: 40px; height: 40px;
   border-radius: 50%;
   border: 2px solid rgba(55,65,81,0.22);
+  background: -webkit-radial-gradient(40% 28%, #ffffff 0%, #f5f9ff 62%, #dbeafe 100%);
   background: radial-gradient(circle at 40% 28%, #ffffff 0%, #f5f9ff 62%, #dbeafe 100%);
-  box-shadow: 0 0 16px rgba(255,255,255,0.5), 0 5px 16px rgba(59,130,246,0.2),
-              inset 0 -4px 7px rgba(15,23,42,0.12);
-  position: relative; transform-origin: center center;
+  -webkit-box-shadow: 0 0 16px rgba(255,255,255,0.5), 0 5px 16px rgba(59,130,246,0.2), inset 0 -4px 7px rgba(15,23,42,0.12);
+  box-shadow: 0 0 16px rgba(255,255,255,0.5), 0 5px 16px rgba(59,130,246,0.2), inset 0 -4px 7px rgba(15,23,42,0.12);
+  position: relative; -webkit-transform-origin: center center; transform-origin: center center;
 }
+@media (min-width: 400px) { .eye { width: 46px; height: 46px; } }
+@media (min-width: 600px) { .eye { width: 54px; height: 54px; } }
 .eye-lashes {
   position: absolute; left:-6%; right:-6%; top:-16%; height:42%;
-  display: flex; justify-content: center; align-items: flex-end;
+  display: -webkit-flex; display: flex; -webkit-justify-content: center; justify-content: center; -webkit-align-items: flex-end; align-items: flex-end;
   padding-bottom: 2px; z-index: 6; pointer-events: none;
 }
 .eye-lashes .lash {
-  flex: 0 0 auto; width: 2px;
-  height: clamp(6px, 1.9vmin, 11px);
+  -webkit-flex: 0 0 auto; flex: 0 0 auto; width: 2px;
+  height: 8px;
   margin: 0 1px; border-radius: 2px;
+  background: -webkit-linear-gradient(top, rgba(28,24,36,0.95) 0%, rgba(28,24,36,0.2) 100%);
   background: linear-gradient(180deg, rgba(28,24,36,0.95) 0%, rgba(28,24,36,0.2) 100%);
-  transform-origin: 50% 100%; opacity: 0.9;
-  box-shadow: 0 0 1px rgba(0,0,0,0.25);
+  -webkit-transform-origin: 50% 100%; transform-origin: 50% 100%; opacity: 0.9;
+  -webkit-box-shadow: 0 0 1px rgba(0,0,0,0.25); box-shadow: 0 0 1px rgba(0,0,0,0.25);
 }
-.eye .lash:nth-child(1) { transform: rotate(-22deg); height: 78%; }
-.eye .lash:nth-child(2) { transform: rotate(-10deg); }
-.eye .lash:nth-child(3) { transform: rotate(0deg); height: 110%; }
-.eye .lash:nth-child(4) { transform: rotate(10deg); }
-.eye .lash:nth-child(5) { transform: rotate(22deg); height: 78%; }
-/* Iris via ::after */
-.eye::after {
+.eye .lash:nth-child(1) { -webkit-transform: rotate(-22deg); transform: rotate(-22deg); height: 6px; }
+.eye .lash:nth-child(2) { -webkit-transform: rotate(-10deg); transform: rotate(-10deg); }
+.eye .lash:nth-child(3) { -webkit-transform: rotate(0deg); height: 9px; }
+.eye .lash:nth-child(4) { -webkit-transform: rotate(10deg); transform: rotate(10deg); }
+.eye .lash:nth-child(5) { -webkit-transform: rotate(22deg); transform: rotate(22deg); height: 6px; }
+.eye:after {
   content: ""; position: absolute;
-  left: 50%; top: 56%; transform: translate(-50%,-50%);
+  left: 50%; top: 56%; -webkit-transform: translate(-50%,-50%); transform: translate(-50%,-50%);
   width: 42%; height: 48%; border-radius: 50%;
+  background: -webkit-radial-gradient(40% 34%, #7c3aed 0%, #4338ca 45%, #0f172a 84%, #020617 100%);
   background: radial-gradient(circle at 40% 34%, #7c3aed 0%, #4338ca 45%, #0f172a 84%, #020617 100%);
+  -webkit-box-shadow: 0 2px 10px rgba(76,29,149,0.45), inset 0 -3px 7px rgba(0,0,0,0.45);
   box-shadow: 0 2px 10px rgba(76,29,149,0.45), inset 0 -3px 7px rgba(0,0,0,0.45);
 }
-/* Catchlight via ::before */
-.eye::before {
+.eye:before {
   content: ""; position: absolute;
   left: 58%; top: 30%; width: 17%; height: 19%;
   border-radius: 50%; background: rgba(255,255,255,0.98);
-  z-index: 1; box-shadow: 0 0 6px rgba(255,255,255,0.9);
+  z-index: 1; -webkit-box-shadow: 0 0 6px rgba(255,255,255,0.9); box-shadow: 0 0 6px rgba(255,255,255,0.9);
 }
 .nose-bridge {
-  position: absolute; top: 54%; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 54%; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
   width: 12%; height: 14%;
-  background: linear-gradient(90deg, transparent 0%,
-    rgba(240,160,150,0.14) 35%, rgba(240,160,150,0.2) 50%,
-    rgba(240,160,150,0.14) 65%, transparent 100%);
+  background: -webkit-linear-gradient(left, transparent 0%, rgba(240,160,150,0.14) 35%, rgba(240,160,150,0.2) 50%, rgba(240,160,150,0.14) 65%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(240,160,150,0.14) 35%, rgba(240,160,150,0.2) 50%, rgba(240,160,150,0.14) 65%, transparent 100%);
   border-radius: 40%; pointer-events: none; z-index: 2;
 }
 .mouth {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  transform-origin: 50% 0%;
+  position: absolute; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
+  -webkit-transform-origin: 50% 0%; transform-origin: 50% 0%;
   top: 70.5%; width: 38%; max-width: 200px; height: 22px;
   border-radius: 0 0 52% 52%; border: none;
   background:
+    -webkit-radial-gradient(50% 0% ellipse, rgba(255,255,255,0.62) 0%, transparent 58%),
+    -webkit-linear-gradient(top, rgba(255,245,250,0.65) 0%, rgba(251,146,170,0.45) 38%, rgba(236,72,120,0.62) 100%);
+  background:
     radial-gradient(ellipse 95% 90% at 50% 0%, rgba(255,255,255,0.62) 0%, transparent 58%),
     linear-gradient(180deg, rgba(255,245,250,0.65) 0%, rgba(251,146,170,0.45) 38%, rgba(236,72,120,0.62) 100%);
-  box-shadow: 0 3px 0 0 #db2777, 0 8px 14px rgba(219,39,119,0.32),
-              inset 0 2px 8px rgba(255,255,255,0.45);
+  -webkit-box-shadow: 0 3px 0 0 #db2777, 0 8px 14px rgba(219,39,119,0.32), inset 0 2px 8px rgba(255,255,255,0.45);
+  box-shadow: 0 3px 0 0 #db2777, 0 8px 14px rgba(219,39,119,0.32), inset 0 2px 8px rgba(255,255,255,0.45);
   z-index: 3;
 }
 .cheek {
   position: absolute; top: 56%; width: 21%; height: 11%;
   border-radius: 50%;
+  background: -webkit-radial-gradient(circle, rgba(255,170,190,0.55) 0%, rgba(255,200,210,0.22) 42%, transparent 70%);
   background: radial-gradient(circle, rgba(255,170,190,0.55) 0%, rgba(255,200,210,0.22) 42%, transparent 70%);
   z-index: 2;
 }
 .cheek.left { left: 6%; }
 .cheek.right { right: 6%; }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   VOICE WAVE
-───────────────────────────────────────────────────────────────────────────── */
+/* ── Voice wave ── */
 .voice-wave {
-  display: flex; align-items: flex-end; justify-content: center;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: flex-end; align-items: flex-end; -webkit-justify-content: center; justify-content: center;
   width: 56%; height: 12%; margin-top: auto; padding-bottom: 2%;
-  opacity: 0.18; position: relative; flex-shrink: 0;
+  opacity: 0.18; position: relative; -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 .voice-wave span {
   width: 10%; margin: 0 1.2%; min-height: 16%; border-radius: 999px;
-  background: #8fd5ff; box-shadow: 0 0 8px rgba(125,211,252,0.45);
-  transform-origin: center bottom;
-  animation: wave 1.2s cubic-bezier(0.4,0,0.2,1) infinite;
-  animation-play-state: paused;
+  background: #8fd5ff; -webkit-box-shadow: 0 0 8px rgba(125,211,252,0.45); box-shadow: 0 0 8px rgba(125,211,252,0.45);
+  -webkit-transform-origin: center bottom; transform-origin: center bottom;
+  -webkit-animation: wave 1.2s ease-in-out infinite; animation: wave 1.2s ease-in-out infinite;
+  -webkit-animation-play-state: paused; animation-play-state: paused;
 }
-.voice-wave span:nth-child(1) { animation-delay: 0s; }
-.voice-wave span:nth-child(2) { animation-delay: 0.1s; }
-.voice-wave span:nth-child(3) { animation-delay: 0.2s; }
-.voice-wave span:nth-child(4) { animation-delay: 0.32s; }
-.voice-wave span:nth-child(5) { animation-delay: 0.44s; }
+.voice-wave span:nth-child(1) { -webkit-animation-delay: 0s; animation-delay: 0s; }
+.voice-wave span:nth-child(2) { -webkit-animation-delay: 0.1s; animation-delay: 0.1s; }
+.voice-wave span:nth-child(3) { -webkit-animation-delay: 0.2s; animation-delay: 0.2s; }
+.voice-wave span:nth-child(4) { -webkit-animation-delay: 0.32s; animation-delay: 0.32s; }
+.voice-wave span:nth-child(5) { -webkit-animation-delay: 0.44s; animation-delay: 0.44s; }
+@-webkit-keyframes wave {
+  0%,100% { -webkit-transform: scaleY(0.28); }
+  18%     { -webkit-transform: scaleY(0.55); }
+  38%     { -webkit-transform: scaleY(1.58); }
+  58%     { -webkit-transform: scaleY(0.72); }
+  78%     { -webkit-transform: scaleY(1.12); }
+}
 @keyframes wave {
   0%,100% { transform: scaleY(0.28); }
   18%     { transform: scaleY(0.55); }
@@ -938,50 +961,68 @@ body {
 .face.awake .voice-wave span,
 .face.listening .voice-wave span,
 .face.thinking .voice-wave span,
-.face.triggered .voice-wave span { animation-play-state: running; }
-.face.thinking .voice-wave span { animation-duration: 1.45s; }
-.face.speaking .voice-wave span { animation-play-state: running; animation-duration: 0.55s; }
+.face.triggered .voice-wave span { -webkit-animation-play-state: running; animation-play-state: running; }
+.face.thinking .voice-wave span { -webkit-animation-duration: 1.45s; animation-duration: 1.45s; }
+.face.speaking .voice-wave span { -webkit-animation-play-state: running; animation-play-state: running; -webkit-animation-duration: 0.55s; animation-duration: 0.55s; }
 .face.speaking .voice-wave { opacity: 1; }
-.face.paused .voice-wave span { background: #fca5a5; box-shadow: none; }
+.face.paused .voice-wave span { background: #fca5a5; -webkit-box-shadow: none; box-shadow: none; }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   SPARKLES
-───────────────────────────────────────────────────────────────────────────── */
-.face-sparkles { position:absolute; inset:0; pointer-events:none; z-index:10; overflow:visible; }
+/* ── Sparkles ── */
+.face-sparkles { position:absolute; top:0;left:0;right:0;bottom:0; pointer-events:none; z-index:10; overflow:visible; }
 .sp {
   position: absolute; font-size: 0.6rem; line-height: 1;
   color: #f5d0fe; opacity: 0;
   text-shadow: 0 0 8px #c084fc, 0 0 18px rgba(192,132,252,0.45);
-  animation: sparkle-float 4.2s ease-in-out infinite;
+  -webkit-animation: sparkle-float 4.2s ease-in-out infinite; animation: sparkle-float 4.2s ease-in-out infinite;
 }
-.sp1 { top:3%;  left:9%;  animation-delay:0s; }
-.sp2 { top:7%;  right:11%; font-size:0.45rem; animation-delay:1.05s; }
-.sp3 { top:1%;  left:52%; animation-delay:2.1s; }
-.sp4 { top:11%; right:5%; font-size:0.42rem; animation-delay:0.62s; }
+.sp1 { top:3%;  left:9%;  -webkit-animation-delay:0s; animation-delay:0s; }
+.sp2 { top:7%;  right:11%; font-size:0.45rem; -webkit-animation-delay:1.05s; animation-delay:1.05s; }
+.sp3 { top:1%;  left:52%; -webkit-animation-delay:2.1s; animation-delay:2.1s; }
+.sp4 { top:11%; right:5%; font-size:0.42rem; -webkit-animation-delay:0.62s; animation-delay:0.62s; }
+@-webkit-keyframes sparkle-float {
+  0%,100% { opacity:0;    -webkit-transform: translateY(0)    rotate(0deg)  scale(0.5); }
+  25%,75% { opacity:0.92; -webkit-transform: translateY(-9px)  rotate(22deg) scale(1); }
+  50%     { opacity:0.6;  -webkit-transform: translateY(-16px) rotate(44deg) scale(0.82); }
+}
 @keyframes sparkle-float {
   0%,100% { opacity:0;    transform: translateY(0)    rotate(0deg)  scale(0.5); }
   25%,75% { opacity:0.92; transform: translateY(-9px)  rotate(22deg) scale(1); }
   50%     { opacity:0.6;  transform: translateY(-16px) rotate(44deg) scale(0.82); }
 }
-.face.awake    ~ .face-sparkles .sp { color:#fde68a; text-shadow:0 0 8px #fb923c,0 0 18px rgba(251,146,60,0.4); animation-duration:2.2s; }
-.face.thinking ~ .face-sparkles .sp { color:#e879f9; text-shadow:0 0 8px #c084fc,0 0 18px rgba(232,121,249,0.45); animation-duration:3s; }
-.face.triggered ~ .face-sparkles .sp { color:#fb923c; text-shadow:0 0 8px #f97316,0 0 18px rgba(249,115,22,0.4); animation-duration:1.6s; }
+.face.awake    ~ .face-sparkles .sp { color:#fde68a; text-shadow:0 0 8px #fb923c,0 0 18px rgba(251,146,60,0.4); -webkit-animation-duration:2.2s; animation-duration:2.2s; }
+.face.thinking ~ .face-sparkles .sp { color:#e879f9; text-shadow:0 0 8px #c084fc,0 0 18px rgba(232,121,249,0.45); -webkit-animation-duration:3s; animation-duration:3s; }
+.face.triggered ~ .face-sparkles .sp { color:#fb923c; text-shadow:0 0 8px #f97316,0 0 18px rgba(249,115,22,0.4); -webkit-animation-duration:1.6s; animation-duration:1.6s; }
 .face.paused ~ .face-sparkles .sp,
-.face.sleeping ~ .face-sparkles .sp { animation:none!important; opacity:0!important; }
+.face.sleeping ~ .face-sparkles .sp { -webkit-animation:none!important; animation:none!important; opacity:0!important; }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   STATE EXPRESSIONS  (exact copy from Pinky)
-───────────────────────────────────────────────────────────────────────────── */
+/* ── State expressions ── */
+@-webkit-keyframes lip-soft {
+  0%,100% { -webkit-transform: translateX(-50%) scale(1,1); }
+  28%     { -webkit-transform: translateX(-50%) scale(1.03,1.05); }
+  48%     { -webkit-transform: translateX(-50%) scale(1.08,1.14); }
+  72%     { -webkit-transform: translateX(-50%) scale(1.02,1.04); }
+}
 @keyframes lip-soft {
   0%,100% { transform: translateX(-50%) scale(1,1); }
   28%     { transform: translateX(-50%) scale(1.03,1.05); }
   48%     { transform: translateX(-50%) scale(1.08,1.14); }
   72%     { transform: translateX(-50%) scale(1.02,1.04); }
 }
+@-webkit-keyframes lip-think {
+  0%,100% { -webkit-transform: translateX(-50%) scale(1,1); opacity:0.9; }
+  45%     { -webkit-transform: translateX(-50%) scale(0.9,0.93); opacity:1; }
+  70%     { -webkit-transform: translateX(-50%) scale(0.95,0.98); opacity:0.94; }
+}
 @keyframes lip-think {
   0%,100% { transform: translateX(-50%) scale(1,1); opacity:0.9; }
   45%     { transform: translateX(-50%) scale(0.9,0.93); opacity:1; }
   70%     { transform: translateX(-50%) scale(0.95,0.98); opacity:0.94; }
+}
+@-webkit-keyframes eye-glow {
+  0%,100% { opacity:1;    -webkit-transform:translate(-50%,-50%) scale(1); }
+  32%     { opacity:0.78; -webkit-transform:translate(-50%,-50%) scale(0.91); }
+  55%     { opacity:0.68; -webkit-transform:translate(-50%,-50%) scale(0.85); }
+  82%     { opacity:0.92; -webkit-transform:translate(-50%,-50%) scale(0.96); }
 }
 @keyframes eye-glow {
   0%,100% { opacity:1;    transform:translate(-50%,-50%) scale(1); }
@@ -989,16 +1030,33 @@ body {
   55%     { opacity:0.68; transform:translate(-50%,-50%) scale(0.85); }
   82%     { opacity:0.92; transform:translate(-50%,-50%) scale(0.96); }
 }
+@-webkit-keyframes eye-glow-think {
+  0%,100% { opacity:1;    -webkit-transform:translate(-46%,-50%) scale(1); }
+  35%     { opacity:0.8;  -webkit-transform:translate(-46%,-50%) scale(0.9); }
+  60%     { opacity:0.72; -webkit-transform:translate(-46%,-50%) scale(0.84); }
+  85%     { opacity:0.88; -webkit-transform:translate(-46%,-50%) scale(0.94); }
+}
 @keyframes eye-glow-think {
   0%,100% { opacity:1;    transform:translate(-46%,-50%) scale(1); }
   35%     { opacity:0.8;  transform:translate(-46%,-50%) scale(0.9); }
   60%     { opacity:0.72; transform:translate(-46%,-50%) scale(0.84); }
   85%     { opacity:0.88; transform:translate(-46%,-50%) scale(0.94); }
 }
+@-webkit-keyframes eye-sparkle {
+  0%,100% { -webkit-transform:scale(1); opacity:1; }
+  38%     { -webkit-transform:scale(1.12); opacity:0.88; }
+  62%     { -webkit-transform:scale(1.04); opacity:0.95; }
+}
 @keyframes eye-sparkle {
   0%,100% { transform:scale(1); opacity:1; }
   38%     { transform:scale(1.12); opacity:0.88; }
   62%     { transform:scale(1.04); opacity:0.95; }
+}
+@-webkit-keyframes eye-scan {
+  0%,100% { -webkit-transform:translate(-50%,-50%); }
+  22%     { -webkit-transform:translate(-55%,-51%); }
+  48%     { -webkit-transform:translate(-42%,-49%); }
+  72%     { -webkit-transform:translate(-56%,-50%); }
 }
 @keyframes eye-scan {
   0%,100% { transform:translate(-50%,-50%); }
@@ -1006,638 +1064,359 @@ body {
   48%     { transform:translate(-42%,-49%); }
   72%     { transform:translate(-56%,-50%); }
 }
+@-webkit-keyframes cheek-pulse { 0%,100%{opacity:0.65} 50%{opacity:1} }
 @keyframes cheek-pulse { 0%,100%{opacity:0.65} 50%{opacity:1} }
 
-/* Listening / idle-awake */
 .face.listening .mouth, .face.awake .mouth {
   width: 36%; top: 70.5%; height: 21px;
-  animation: lip-soft 2s ease-in-out infinite;
+  -webkit-animation: lip-soft 2s ease-in-out infinite; animation: lip-soft 2s ease-in-out infinite;
 }
-.face.listening .eye::after { animation: eye-glow 1.4s ease-in-out infinite; }
-.face.listening .eye::before { animation: eye-sparkle 2.4s ease-in-out infinite; }
-.face.listening .cheek { animation: cheek-pulse 3.8s ease-in-out infinite; }
-/* Awake (session open) */
-.face.awake .brow.left  { transform: rotate(-8deg) translateY(0); }
-.face.awake .brow.right { transform: rotate(8deg) translateY(0); }
-.face.awake .eye::after { animation: eye-glow 1.05s ease-in-out infinite; }
-.face.awake .eye::before { animation: eye-sparkle 1.6s ease-in-out infinite; }
-.face.awake .cheek { animation: cheek-pulse 1.5s ease-in-out infinite; }
-.face.awake .mouth { animation: lip-soft 1.8s ease-in-out infinite; }
-/* Thinking */
-.face.thinking .eye::after { top:46%; left:52%; animation: eye-glow-think 2.2s ease-in-out infinite; }
-.face.thinking .brow.left  { transform: rotate(-5deg) translateY(0); }
-.face.thinking .brow.right { transform: rotate(5deg) translateY(0); }
+.face.listening .eye:after { -webkit-animation: eye-glow 1.4s ease-in-out infinite; animation: eye-glow 1.4s ease-in-out infinite; }
+.face.listening .eye:before { -webkit-animation: eye-sparkle 2.4s ease-in-out infinite; animation: eye-sparkle 2.4s ease-in-out infinite; }
+.face.listening .cheek { -webkit-animation: cheek-pulse 3.8s ease-in-out infinite; animation: cheek-pulse 3.8s ease-in-out infinite; }
+.face.awake .brow.left  { -webkit-transform: rotate(-8deg) translateY(0); transform: rotate(-8deg) translateY(0); }
+.face.awake .brow.right { -webkit-transform: rotate(8deg) translateY(0); transform: rotate(8deg) translateY(0); }
+.face.awake .eye:after { -webkit-animation: eye-glow 1.05s ease-in-out infinite; animation: eye-glow 1.05s ease-in-out infinite; }
+.face.awake .eye:before { -webkit-animation: eye-sparkle 1.6s ease-in-out infinite; animation: eye-sparkle 1.6s ease-in-out infinite; }
+.face.awake .cheek { -webkit-animation: cheek-pulse 1.5s ease-in-out infinite; animation: cheek-pulse 1.5s ease-in-out infinite; }
+.face.awake .mouth { -webkit-animation: lip-soft 1.8s ease-in-out infinite; animation: lip-soft 1.8s ease-in-out infinite; }
+.face.thinking .eye:after { top:46%; left:52%; -webkit-animation: eye-glow-think 2.2s ease-in-out infinite; animation: eye-glow-think 2.2s ease-in-out infinite; }
+.face.thinking .brow.left  { -webkit-transform: rotate(-5deg) translateY(0); transform: rotate(-5deg) translateY(0); }
+.face.thinking .brow.right { -webkit-transform: rotate(5deg) translateY(0); transform: rotate(5deg) translateY(0); }
 .face.thinking .mouth {
   width: 32%; height: 13px; top: 71.5%; border-radius: 999px;
+  background: -webkit-linear-gradient(top, rgba(253,242,248,0.5), rgba(236,72,153,0.48));
   background: linear-gradient(180deg, rgba(253,242,248,0.5), rgba(236,72,153,0.48));
+  -webkit-box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
   box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
-  animation: lip-think 1.8s ease-in-out infinite;
+  -webkit-animation: lip-think 1.8s ease-in-out infinite; animation: lip-think 1.8s ease-in-out infinite;
 }
-.face.thinking .eye::before { animation: eye-sparkle 3.4s ease-in-out infinite; }
-.face.thinking .cheek { animation: cheek-pulse 3s ease-in-out infinite; }
-/* Triggered (action fired / detection) */
+.face.thinking .eye:before { -webkit-animation: eye-sparkle 3.4s ease-in-out infinite; animation: eye-sparkle 3.4s ease-in-out infinite; }
+.face.thinking .cheek { -webkit-animation: cheek-pulse 3s ease-in-out infinite; animation: cheek-pulse 3s ease-in-out infinite; }
 .face.triggered .mouth {
   width: 20%; height: 18%; border-radius: 50%; top: 69%;
   border: 3px solid #f472b6;
+  background: -webkit-radial-gradient(40% 35%, rgba(255,255,255,0.35), rgba(251,113,133,0.45));
   background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.35), rgba(251,113,133,0.45));
+  -webkit-box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
   box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
-  animation: lip-soft 0.45s ease-in-out infinite;
+  -webkit-animation: lip-soft 0.45s ease-in-out infinite; animation: lip-soft 0.45s ease-in-out infinite;
 }
-.face.triggered .eye::after { animation: eye-glow 0.6s ease-in-out infinite; }
-.face.triggered .eye::before { animation: eye-sparkle 1.1s ease-in-out infinite; }
-/* Speaking */
-.face.speaking .mouth { animation: lip-soft 0.32s ease-in-out infinite; }
-.face.speaking .eye { animation: none; transform: scaleY(1); }
-.face.speaking .eye::after { animation: eye-glow 1.8s ease-in-out infinite; }
-/* Paused / muted */
-.face.paused .eye { transform: none; animation: none; }
-.face.paused .eye::before, .face.paused .eye::after { animation: none !important; }
-.face.paused .eye-lashes { opacity: 0.38; filter: saturate(0.85); }
-.face.paused .head { filter: saturate(0.82) brightness(0.96); }
-.face.paused .eye::after { background: #5a3a40; }
+.face.triggered .eye:after { -webkit-animation: eye-glow 0.6s ease-in-out infinite; animation: eye-glow 0.6s ease-in-out infinite; }
+.face.triggered .eye:before { -webkit-animation: eye-sparkle 1.1s ease-in-out infinite; animation: eye-sparkle 1.1s ease-in-out infinite; }
+.face.speaking .mouth { -webkit-animation: lip-soft 0.32s ease-in-out infinite; animation: lip-soft 0.32s ease-in-out infinite; }
+.face.speaking .eye { -webkit-animation: none; animation: none; -webkit-transform: scaleY(1); transform: scaleY(1); }
+.face.speaking .eye:after { -webkit-animation: eye-glow 1.8s ease-in-out infinite; animation: eye-glow 1.8s ease-in-out infinite; }
+.face.paused .eye { -webkit-transform: none; transform: none; -webkit-animation: none; animation: none; }
+.face.paused .eye:before, .face.paused .eye:after { -webkit-animation: none !important; animation: none !important; }
+.face.paused .eye-lashes { opacity: 0.38; -webkit-filter: saturate(0.85); filter: saturate(0.85); }
+.face.paused .head { -webkit-filter: saturate(0.82) brightness(0.96); filter: saturate(0.82) brightness(0.96); }
+.face.paused .eye:after { background: #5a3a40; }
 .face.paused .mouth {
   width: 30%; height: 12px; border-radius: 999px; top: 74%;
+  background: -webkit-linear-gradient(top, rgba(80,50,58,0.5), rgba(120,60,72,0.65));
   background: linear-gradient(180deg, rgba(80,50,58,0.5), rgba(120,60,72,0.65));
+  -webkit-box-shadow: 0 -3px 0 0 rgba(120,60,72,0.95), inset 0 2px 4px rgba(0,0,0,0.15);
   box-shadow: 0 -3px 0 0 rgba(120,60,72,0.95), inset 0 2px 4px rgba(0,0,0,0.15);
-  animation: none !important;
+  -webkit-animation: none !important; animation: none !important;
 }
 .face.paused .cheek { opacity: 0.3; }
-/* Sleeping (idle, no session) */
+@-webkit-keyframes sleep-breathe { 0%,100%{opacity:1} 50%{opacity:0.7} }
 @keyframes sleep-breathe { 0%,100%{opacity:1} 50%{opacity:0.7} }
 .face.sleeping {
-  filter: saturate(0.2) brightness(0.55);
-  transition: filter 0.8s ease;
+  -webkit-filter: saturate(0.2) brightness(0.55); filter: saturate(0.2) brightness(0.55);
+  -webkit-transition: filter 0.8s ease; transition: filter 0.8s ease;
 }
 .face.sleeping .eye {
-  transform: scaleY(0.18);
-  transition: transform 0.6s ease;
-  animation: none !important;
+  -webkit-transform: scaleY(0.18); transform: scaleY(0.18);
+  -webkit-transition: transform 0.6s ease; transition: transform 0.6s ease;
+  -webkit-animation: none !important; animation: none !important;
 }
-.face.sleeping .eye::before, .face.sleeping .eye::after { animation: none !important; opacity: 0 !important; }
-.face.sleeping .mouth { width:16%; height:7px; border-radius:2px; top:69.5%; opacity:0.35; animation:none!important; }
-.face.sleeping .cheek { opacity:0.15; animation:none!important; }
+.face.sleeping .eye:before, .face.sleeping .eye:after { -webkit-animation: none !important; animation: none !important; opacity: 0 !important; }
+.face.sleeping .mouth { width:16%; height:7px; border-radius:2px; top:69.5%; opacity:0.35; -webkit-animation:none!important; animation:none!important; }
+.face.sleeping .cheek { opacity:0.15; -webkit-animation:none!important; animation:none!important; }
 .face.sleeping .voice-wave { opacity:0!important; }
+.face.awake, .face.thinking, .face.triggered, .face.listening { -webkit-transition: filter 0.6s ease; transition: filter 0.6s ease; }
+.face.awake .eye, .face.thinking .eye, .face.triggered .eye { -webkit-transition: transform 0.5s ease; transition: transform 0.5s ease; }
 
-/* Smooth transitions when waking */
-.face.awake, .face.thinking, .face.triggered, .face.listening { transition: filter 0.6s ease; }
-.face.awake .eye, .face.thinking .eye, .face.triggered .eye { transition: transform 0.5s ease; }
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   BOTTOM NAV
-───────────────────────────────────────────────────────────────────────────── */
+/* ── Bottom nav ── */
 .pinky-nav {
-  display: flex; border-top: 1px solid var(--border);
-  flex-shrink: 0; background: rgba(0,0,0,0.35);
+  display: -webkit-flex; display: flex; border-top: 1px solid #24243a;
+  -webkit-flex-shrink: 0; flex-shrink: 0; background: rgba(0,0,0,0.35);
 }
 .pinky-nav-item {
-  flex: 1; padding: 10px 0 14px;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  cursor: pointer; opacity: 0.45; transition: opacity 0.2s;
-  border: none; background: none; color: var(--text);
+  -webkit-flex: 1; flex: 1; padding: 10px 0 14px;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; gap: 3px;
+  cursor: pointer; opacity: 0.45; -webkit-transition: opacity 0.2s; transition: opacity 0.2s;
+  border: none; background: none; color: #e8e8f4;
   font-size: 0.62rem; letter-spacing: 0.3px;
+  min-height: 56px; -webkit-justify-content: center; justify-content: center;
 }
 .pinky-nav-item:hover { opacity: 0.75; }
 .pinky-nav-item.active { opacity: 1; color: #c084fc; }
 .pinky-nav-ic { font-size: 1.2rem; line-height: 1; }
 
-/* History panel */
-.history-area { flex:1; overflow-y:auto; padding:14px; display:none; flex-direction:column; gap:10px; }
-.history-area.open { display:flex; }
-.history-area::-webkit-scrollbar { width:3px; }
-.history-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
-.hist-day-sep { text-align:center; font-size:0.72rem; color:#6b7280; margin:6px 0 2px;
-                letter-spacing:0.04em; }
-.hist-source  { font-size:0.68rem; color:#6b7280; margin-top:2px; text-align:right; }
-.msg-row { display:flex; gap:8px; }
-.msg-row.user { justify-content:flex-end; }
-.msg-row.pinku { justify-content:flex-start; }
-.bubble {
-  max-width: 78%; padding: 9px 13px; border-radius: 18px;
-  font-size: 0.88rem; line-height: 1.45;
-}
-.bubble.user { background: linear-gradient(135deg,#7c3aed,#4c1d95); border-bottom-right-radius:4px; }
-.bubble.pinku { background:rgba(255,255,255,0.07); border:1px solid var(--border); border-bottom-left-radius:4px; }
-.msg-time { font-size:0.65rem; color:var(--muted); margin-top:3px; }
-.msg-row.user .msg-time { text-align:right; }
-.day-sep { text-align:center; font-size:0.68rem; color:var(--muted); padding:8px 0; }
-
-/* Camera panel */
+/* ── Camera panel ── */
 .camera-area {
-  flex:1; display:none; flex-direction:column;
-  align-items:center; overflow:hidden; gap:0;
+  display: none; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; overflow: hidden; gap: 0;
 }
-.camera-area.open { display:flex; }
+.camera-area.open {
+  display: -webkit-flex; display: flex;
+  -webkit-flex: 1; flex: 1;
+}
 .cam-feed-wrap {
-  position:relative; width:100%; max-width:640px; flex-shrink:0;
-  background:#000; aspect-ratio:4/3; overflow:hidden;
+  position: relative; width: 100%; max-width: 640px; -webkit-flex-shrink: 0; flex-shrink: 0;
+  background: #000; overflow: hidden;
+  padding-top: 75%;
 }
-#cam-img { width:100%; height:100%; object-fit:contain; display:block; }
+.cam-feed-wrap > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.cam-feed-wrap img { object-fit: contain; display: none; }
+.cam-feed-wrap img.visible { display: block; }
 .cam-offline {
-  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  font-size:0.88rem; color:var(--muted); background:rgba(0,0,0,0.6);
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  font-size: 0.88rem; color: #666683; background: rgba(0,0,0,0.6);
 }
 .cam-toolbar {
-  width:100%; max-width:640px; padding:5px 10px;
-  display:flex; justify-content:space-between; align-items:center;
-  border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2);
+  width: 100%; max-width: 640px; padding: 5px 10px;
+  display: -webkit-flex; display: flex;
+  -webkit-justify-content: space-between; justify-content: space-between;
+  -webkit-align-items: center; align-items: center;
+  border-bottom: 1px solid #24243a; background: rgba(0,0,0,0.2);
 }
 .cam-detect-feed {
-  flex:1; overflow-y:auto; width:100%; max-width:640px; padding:8px 12px;
+  -webkit-flex: 1; flex: 1; overflow-y: auto; width: 100%; max-width: 640px; padding: 8px 12px;
 }
-.cam-detect-feed::-webkit-scrollbar { width:3px; }
-.cam-detect-feed::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.cam-detect-feed::-webkit-scrollbar { width: 3px; }
+.cam-detect-feed::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
 .det-row {
-  display:flex; align-items:baseline; gap:8px;
-  padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04);
-  font-size:0.78rem; color:var(--muted);
+  display: -webkit-flex; display: flex; -webkit-align-items: baseline; align-items: baseline; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.78rem; color: #666683;
 }
-.det-row .det-time { flex-shrink:0; font-size:0.68rem; color:#444466; }
-.det-row .det-body { flex:1; color:var(--text); }
+.det-row .det-time { -webkit-flex-shrink: 0; flex-shrink: 0; font-size: 0.68rem; color: #444466; }
+.det-row .det-body { -webkit-flex: 1; flex: 1; color: #e8e8f4; }
 .det-chip {
-  display:inline-block; padding:1px 6px; border-radius:6px; font-size:0.7rem;
-  margin:0 2px;
+  display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 0.7rem; margin: 0 2px;
 }
-.det-chip.person { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
-.det-chip.gesture{ background:rgba(192,132,252,0.15); color:#c084fc; border:1px solid rgba(192,132,252,0.3); }
-.det-chip.object { background:rgba(251,191,36,0.13); color:#fbbf24; border:1px solid rgba(251,191,36,0.28); }
+.det-chip.person  { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+.det-chip.gesture { background: rgba(192,132,252,0.15); color: #c084fc; border: 1px solid rgba(192,132,252,0.3); }
+.det-chip.object  { background: rgba(251,191,36,0.13); color: #fbbf24; border: 1px solid rgba(251,191,36,0.28); }
 
-/* Darts panel */
+/* ── Darts panel ── */
 .darts-area {
-  flex:1; display:none; flex-direction:column;
-  align-items:center; overflow:hidden; gap:0;
+  display: none; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; overflow: hidden; gap: 0;
 }
-.darts-area.open { display:flex; }
+.darts-area.open {
+  display: -webkit-flex; display: flex;
+  -webkit-flex: 1; flex: 1;
+}
 .darts-toolbar {
-  width:100%; max-width:640px; padding:6px 10px;
-  display:flex; justify-content:center; align-items:center; gap:8px;
-  border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2);
-  flex-shrink:0;
+  width: 100%; max-width: 640px; padding: 6px 10px;
+  display: -webkit-flex; display: flex;
+  -webkit-justify-content: center; justify-content: center; -webkit-align-items: center; align-items: center; gap: 8px;
+  border-bottom: 1px solid #24243a; background: rgba(0,0,0,0.2); -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 .darts-btn {
-  padding:5px 12px; border-radius:8px; font-size:0.8rem; cursor:pointer;
-  border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text);
-  transition:background 0.15s;
+  padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;
+  border: 1px solid #24243a; background: rgba(255,255,255,0.05); color: #e8e8f4;
+  -webkit-transition: background 0.15s; transition: background 0.15s;
+  min-height: 44px;
 }
-.darts-btn:hover  { background:rgba(255,255,255,0.1); }
-.darts-btn:disabled{ opacity:0.5; cursor:default; }
-.darts-btn.speak-btn { border-color:rgba(192,132,252,0.45); color:#c084fc; }
-.darts-btn.cal-btn   { border-color:rgba(251,191,36,0.45);  color:#fbbf24; }
-.darts-btn.clear-btn { border-color:rgba(248,113,113,0.4);  color:#f87171; }
-.darts-btn.next-btn  { border-color:rgba(74,222,128,0.45);  color:#4ade80; }
-.darts-btn.new-btn   { border-color:rgba(248,113,113,0.4);  color:#f87171; }
+.darts-btn:hover  { background: rgba(255,255,255,0.1); }
+.darts-btn:disabled { opacity: 0.5; cursor: default; }
+.darts-btn.speak-btn { border-color: rgba(192,132,252,0.45); color: #c084fc; }
+.darts-btn.cal-btn   { border-color: rgba(251,191,36,0.45); color: #fbbf24; }
+.darts-btn.next-btn  { border-color: rgba(74,222,128,0.45); color: #4ade80; }
+.darts-btn.new-btn   { border-color: rgba(248,113,113,0.4); color: #f87171; }
 .darts-btn.next-btn.awaiting {
-  background:rgba(74,222,128,0.18); font-weight:700;
-  animation:pulse-green 1.1s ease-in-out infinite;
+  background: rgba(74,222,128,0.18); font-weight: 700;
+  -webkit-animation: pulse-green 1.1s ease-in-out infinite; animation: pulse-green 1.1s ease-in-out infinite;
+}
+@-webkit-keyframes pulse-green {
+  0%,100% { -webkit-box-shadow: 0 0 6px rgba(74,222,128,0.25); }
+  50%     { -webkit-box-shadow: 0 0 18px rgba(74,222,128,0.55); }
 }
 @keyframes pulse-green {
-  0%,100% { box-shadow:0 0 6px rgba(74,222,128,0.25); }
-  50%     { box-shadow:0 0 18px rgba(74,222,128,0.55); }
+  0%,100% { box-shadow: 0 0 6px rgba(74,222,128,0.25); }
+  50%     { box-shadow: 0 0 18px rgba(74,222,128,0.55); }
 }
 .darts-gamebar {
-  width:100%; max-width:640px; flex-shrink:0;
-  display:flex; align-items:center; gap:10px;
-  padding:7px 14px;
-  background:rgba(0,0,0,0.3);
-  border-bottom:1px solid var(--border);
+  width: 100%; max-width: 640px; -webkit-flex-shrink: 0; flex-shrink: 0;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px;
+  padding: 7px 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #24243a;
 }
-.dgb-player { font-size:1rem; font-weight:800; color:#c084fc; min-width:26px; }
-.dgb-dots   { flex:1; font-size:1.15rem; letter-spacing:3px; }
-.dgb-score  { font-size:1rem; font-weight:700; color:#fbbf24; }
+.dgb-player { font-size: 1rem; font-weight: 800; color: #c084fc; min-width: 26px; }
+.dgb-dots   { -webkit-flex: 1; flex: 1; font-size: 1.15rem; letter-spacing: 3px; }
+.dgb-score  { font-size: 1rem; font-weight: 700; color: #fbbf24; }
 .darts-top-row {
-  display:flex; flex-direction:row; align-items:flex-start;
-  width:100%; max-width:860px; gap:0; flex-shrink:0;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: row; flex-direction: row; -webkit-align-items: flex-start; align-items: flex-start;
+  width: 100%; max-width: 860px; gap: 0; -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 .darts-leaderboard {
-  flex:1; min-width:130px; max-width:190px; flex-shrink:0;
-  padding:6px 8px 6px; align-self:stretch;
-  background:rgba(255,255,255,0.03);
-  border-left:1px solid rgba(255,255,255,0.07);
-  border-radius:0 8px 8px 0; overflow-y:auto;
+  -webkit-flex: 1; flex: 1; min-width: 130px; max-width: 190px; -webkit-flex-shrink: 0; flex-shrink: 0;
+  padding: 6px 8px; -webkit-align-self: stretch; align-self: stretch;
+  background: rgba(255,255,255,0.03);
+  border-left: 1px solid rgba(255,255,255,0.07);
+  border-radius: 0 8px 8px 0; overflow-y: auto;
 }
-.dart-lb-title {
-  font-size:0.65rem; text-transform:uppercase; letter-spacing:0.07em;
-  color:#64748b; padding:4px 0 3px;
-}
-.dart-lb-empty {
-  font-size:0.7rem; color:#475569; padding:6px 2px; text-align:center;
-}
+.dart-lb-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; padding: 4px 0 3px; }
+.dart-lb-empty { font-size: 0.7rem; color: #475569; padding: 6px 2px; text-align: center; }
 .dart-lb-row {
-  display:flex; align-items:center; gap:6px;
-  padding:5px 6px; border-radius:8px; margin-bottom:4px;
-  background:rgba(255,255,255,0.04);
-  border:1px solid rgba(255,255,255,0.05);
-  flex-wrap:wrap;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 6px;
+  padding: 5px 6px; border-radius: 8px; margin-bottom: 4px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.05);
+  -webkit-flex-wrap: wrap; flex-wrap: wrap;
 }
-.dart-lb-row.lb-active { border-color:rgba(192,132,252,0.35); background:rgba(192,132,252,0.06); }
-.dart-lb-player { font-size:0.85rem; font-weight:800; color:#c084fc; min-width:22px; }
-.dart-lb-turns  { font-size:0.65rem; color:#64748b; flex:1; }
-.dart-lb-shots  { font-size:0.65rem; color:#94a3b8; width:100%; padding-left:2px; }
-.dart-lb-total  { font-size:1rem; font-weight:800; text-align:right; }
-#darts-hit-layer { position:absolute; inset:0; pointer-events:none; }
+.dart-lb-row.lb-active { border-color: rgba(192,132,252,0.35); background: rgba(192,132,252,0.06); }
+.dart-lb-player { font-size: 0.85rem; font-weight: 800; color: #c084fc; min-width: 22px; }
+.dart-lb-turns  { font-size: 0.65rem; color: #64748b; -webkit-flex: 1; flex: 1; }
+.dart-lb-shots  { font-size: 0.65rem; color: #94a3b8; width: 100%; padding-left: 2px; }
+.dart-lb-total  { font-size: 1rem; font-weight: 800; text-align: right; }
+.darts-hit-layer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
 .dart-hit-dot {
-  position:absolute;
-  width:28px; height:28px; border-radius:50%;
-  transform:translate(-50%,-50%);
-  display:flex; align-items:center; justify-content:center;
-  font-size:0.6rem; font-weight:800; color:#fff;
-  border:2px solid rgba(255,255,255,0.8);
-  box-shadow:0 0 10px rgba(0,0,0,0.7);
-  animation:dart-land 0.28s cubic-bezier(0.34,1.56,0.64,1);
-  pointer-events:none;
+  position: absolute;
+  width: 28px; height: 28px; border-radius: 50%;
+  -webkit-transform: translate(-50%,-50%); transform: translate(-50%,-50%);
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 800; color: #fff;
+  border: 2px solid rgba(255,255,255,0.8);
+  -webkit-box-shadow: 0 0 10px rgba(0,0,0,0.7); box-shadow: 0 0 10px rgba(0,0,0,0.7);
+  -webkit-animation: dart-land 0.28s ease; animation: dart-land 0.28s ease;
+  pointer-events: none;
+}
+@-webkit-keyframes dart-land {
+  0%   { -webkit-transform: translate(-50%,-50%) scale(0.2); opacity: 0.5; }
+  70%  { -webkit-transform: translate(-50%,-50%) scale(1.18); }
+  100% { -webkit-transform: translate(-50%,-50%) scale(1); opacity: 1; }
 }
 @keyframes dart-land {
-  0%   { transform:translate(-50%,-50%) scale(0.2); opacity:0.5; }
-  70%  { transform:translate(-50%,-50%) scale(1.18); }
-  100% { transform:translate(-50%,-50%) scale(1); opacity:1; }
+  0%   { transform: translate(-50%,-50%) scale(0.2); opacity: 0.5; }
+  70%  { transform: translate(-50%,-50%) scale(1.18); }
+  100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
 }
 .dart-score-badge {
-  position:absolute; top:-16px; left:50%; transform:translateX(-50%);
-  background:rgba(0,0,0,0.75); color:#fff; font-size:0.58rem; font-weight:700;
-  padding:1px 5px; border-radius:4px; white-space:nowrap;
-  border:1px solid rgba(255,255,255,0.2);
+  position: absolute; top: -16px; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; font-size: 0.58rem; font-weight: 700;
+  padding: 1px 5px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.2);
 }
 .darts-score-list {
-  width:100%; max-width:640px; flex:1; overflow-y:auto;
-  padding:8px 14px; display:flex; flex-direction:column; gap:4px;
+  width: 100%; max-width: 640px; -webkit-flex: 1; flex: 1; overflow-y: auto;
+  padding: 8px 14px; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; gap: 4px;
 }
-.darts-score-list::-webkit-scrollbar { width:3px; }
-.darts-score-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.darts-score-list::-webkit-scrollbar { width: 3px; }
+.darts-score-list::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
 .dart-score-row {
-  display:flex; align-items:center; gap:10px;
-  padding:5px 8px; border-radius:8px;
-  background:rgba(255,255,255,0.04);
-  border:1px solid var(--border);
-  font-size:0.82rem;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px;
+  padding: 5px 8px; border-radius: 8px;
+  background: rgba(255,255,255,0.04); border: 1px solid #24243a;
+  font-size: 0.82rem;
 }
-.dart-score-num {
-  font-size:1.1rem; font-weight:800; min-width:38px; text-align:center;
-}
-.dart-score-label { flex:1; color:var(--muted); }
-.dart-score-pos   { font-size:0.7rem; color:#64748b; font-family:monospace; }
+.dart-score-num   { font-size: 1.1rem; font-weight: 800; min-width: 38px; text-align: center; }
+.dart-score-label { -webkit-flex: 1; flex: 1; color: #666683; }
+.dart-score-pos   { font-size: 0.7rem; color: #64748b; font-family: monospace; }
 
-
-/* Log panel */
+/* ── Log panel ── */
 .log-area {
-  flex:1; overflow-y:auto; padding:0; display:none; flex-direction:column;
-  width:100%;
+  overflow-y: auto; padding: 0; display: none; -webkit-flex-direction: column; flex-direction: column; width: 100%;
 }
-.log-area.open { display:flex; }
-.log-area::-webkit-scrollbar { width:4px; }
-.log-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.log-area.open {
+  display: -webkit-flex; display: flex;
+  -webkit-flex: 1; flex: 1;
+}
+.log-area::-webkit-scrollbar { width: 4px; }
+.log-area::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
 .log-toolbar {
-  flex-shrink:0; padding:8px 20px; border-bottom:1px solid var(--border);
-  display:flex; justify-content:space-between; align-items:center;
-  background:rgba(0,0,0,0.25); font-size:0.8rem; color:var(--muted);
+  -webkit-flex-shrink: 0; flex-shrink: 0; padding: 8px 20px; border-bottom: 1px solid #24243a;
+  display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; -webkit-align-items: center; align-items: center;
+  background: rgba(0,0,0,0.25); font-size: 0.8rem; color: #666683;
 }
 .log-clear-btn {
-  font-size:0.75rem; padding:4px 12px; border-radius:6px; cursor:pointer;
-  background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--muted);
+  font-size: 0.75rem; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid #24243a; color: #666683;
+  min-height: 36px;
 }
-.log-clear-btn:hover { background:rgba(255,255,255,0.1); }
+.log-clear-btn:hover { background: rgba(255,255,255,0.1); }
 .log-entries {
-  flex:1; overflow-y:auto; padding:0;
-  display:flex; flex-direction:column; gap:0;
-  width:100%; box-sizing:border-box;
+  -webkit-flex: 1; flex: 1; overflow-y: auto; padding: 0;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; gap: 0;
+  width: 100%;
 }
-.log-entries::-webkit-scrollbar { width:4px; }
-.log-entries::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.log-entries::-webkit-scrollbar { width: 4px; }
+.log-entries::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
 .log-entry {
-  padding:10px 16px 8px 14px;
-  border-bottom:1px solid rgba(255,255,255,0.04);
-  display:flex; gap:12px; align-items:flex-start;
-  border-left:3px solid transparent;
-  width:100%; box-sizing:border-box;
+  padding: 10px 16px 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  display: -webkit-flex; display: flex; gap: 12px; -webkit-align-items: flex-start; align-items: flex-start;
+  border-left: 3px solid transparent;
+  width: 100%;
 }
-.log-entry:hover { background:rgba(255,255,255,0.02); }
-.log-entry.log-stt   { background:rgba(147,197,253,0.04); }
-.log-entry.log-pinku { background:rgba(192,132,252,0.04); }
-.log-entry.log-error { background:rgba(248,113,113,0.05); }
-.log-icon { font-size:1.15rem; flex-shrink:0; width:26px; text-align:center; line-height:1.5; }
-.log-body { flex:1; min-width:0; }
-.log-msg  { display:block; font-size:1rem; line-height:1.5; word-break:break-word; color:#c8ccdc; }
-.log-entry.log-stt   .log-msg { color:#bfdbfe; font-weight:500; font-size:1.05rem; }
-.log-entry.log-pinku .log-msg { color:#e9d5ff; font-weight:500; font-size:1.05rem; }
-.log-entry.log-error .log-msg { color:#fca5a5; }
-.log-entry.log-warn  .log-msg { color:#fde68a; }
-.log-entry.log-wake  .log-msg { color:#fde68a; }
-.log-ts { display:block; font-size:0.7rem; color:#44475a; margin-top:3px;
-          font-family:'SF Mono','Menlo','Consolas',monospace; }
+.log-entry:hover { background: rgba(255,255,255,0.02); }
+.log-entry.log-stt   { background: rgba(147,197,253,0.04); }
+.log-entry.log-pinku { background: rgba(192,132,252,0.04); }
+.log-entry.log-error { background: rgba(248,113,113,0.05); }
+.log-icon { font-size: 1.15rem; -webkit-flex-shrink: 0; flex-shrink: 0; width: 26px; text-align: center; line-height: 1.5; }
+.log-body { -webkit-flex: 1; flex: 1; min-width: 0; }
+.log-msg  { display: block; font-size: 1rem; line-height: 1.5; word-break: break-word; color: #c8ccdc; }
+.log-entry.log-stt   .log-msg { color: #bfdbfe; font-weight: 500; font-size: 1.05rem; }
+.log-entry.log-pinku .log-msg { color: #e9d5ff; font-weight: 500; font-size: 1.05rem; }
+.log-entry.log-error .log-msg { color: #fca5a5; }
+.log-entry.log-warn  .log-msg { color: #fde68a; }
+.log-entry.log-wake  .log-msg { color: #fde68a; }
+.log-ts { display: block; font-size: 0.7rem; color: #44475a; margin-top: 3px; font-family: 'SF Mono','Menlo','Consolas',monospace; }
 </style>
 </head>
 <body>
+<div id="root"></div>
 
-<!-- ── Header ── -->
-<header class="header">
-  <div class="header-left">
-    <div class="dot-wrap">
-      <div class="avatar-ring">P</div>
-      <div class="status-dot" id="hdr-dot"></div>
-    </div>
-    <div>
-      <div class="app-name">Pinku</div>
-      <div class="status-pills">
-        <span class="spill" id="pill-human" title="Person detected">👤</span>
-        <span class="spill" id="pill-session" title="Session">💬</span>
-      </div>
-    </div>
-  </div>
-  <div class="header-btns">
-    <button class="hdr-btn stop-btn" id="stop-btn" title="Pause — stop speaking, mic re-opens after">⏸</button>
-    <button class="hdr-btn mute-btn" id="mute-btn" title="Mute / Unmute listening">🔇</button>
-    <button class="hdr-btn" id="restart-btn" title="git pull + restart Pinku" style="border-color:rgba(251,191,36,0.4);color:#fbbf24;font-size:0.8rem;">↺</button>
-  </div>
-</header>
-
-<!-- ── Main ── -->
-<div class="main-area" id="main-area">
-  <div class="pinky-stage">
-
-    <!-- Question cloud -->
-    <div class="question-cloud" id="q-cloud">
-      <span class="question-cloud-label">You said</span>
-      <span id="q-body"></span>
-    </div>
-
-    <div class="face-with-actions">
-      <!-- Mic / wake button -->
-      <button class="wake-btn-top" id="wake-btn" title="Tap to speak">🎙️</button>
-
-      <!-- Face ring -->
-      <div class="face-wrap" id="face-wrap-el">
-
-        <!-- Thought bubble -->
-        <div class="face-bubble" id="thought-bubble" style="--bubble-color:#c084fc">
-          <span class="bubble-dot d1"></span>
-          <span class="bubble-dot d2"></span>
-          <span class="bubble-dot d3"></span>
-        </div>
-
-        <!-- THE FACE -->
-        <div class="face sleeping" id="pinku-face">
-          <div class="head">
-            <div class="hair-side left"></div>
-            <div class="hair-side right"></div>
-            <div class="hair-fringe"></div>
-            <div class="brows">
-              <div class="brow left"></div>
-              <div class="brow right"></div>
-            </div>
-            <div class="eyes">
-              <div class="eye eye-left">
-                <span class="eye-lashes">
-                  <span class="lash"></span><span class="lash"></span>
-                  <span class="lash"></span><span class="lash"></span>
-                  <span class="lash"></span>
-                </span>
-              </div>
-              <div class="eye eye-right">
-                <span class="eye-lashes">
-                  <span class="lash"></span><span class="lash"></span>
-                  <span class="lash"></span><span class="lash"></span>
-                  <span class="lash"></span>
-                </span>
-              </div>
-            </div>
-            <div class="nose-bridge"></div>
-            <div class="mouth"></div>
-            <div class="cheek left"></div>
-            <div class="cheek right"></div>
-          </div>
-          <div class="voice-wave">
-            <span></span><span></span><span></span><span></span><span></span>
-          </div>
-        </div><!-- face -->
-
-        <!-- Sparkles -->
-        <div class="face-sparkles">
-          <span class="sp sp1">✦</span>
-          <span class="sp sp2">✦</span>
-          <span class="sp sp3">⋆</span>
-          <span class="sp sp4">⋆</span>
-        </div>
-
-      </div><!-- face-wrap -->
-    </div><!-- face-with-actions -->
-
-    <!-- Reply cloud -->
-    <div class="reply-cloud" id="r-cloud">
-      <span class="reply-cloud-label">Pinku said</span>
-      <span class="reply-cloud-body" id="r-body"></span>
-    </div>
-
-    <!-- Person badge -->
-    <div class="person-badge" id="person-badge">
-      <span class="person-dot"></span>
-      <span id="person-name">Someone here</span>
-    </div>
-
-    <!-- Status bar -->
-    <div class="status-bar sleeping" id="status-bar">
-      <span class="status-bar-icon" id="sb-icon">😴</span>
-      <div class="status-bar-text">
-        <span class="status-bar-label" id="sb-label">Sleeping</span>
-        <span class="status-bar-sub" id="sb-sub">Wake word: "Hey Pinku"</span>
-      </div>
-      <div class="status-bar-right">
-        <span class="ws-dot off" id="ws-dot"></span>
-      </div>
-    </div>
-
-  </div><!-- pinky-stage -->
-</div><!-- main-area -->
-
-<!-- Camera area (hidden by default) -->
-<div class="camera-area" id="camera-area">
-  <div class="cam-feed-wrap">
-    <img id="cam-img" alt="Camera" draggable="false" style="display:none;-webkit-user-drag:none;">
-    <div class="cam-offline" id="cam-offline">📷 Camera offline or not started</div>
-  </div>
-  <div class="cam-toolbar">
-    <span id="cam-status-text" style="font-size:0.72rem;color:#64748b">Checking…</span>
-    <button class="log-clear-btn" id="cam-perm-btn" onclick="requestCameraPermission()">🔓 Permission</button>
-  </div>
-  <div class="cam-detect-feed" id="cam-detect-feed"></div>
-</div>
-
-<!-- Darts area (hidden by default) -->
-<div class="darts-area" id="darts-area">
-  <!-- Top row: camera feed + right-side leaderboard -->
-  <div class="darts-top-row">
-    <div class="cam-feed-wrap" id="darts-feed-wrap">
-      <img id="darts-img" alt="Darts camera" draggable="false" style="display:none;-webkit-user-drag:none;">
-      <div class="cam-offline" id="darts-offline">📷 Camera offline or not started</div>
-      <div id="darts-hit-layer"></div>
-    </div>
-    <!-- Leaderboard (right side panel) -->
-    <div class="darts-leaderboard" id="darts-leaderboard">
-      <div class="dart-lb-title">🏆 Leaderboard</div>
-    </div>
-  </div>
-  <!-- Game status bar: current player + shot dots + turn total -->
-  <div class="darts-gamebar">
-    <span class="dgb-player" id="dgb-player">P1</span>
-    <span class="dgb-dots"   id="dgb-dots">○○○○○</span>
-    <span class="dgb-score"  id="dgb-score">0 pts</span>
-  </div>
-  <!-- Controls -->
-  <div class="darts-toolbar">
-    <button class="darts-btn speak-btn" id="dart-speak-btn" onclick="dartSpeak()" title="Speak last score">🔊</button>
-    <button class="darts-btn next-btn"  id="dart-next-btn"  onclick="dartNextPlayer()">→ Next Player</button>
-    <button class="darts-btn cal-btn"   id="dart-cal-btn"   onclick="calibrateLaser()" title="Point laser at bullseye">🎯 Calibrate</button>
-    <button class="darts-btn new-btn"   id="dart-new-btn"   onclick="dartNewGame()">✕ New Game</button>
-  </div>
-  <!-- Individual shot log -->
-  <div class="darts-score-list" id="darts-score-list"></div>
-</div>
-
-<!-- Log area (hidden by default) -->
-<div class="log-area" id="log-area">
-  <div class="log-toolbar">
-    <span>Live log — newest first</span>
-    <button class="log-clear-btn" onclick="document.getElementById('log-entries').innerHTML=''">Clear</button>
-  </div>
-  <div class="log-entries" id="log-entries"></div>
-</div>
-
-<!-- Bottom nav -->
-<nav class="pinky-nav">
-  <button class="pinky-nav-item active" id="nav-home" onclick="showTab('home')">
-    <span class="pinky-nav-ic">🏠</span>Home
-  </button>
-  <button class="pinky-nav-item" id="nav-cam" onclick="showTab('cam')">
-    <span class="pinky-nav-ic">📷</span>Camera
-  </button>
-  <button class="pinky-nav-item" id="nav-darts" onclick="showTab('darts')">
-    <span class="pinky-nav-ic">🎯</span>Darts
-  </button>
-  <button class="pinky-nav-item" id="nav-log" onclick="showTab('log')">
-    <span class="pinky-nav-ic">📋</span>Log
-  </button>
-</nav>
-
-<script>
-// ── State mapping ─────────────────────────────────────────────────────────────
-const STATE_CSS = {
-  idle:'sleeping', sleeping:'sleeping', awake:'awake',
-  processing:'thinking', speaking:'speaking', muted:'paused', detection:'triggered',
-};
+<script type="text/babel">
+// ── Constants ──────────────────────────────────────────────────────────────────
 const STATE_UI = {
-  sleeping: { icon:'😴', label:'Sleeping',   sub:'Say "Hey Pinku" to wake me' },
-  awake:    { icon:'👂', label:'Listening…', sub:'Speak freely — or tap 🎙️' },
-  thinking: { icon:'⚡', label:'On it…',     sub:'Processing your request' },
-  speaking: { icon:'🗣️', label:'Speaking…',  sub:'Tap ⏹ to stop' },
-  paused:   { icon:'🔇', label:'Muted',      sub:'Tap 🎙️ to unmute — or show 🙌 Hands Up' },
-  triggered:{ icon:'⚡', label:'On it…',     sub:'Running your command' },
-  listening:{ icon:'👁️', label:'Watching',   sub:'Step into view' },
+  sleeping:  { icon:'😴', label:'Sleeping',   sub:'Say "Pinku" to wake me' },
+  awake:     { icon:'👂', label:'Listening…', sub:'Speak freely — or tap 🎙️' },
+  thinking:  { icon:'⚡', label:'On it…',     sub:'Processing your request' },
+  speaking:  { icon:'🗣️', label:'Speaking…',  sub:'Tap ⏸ to stop' },
+  paused:    { icon:'🔇', label:'Muted',      sub:'Tap mic or wave ✋ to resume' },
+  triggered: { icon:'⚡', label:'On it…',     sub:'Running your command' },
 };
-const BUBBLE_STATES = new Set(['thinking','triggered']);
-const BUBBLE_COLOR  = { thinking:'#c084fc', triggered:'#fb923c' };
-const ALL_FACE_CSS  = ['sleeping','awake','listening','active','thinking','triggered','speaking','paused','connecting'];
 
-let _lastStatus = {}, _lastTranscript = '', _lastReply = '';
-let _detectRevertTimer = null;
+const LOG_COLORS = {
+  stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
+  tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
+  warn:'#fbbf24', info:'#64748b', pinku:'#c084fc', laser:'#4ade80', source:'#86efac',
+  you:'#93c5fd', user:'#93c5fd', llm:'#64748b', cam:'#67e8f9',
+};
+const LOG_ICONS = {
+  stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊', camera:'📷',
+  gesture:'✋', error:'🔴', warn:'🟡', info:'⚪', pinku:'🤖', laser:'🎯', source:'📖',
+  you:'🧑', user:'🧑', llm:'🤖', cam:'📷',
+};
 
-// ── Face ─────────────────────────────────────────────────────────────────────
-function setFaceClass(cls) {
-  const face = document.getElementById('pinku-face');
-  ALL_FACE_CSS.forEach(c => face.classList.remove(c));
-  face.classList.add(cls);
+const DART_COLORS = {
+  100: '#ef4444', 75: '#f97316', 50: '#eab308', 25: '#84cc16', 10: '#22d3ee', 0: '#6b7280',
+};
 
-  const sb = document.getElementById('status-bar');
-  ALL_FACE_CSS.forEach(c => sb.classList.remove(c));
-  sb.classList.add(cls);
-
-  document.getElementById('hdr-dot').className = 'status-dot ' + cls;
-
-  const bubble = document.getElementById('thought-bubble');
-  if (BUBBLE_STATES.has(cls)) {
-    bubble.style.setProperty('--bubble-color', BUBBLE_COLOR[cls] || '#c084fc');
-    bubble.classList.add('visible');
-  } else {
-    bubble.classList.remove('visible');
-  }
-
-  const ui = STATE_UI[cls] || STATE_UI.sleeping;
-  document.getElementById('sb-icon').textContent  = ui.icon;
-  document.getElementById('sb-icon').className    = 'status-bar-icon ' + cls;
-  document.getElementById('sb-label').textContent = ui.label;
-  document.getElementById('sb-sub').textContent   = ui.sub;
+function dartColor(score) {
+  const keys = [100,75,50,25,10,0];
+  for (const k of keys) { if (score >= k) return DART_COLORS[k]; }
+  return '#6b7280';
 }
 
-// ── Status update from SSE ────────────────────────────────────────────────────
-function applyStatus(data) {
-  const isMuted    = data.muted;
-  const isSpeaking = data.speaking;
-  const rawState   = data.state || 'idle';
-
-  let faceCls;
-  if (isMuted)         faceCls = 'paused';
-  else if (isSpeaking) faceCls = 'speaking';
-  else                 faceCls = STATE_CSS[rawState] || 'sleeping';
-
-  if (!_detectRevertTimer) setFaceClass(faceCls);
-
-  // Question cloud
-  if (data.last_transcript && data.last_transcript !== _lastTranscript) {
-    _lastTranscript = data.last_transcript;
-    document.getElementById('q-body').textContent = data.last_transcript;
-    document.getElementById('q-cloud').classList.add('has-text');
-  }
-  // Reply cloud
-  if (data.last_reply && data.last_reply !== _lastReply) {
-    _lastReply = data.last_reply;
-    document.getElementById('r-body').textContent = data.last_reply;
-    document.getElementById('r-cloud').classList.add('has-text');
-    // history is updated via the dedicated SSE "history" event, not here
-  }
-
-  // Mute button icon
-  document.getElementById('mute-btn').textContent = isMuted ? '🎙️' : '🔇';
-  document.getElementById('mute-btn').title = isMuted ? 'Unmute' : 'Mute';
-  document.getElementById('mute-btn').classList.toggle('active', isMuted);
-
-  // Camera status (included in initial SSE push and whenever camera.py changes state)
-  if (data.cam_status !== undefined || data.det_status !== undefined) {
-    const camTxt = data.cam_status || '?';
-    const detTxt = data.det_status || '?';
-    const msg = `Camera: ${camTxt} | Detection: ${detTxt}`;
-    const offlineEl = document.getElementById('cam-offline');
-    const statusEl  = document.getElementById('cam-status-text');
-    if (offlineEl) offlineEl.textContent = '📷 ' + msg;
-    if (statusEl)  statusEl.textContent  = msg;
-  }
+function getFaceClass(status, detectFlash) {
+  if (detectFlash) return 'triggered';
+  if (status.muted) return 'paused';
+  if (status.speaking) return 'speaking';
+  const map = {
+    idle:'sleeping', sleeping:'sleeping', awake:'awake',
+    processing:'thinking', speaking:'speaking', muted:'paused', detection:'triggered',
+  };
+  return map[status.state] || 'sleeping';
 }
 
-// ── Detection flash ───────────────────────────────────────────────────────────
-function flashDetection(event) {
-  setFaceClass('triggered');
-  clearTimeout(_detectRevertTimer);
-  _detectRevertTimer = setTimeout(() => {
-    _detectRevertTimer = null;
-    applyStatus(_lastStatus);
-  }, 1500);
-
-  const persons = event.persons || 0;
-  if (persons > 0) {
-    const badge = document.getElementById('person-badge');
-    document.getElementById('person-name').textContent =
-      persons > 1 ? `${persons} people here` : 'Someone here';
-    badge.classList.add('visible');
-    clearTimeout(badge._timer);
-    badge._timer = setTimeout(() => badge.classList.remove('visible'), 5000);
-    document.getElementById('pill-human').classList.add('on');
-  }
-
-  addDetectionRow(event);
-  // Only write to the Log tab when a gesture is recognised — routine
-  // person/object detections are already shown in the Camera tab feed.
-  const gestures = event.gestures || [];
-  if (gestures.length > 0) {
-    addLog('gesture', '✋ ' + gestures.map(g => g.gesture).join(', '));
-  }
-}
-
-// ── API action helper ─────────────────────────────────────────────────────────
 function apiAction(name) {
   fetch('/api/action', {
     method: 'POST',
@@ -1646,493 +1425,592 @@ function apiAction(name) {
   }).catch(() => {});
 }
 
-// ── Button wiring ─────────────────────────────────────────────────────────────
-document.getElementById('wake-btn').addEventListener('click', () => {
-  apiAction('wake');
-  setFaceClass('awake');
-});
-document.getElementById('stop-btn').addEventListener('click', () => {
-  apiAction('pause');
-});
-document.getElementById('mute-btn').addEventListener('click', () => {
-  apiAction('mute_toggle');
-});
-document.getElementById('restart-btn').addEventListener('click', () => {
-  if (!confirm('git pull + restart Pinku?')) return;
-  const btn = document.getElementById('restart-btn');
-  btn.textContent = '⏳'; btn.disabled = true;
-  fetch('/api/restart', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({token:'pinku'}),
-  }).then(r => r.json()).then(d => {
-    btn.textContent = d.ok ? '✓' : '✗';
-    if (d.ok) setTimeout(() => location.reload(), 5000);
-    else { btn.disabled = false; btn.textContent = '↺'; }
-  }).catch(() => { btn.disabled = false; btn.textContent = '↺'; });
-});
-
-// ── History panel ─────────────────────────────────────────────────────────────
-let _histLastKey = '';   // dedup key: ts+transcript
-let _histLastDay = '';   // track day separators
-
-function _histTimeLabel(tsStr) {
-  // tsStr: "2026-05-26 08:33:25"
-  try {
-    const d = new Date(tsStr.replace(' ', 'T'));
-    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  } catch(_) { return tsStr.slice(11,16); }
-}
-
-function _histDayLabel(tsStr) {
-  try {
-    const d = new Date(tsStr.replace(' ', 'T'));
-    return d.toLocaleDateString([], {weekday:'long', day:'numeric', month:'long', year:'numeric'});
-  } catch(_) { return tsStr.slice(0,10); }
-}
-
-function appendHistoryEntry(entry) {
-  if (!entry.transcript && !entry.reply) return;
-  const key = (entry.ts || '') + entry.transcript;
-  if (key === _histLastKey) return;
-  _histLastKey = key;
-
-  const box = document.getElementById('history-area');
-  const day = (entry.ts || '').slice(0,10);
-
-  // Day separator
-  if (day && day !== _histLastDay) {
-    _histLastDay = day;
-    const sep = document.createElement('div');
-    sep.className = 'hist-day-sep';
-    sep.textContent = _histDayLabel(entry.ts);
-    box.appendChild(sep);
-  }
-
-  const timeStr = entry.ts ? _histTimeLabel(entry.ts) : '';
-
-  if (entry.transcript) {
-    const d = document.createElement('div');
-    d.className = 'msg-row user';
-    d.innerHTML = `<div><div class="bubble user">${esc(entry.transcript)}</div><div class="msg-time">${timeStr}</div></div>`;
-    box.appendChild(d);
-  }
-  if (entry.reply) {
-    const src = entry.source ? `<div class="hist-source">${esc(entry.source)}</div>` : '';
-    const d = document.createElement('div');
-    d.className = 'msg-row pinku';
-    d.innerHTML = `<div><div class="bubble pinku">${esc(entry.reply)}</div><div class="msg-time">${timeStr}</div>${src}</div>`;
-    box.appendChild(d);
-  }
-}
-
-async function loadHistory() {
-  try {
-    const resp = await fetch('/api/history?limit=200');
-    const entries = await resp.json();
-    const box = document.getElementById('history-area');
-    box.innerHTML = '';
-    _histLastDay = '';
-    _histLastKey = '';
-    entries.forEach(appendHistoryEntry);
-    box.scrollTop = box.scrollHeight;
-  } catch(e) { console.warn('History load failed', e); }
-}
-
-// ── Camera panel ──────────────────────────────────────────────────────────────
-let _camActive = false;
-let _camTimer  = null;
-
-function startCamera() {
-  _camActive = true;
-  refreshCam();
-  fetch('/api/camera/status').then(r => r.json()).then(s => {
-    const msg = `Camera: ${s.camera || '?'} | Detection: ${s.detection || '?'}`;
-    document.getElementById('cam-offline').textContent = '📷 ' + msg;
-    document.getElementById('cam-status-text').textContent = msg;
-  }).catch(() => {});
-}
-
-// ── Darts tab ─────────────────────────────────────────────────────────────────
-let _dartsActive = false;
-let _dartsTimer  = null;
-const DART_COLORS = {
-  100: '#ef4444',   // bullseye — red
-   75: '#f97316',   // orange
-   50: '#eab308',   // yellow
-   25: '#84cc16',   // lime
-   10: '#22d3ee',   // cyan
-    0: '#6b7280',   // miss — gray
-};
-function dartColor(score) {
-  for (const [s, c] of Object.entries(DART_COLORS).sort((a,b) => b[0]-a[0]))
-    if (score >= Number(s)) return c;
-  return '#6b7280';
-}
-
-function startDartsCamera() {
-  _dartsActive = true;
-  refreshDartsCam();
-}
-function stopDartsCamera() {
-  _dartsActive = false;
-  clearTimeout(_dartsTimer);
-}
-function refreshDartsCam() {
-  if (!_dartsActive) return;
-  const img = document.getElementById('darts-img');
-  const tmp = new Image();
-  tmp.onload = () => {
-    img.src = tmp.src;
-    img.style.display = 'block';
-    document.getElementById('darts-offline').style.display = 'none';
-    _dartsTimer = setTimeout(refreshDartsCam, 200);
-  };
-  tmp.onerror = () => {
-    img.style.display = 'none';
-    document.getElementById('darts-offline').style.display = 'flex';
-    _dartsTimer = setTimeout(refreshDartsCam, 2000);
-  };
-  tmp.src = '/api/camera.jpg?annotated=1&t=' + Date.now();
-}
-
-function addDartHitDot(hit) {
-  const layer = document.getElementById('darts-hit-layer');
-  const wrap  = document.getElementById('darts-feed-wrap');
-  if (!layer || !wrap) return;
-  const col = dartColor(hit.score);
-  const dot = document.createElement('div');
-  dot.className = 'dart-hit-dot';
-  dot.style.left       = (hit.x * 100) + '%';
-  dot.style.top        = (hit.y * 100) + '%';
-  dot.style.background = col;
-  dot.style.boxShadow  = `0 0 10px ${col}, 0 0 20px ${col}60`;
-  dot.innerHTML = `<span class="dart-score-badge">${hit.score === 100 ? '🎯' : hit.score === 0 ? '💨' : hit.score}</span>`;
-  layer.appendChild(dot);
-}
-
-function addDartScoreRow(hit, prepend) {
-  const list = document.getElementById('darts-score-list');
-  if (!list) return;
-  const col   = dartColor(hit.score);
-  const label = hit.score === 100 ? 'Bullseye!' : hit.score === 0 ? 'Miss' : hit.score + ' pts';
-  const row   = document.createElement('div');
-  row.className = 'dart-score-row';
-  row.innerHTML =
-    `<span class="dart-score-num" style="color:${col}">${hit.score}</span>` +
-    `<span class="dart-score-label">${esc(label)}</span>` +
-    `<span class="dart-score-pos">(${(hit.x||0).toFixed(2)}, ${(hit.y||0).toFixed(2)})</span>`;
-  if (prepend) list.insertBefore(row, list.firstChild);
-  else         list.appendChild(row);
-}
-
-async function loadDartHits() {
-  try {
-    const resp = await fetch('/api/dart/hits');
-    const hits = await resp.json();
-    // Clear current overlays
-    const layer = document.getElementById('darts-hit-layer');
-    const list  = document.getElementById('darts-score-list');
-    if (layer) layer.innerHTML = '';
-    if (list)  list.innerHTML  = '';
-    hits.forEach(h => { addDartHitDot(h); addDartScoreRow(h, false); });
-  } catch(e) { console.warn('dart hits load failed', e); }
-}
-
-// ── Game bar / leaderboard ────────────────────────────────────────────────────
-function updateGameBar(g) {
-  const playerEl = document.getElementById('dgb-player');
-  const dotsEl   = document.getElementById('dgb-dots');
-  const scoreEl  = document.getElementById('dgb-score');
-  if (!playerEl) return;
-
-  playerEl.textContent = 'P' + g.player;
-
-  // Shot progress dots ●/○
-  let dh = '';
-  for (let i = 0; i < (g.shots_total || 5); i++)
-    dh += i < g.shots_done
-      ? '<span style="color:#4ade80">●</span>'
-      : '<span style="color:#334155">○</span>';
-  dotsEl.innerHTML = dh;
-
-  scoreEl.textContent = (g.turn_total || 0) + ' pts';
-
-  // Next-player button pulse when turn is done
-  const nb = document.getElementById('dart-next-btn');
-  if (nb) {
-    nb.classList.toggle('awaiting', !!g.awaiting);
-    nb.textContent = g.awaiting ? '→ Next Player ⚡' : '→ Next Player';
-  }
-
-  if (g.rounds) updateLeaderboard(g.rounds, g.player);
-}
-
-function updateLeaderboard(rounds, currentPlayer) {
-  const el = document.getElementById('darts-leaderboard');
-  if (!el) return;
-  if (!rounds || !rounds.length) {
-    el.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
-    return;
-  }
-
-  // Group by player
-  const players = {};
-  rounds.forEach(r => {
-    if (!players[r.player]) players[r.player] = { turns: 0, total: 0, lastShots: [] };
-    players[r.player].turns++;
-    players[r.player].total += r.total;
-    players[r.player].lastShots = r.shots || [];
-  });
-
-  // Sort by total descending
-  const sorted = Object.entries(players).sort((a, b) => b[1].total - a[1].total);
-
-  el.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div>' +
-    sorted.map(([pid, p]) => {
-      const col = dartColor(p.total / Math.max(1, p.turns));
-      const active = Number(pid) === currentPlayer;
-      return `<div class="dart-lb-row${active ? ' lb-active' : ''}">
-        <span class="dart-lb-player">P${pid}</span>
-        <span class="dart-lb-turns">${p.turns} turn${p.turns > 1 ? 's' : ''}</span>
-        <span class="dart-lb-shots">${p.lastShots.map(s => s.score).join(' · ')}</span>
-        <span class="dart-lb-total" style="color:${col}">${p.total}</span>
-      </div>`;
-    }).join('');
-}
-
-async function loadDartGame() {
-  try {
-    const g = await fetch('/api/dart/game').then(r => r.json());
-    updateGameBar(g);
-  } catch(e) {}
-}
-
-function dartNextPlayer() {
-  document.getElementById('darts-hit-layer').innerHTML = '';
-  apiAction('dart_next_player');
-}
-
-function dartNewGame() {
-  if (!confirm('Start a new game? This clears all scores.')) return;
-  document.getElementById('darts-hit-layer').innerHTML = '';
-  document.getElementById('darts-score-list').innerHTML = '';
-  const lb = document.getElementById('darts-leaderboard');
-  if (lb) lb.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
-  apiAction('dart_new_game');
-}
-
-function dartSpeak() {
-  const btn = document.getElementById('dart-speak-btn');
-  btn.disabled = true;
-  apiAction('dart_speak');
-  setTimeout(() => btn.disabled = false, 1500);
-}
-
-function dartClear() {
-  document.getElementById('darts-hit-layer').innerHTML = '';
-  document.getElementById('darts-score-list').innerHTML = '';
-  apiAction('dart_reset');
-}
-
-function calibrateLaser() {
-  // Button may be in Darts tab (dart-cal-btn) or Camera tab (cal-btn)
-  const btn = document.getElementById('dart-cal-btn') || document.getElementById('cal-btn');
-  if (btn) { btn.textContent = '⏳ Setting…'; btn.disabled = true; }
-  fetch('/api/laser/calibrate', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body:'{}'})
-  .then(r => r.json()).then(d => {
-    if (d.ok) {
-      if (btn) btn.textContent = '✅ Set!';
-      addLog('laser', `🎯 Bullseye set → (${(d.bull_x||0).toFixed(3)}, ${(d.bull_y||0).toFixed(3)})`);
-    } else {
-      if (btn) btn.textContent = '❌ ' + (d.error || 'Failed');
-      addLog('warn', '🎯 Cal failed: ' + (d.error || 'unknown'));
-    }
-    setTimeout(() => { if (btn) { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; } }, 3500);
-  }).catch(err => {
-    if (btn) { btn.textContent = '❌ Error'; btn.disabled = false; }
-    addLog('error', 'Calibrate error: ' + err);
-    setTimeout(() => { if (btn) { btn.textContent = '🎯 Set Bullseye'; btn.disabled = false; } }, 3500);
-  });
-}
-
-function requestCameraPermission() {
-  const btn = document.getElementById('cam-perm-btn');
-  btn.textContent = '⏳ Requesting…';
-  btn.disabled = true;
-  addLog('camera', 'Requesting macOS camera permission…', '');
-  fetch('/api/camera/request-permission').then(r => r.json()).then(s => {
-    if (s.ok) {
-      btn.textContent = '✅ Granted!';
-      addLog('camera', 'Camera permission granted — restarting feed', '');
-      document.getElementById('cam-status-text').textContent = 'Permission granted — reloading…';
-      setTimeout(() => { stopCamera(); startCamera(); }, 1000);
-    } else {
-      btn.textContent = '❌ Denied';
-      btn.disabled = false;
-      addLog('error', 'Camera permission denied: ' + (s.output || ''), '');
-      document.getElementById('cam-status-text').textContent =
-        'Permission denied — go to System Settings → Privacy → Camera';
-    }
-    setTimeout(() => { btn.textContent = '🔓 Request Permission'; btn.disabled = false; }, 4000);
-  }).catch(() => { btn.textContent = '🔓 Request Permission'; btn.disabled = false; });
-}
-function stopCamera() {
-  _camActive = false;
-  clearTimeout(_camTimer);
-}
-function refreshCam() {
-  if (!_camActive) return;
-  const img = document.getElementById('cam-img');
-  const tmp = new Image();
-  tmp.onload = () => {
-    img.src = tmp.src;
-    img.style.display = 'block';
-    document.getElementById('cam-offline').style.display = 'none';
-    _camTimer = setTimeout(refreshCam, 200);   // ~5 fps
-  };
-  tmp.onerror = () => {
-    img.style.display = 'none';
-    document.getElementById('cam-offline').style.display = 'flex';
-    _camTimer = setTimeout(refreshCam, 2000);  // retry slower when offline
-  };
-  tmp.src = '/api/camera.jpg?t=' + Date.now();
-}
-
-function addDetectionRow(event) {
-  const box = document.getElementById('cam-detect-feed');
-  const row = document.createElement('div');
-  row.className = 'det-row';
-  const ts   = (event.timestamp || '').split(' ')[1] || '';
-  let body = '';
-  if (event.persons > 0)
-    body += `<span class="det-chip person">👤 ${event.persons === 1 ? 'person' : event.persons + ' people'}</span>`;
-  (event.gestures || []).forEach(g =>
-    body += `<span class="det-chip gesture">✋ ${g.gesture}</span>`);
-  (event.objects || []).forEach(o =>
-    body += `<span class="det-chip object">${o.label}</span>`);
-  row.innerHTML = `<span class="det-time">${esc(ts)}</span><span class="det-body">${body || 'no detection'}</span>`;
-  box.insertBefore(row, box.firstChild);
-  while (box.children.length > 60) box.removeChild(box.lastChild);
-}
-
-// ── Log panel ─────────────────────────────────────────────────────────────────
-const LOG_ICONS = {
-  stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊',
-  camera:'📷', gesture:'✋', error:'🔴', warn:'🟡',
-  info:'⚪', you:'🧑', pinku:'🤖', cam:'📷',
-  user:'🧑', source:'📖', llm:'🤖', laser:'🎯',
-};
-const LOG_COLORS = {
-  stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
-  tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
-  warn:'#fbbf24', info:'#64748b', you:'#93c5fd', pinku:'#c084fc', cam:'#67e8f9',
-  user:'#93c5fd', source:'#86efac', llm:'#64748b', laser:'#4ade80',
-};
-
-function addLog(level, msg, ts) {
-  const box = document.getElementById('log-entries');
-  if (!box) return;
-  const entry = document.createElement('div');
-  entry.className = 'log-entry log-' + level;
-  const t = ts || new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  const icon  = LOG_ICONS[level]  || '⚪';
-  const color = LOG_COLORS[level] || '#94a3b8';
-  entry.style.borderLeftColor = color;
-  entry.innerHTML =
-    `<span class="log-icon">${icon}</span>` +
-    `<div class="log-body">` +
-      `<span class="log-msg">${esc(msg)}</span>` +
-      `<span class="log-ts">${esc(t)} · ${esc(level)}</span>` +
-    `</div>`;
-  box.insertBefore(entry, box.firstChild);
-  while (box.children.length > 200) box.removeChild(box.lastChild);
-}
-
-function formatDetEvent(e) {
-  const parts = [];
-  if (e.persons > 0) parts.push(`${e.persons} person${e.persons > 1 ? 's' : ''}`);
-  (e.gestures || []).forEach(g => parts.push(`${g.gesture}`));
-  (e.objects  || []).forEach(o => parts.push(`${o.label}(${o.conf})`));
-  return parts.join(', ') || 'motion';
-}
-
-// ── Tab switching ─────────────────────────────────────────────────────────────
-const _TABS = ['home', 'cam', 'darts', 'log'];
-function showTab(name) {
-  document.getElementById('main-area').style.display = name === 'home' ? '' : 'none';
-  document.getElementById('camera-area').className   = 'camera-area' + (name === 'cam'   ? ' open' : '');
-  document.getElementById('darts-area').className    = 'darts-area'  + (name === 'darts' ? ' open' : '');
-  document.getElementById('log-area').className      = 'log-area'    + (name === 'log'   ? ' open' : '');
-  _TABS.forEach(t => {
-    const el = document.getElementById('nav-' + t);
-    if (el) el.classList.toggle('active', t === name);
-  });
-  if (name === 'cam')        startCamera();
-  else if (name === 'darts') startDartsCamera();
-  else                       { stopCamera(); stopDartsCamera(); }
-  fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({active: name === 'darts'})}).catch(() => {});
-  if (name === 'darts') { loadDartHits(); loadDartGame(); }
-}
-
-// ── SSE ───────────────────────────────────────────────────────────────────────
-let _es = null;
-function connect() {
-  // Always close the previous connection before opening a new one —
-  // otherwise every reconnect (VNC blip, tab restore) stacks up another
-  // EventSource, and each one receives every log event → N duplicate lines.
-  if (_es) { try { _es.close(); } catch(_) {} _es = null; }
-
-  _es = new EventSource('/api/stream');
-  document.getElementById('ws-dot').className = 'ws-dot off';
-  _es.onopen  = () => document.getElementById('ws-dot').className = 'ws-dot on';
-  _es.onerror = () => {
-    document.getElementById('ws-dot').className = 'ws-dot off';
-    try { _es.close(); } catch(_) {}
-    _es = null;
-    setTimeout(connect, 3000);
-  };
-  _es.onmessage = e => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type === 'status') {
-        _lastStatus = data;
-        applyStatus(data);
-      } else if (data.type === 'detection') {
-        flashDetection(data);
-      } else if (data.type === 'log') {
-        addLog(data.level || 'info', data.msg || '', data.ts || '');
-      } else if (data.type === 'dart_hit') {
-        addDartHitDot(data);
-        addDartScoreRow(data, true);
-      } else if (data.type === 'dart_reset') {
-        const layer = document.getElementById('darts-hit-layer');
-        const list  = document.getElementById('darts-score-list');
-        const lb    = document.getElementById('darts-leaderboard');
-        if (layer) layer.innerHTML = '';
-        if (list)  list.innerHTML  = '';
-        if (lb)  lb.innerHTML = '<div class="dart-lb-title">🏆 Leaderboard</div><div class="dart-lb-empty">No scores yet</div>';
-      } else if (data.type === 'dart_hits_clear') {
-        const layer = document.getElementById('darts-hit-layer');
-        if (layer) layer.innerHTML = '';
-      } else if (data.type === 'dart_game') {
-        updateGameBar(data);
-      }
-    } catch(_) {}
-  };
-}
-connect();
-// Ensure laser is off on fresh page load (home tab is default)
-fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'},
-  body: JSON.stringify({active: false})}).catch(() => {});
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Face component ─────────────────────────────────────────────────────────────
+function Face({ faceClass }) {
+  return React.createElement('div', { className: 'face ' + faceClass },
+    React.createElement('div', { className: 'head' },
+      React.createElement('div', { className: 'hair-side left' }),
+      React.createElement('div', { className: 'hair-side right' }),
+      React.createElement('div', { className: 'hair-fringe' }),
+      React.createElement('div', { className: 'brows' },
+        React.createElement('div', { className: 'brow left' }),
+        React.createElement('div', { className: 'brow right' })
+      ),
+      React.createElement('div', { className: 'eyes' },
+        React.createElement('div', { className: 'eye eye-left' },
+          React.createElement('span', { className: 'eye-lashes' },
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' })
+          )
+        ),
+        React.createElement('div', { className: 'eye eye-right' },
+          React.createElement('span', { className: 'eye-lashes' },
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' }),
+            React.createElement('span', { className: 'lash' })
+          )
+        )
+      ),
+      React.createElement('div', { className: 'nose-bridge' }),
+      React.createElement('div', { className: 'mouth' }),
+      React.createElement('div', { className: 'cheek left' }),
+      React.createElement('div', { className: 'cheek right' })
+    ),
+    React.createElement('div', { className: 'voice-wave' },
+      React.createElement('span'), React.createElement('span'),
+      React.createElement('span'), React.createElement('span'),
+      React.createElement('span')
+    )
+  );
+}
+
+// ── Header ─────────────────────────────────────────────────────────────────────
+function Header({ status, onWake, onPause, onMuteToggle, onRestart }) {
+  const faceClass = getFaceClass(status, false);
+  const isMuted = status.muted;
+
+  function handleRestart() {
+    if (!window.confirm('git pull + restart Pinku?')) return;
+    onRestart();
+  }
+
+  return React.createElement('header', { className: 'header' },
+    React.createElement('div', { className: 'header-left' },
+      React.createElement('div', { className: 'dot-wrap' },
+        React.createElement('div', { className: 'avatar-ring' }, 'P'),
+        React.createElement('div', { className: 'status-dot ' + faceClass })
+      ),
+      React.createElement('div', null,
+        React.createElement('div', { className: 'app-name' }, 'Pinku'),
+        React.createElement('div', { className: 'status-pills' },
+          React.createElement('span', {
+            className: 'spill' + (status.persons > 0 ? ' on' : ''),
+            title: 'Person detected'
+          }, '👤'),
+          React.createElement('span', {
+            className: 'spill' + (status.state === 'awake' || status.state === 'processing' || status.speaking ? ' on' : ''),
+            title: 'Session'
+          }, '💬')
+        )
+      )
+    ),
+    React.createElement('div', { className: 'header-btns' },
+      React.createElement('button', {
+        className: 'hdr-btn stop-btn', title: 'Pause',
+        onClick: onPause
+      }, '⏸'),
+      React.createElement('button', {
+        className: 'hdr-btn mute-btn' + (isMuted ? ' active' : ''),
+        title: isMuted ? 'Unmute' : 'Mute',
+        onClick: onMuteToggle
+      }, isMuted ? '🎙️' : '🔇'),
+      React.createElement('button', {
+        className: 'hdr-btn restart-btn',
+        title: 'git pull + restart Pinku',
+        onClick: handleRestart
+      }, '↺')
+    )
+  );
+}
+
+// ── HomeTab ────────────────────────────────────────────────────────────────────
+function HomeTab({ status, detectFlash, connected, onWake }) {
+  const faceClass = getFaceClass(status, detectFlash);
+  const ui = STATE_UI[faceClass] || STATE_UI.sleeping;
+  const showBubble = faceClass === 'thinking' || faceClass === 'triggered';
+  const bubbleColor = faceClass === 'triggered' ? '#fb923c' : '#c084fc';
+  const showQuestion = !!status.last_transcript;
+  const showReply = !!status.last_reply;
+  const showPersonBadge = status.persons > 0;
+
+  return React.createElement('div', { className: 'main-area' },
+    React.createElement('div', { className: 'pinky-stage' },
+      showQuestion && React.createElement('div', { className: 'question-cloud has-text' },
+        React.createElement('span', { className: 'question-cloud-label' }, 'You said'),
+        React.createElement('span', null, status.last_transcript)
+      ),
+
+      React.createElement('div', { className: 'face-with-actions' },
+        React.createElement('button', {
+          className: 'wake-btn-top',
+          title: 'Tap to speak',
+          onClick: onWake
+        }, '🎙️'),
+
+        React.createElement('div', { className: 'face-wrap ' + faceClass },
+          React.createElement('div', {
+            className: 'face-bubble' + (showBubble ? ' visible' : '') + (faceClass === 'triggered' ? ' triggered' : '')
+          },
+            React.createElement('span', { className: 'bubble-dot d1' }),
+            React.createElement('span', { className: 'bubble-dot d2' }),
+            React.createElement('span', { className: 'bubble-dot d3' })
+          ),
+          React.createElement(Face, { faceClass: faceClass }),
+          React.createElement('div', { className: 'face-sparkles' },
+            React.createElement('span', { className: 'sp sp1' }, '✦'),
+            React.createElement('span', { className: 'sp sp2' }, '✦'),
+            React.createElement('span', { className: 'sp sp3' }, '⋆'),
+            React.createElement('span', { className: 'sp sp4' }, '⋆')
+          )
+        )
+      ),
+
+      showReply && React.createElement('div', { className: 'reply-cloud has-text' },
+        React.createElement('span', { className: 'reply-cloud-label' }, 'Pinku said'),
+        React.createElement('span', { className: 'reply-cloud-body' }, status.last_reply)
+      ),
+
+      React.createElement('div', { className: 'person-badge' + (showPersonBadge ? ' visible' : '') },
+        React.createElement('span', { className: 'person-dot' }),
+        React.createElement('span', null, status.persons > 1 ? status.persons + ' people here' : 'Someone here')
+      ),
+
+      React.createElement('div', { className: 'status-bar ' + faceClass },
+        React.createElement('span', { className: 'status-bar-icon ' + faceClass }, ui.icon),
+        React.createElement('div', { className: 'status-bar-text' },
+          React.createElement('span', { className: 'status-bar-label' }, ui.label),
+          React.createElement('span', { className: 'status-bar-sub' }, ui.sub)
+        ),
+        React.createElement('div', { className: 'status-bar-right' },
+          React.createElement('span', { className: 'ws-dot ' + (connected ? 'on' : 'off') })
+        )
+      )
+    )
+  );
+}
+
+// ── CameraTab ──────────────────────────────────────────────────────────────────
+function CameraTab({ active, camStatus, detStatus, detections }) {
+  const imgRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const [camOnline, setCamOnline] = React.useState(false);
+  const [permBtnText, setPermBtnText] = React.useState('🔓 Permission');
+  const [permBtnDisabled, setPermBtnDisabled] = React.useState(false);
+
+  function refreshCam() {
+    if (!active) return;
+    const tmp = new Image();
+    tmp.onload = function() {
+      if (imgRef.current) {
+        imgRef.current.src = tmp.src;
+        imgRef.current.className = 'visible';
+      }
+      setCamOnline(true);
+      timerRef.current = setTimeout(refreshCam, 200);
+    };
+    tmp.onerror = function() {
+      if (imgRef.current) imgRef.current.className = '';
+      setCamOnline(false);
+      timerRef.current = setTimeout(refreshCam, 2000);
+    };
+    tmp.src = '/api/camera.jpg?t=' + Date.now();
+  }
+
+  React.useEffect(function() {
+    if (active) {
+      refreshCam();
+    }
+    return function() {
+      clearTimeout(timerRef.current);
+    };
+  }, [active]);
+
+  function requestPermission() {
+    setPermBtnText('⏳ Requesting…');
+    setPermBtnDisabled(true);
+    fetch('/api/camera/request-permission').then(function(r) { return r.json(); }).then(function(s) {
+      if (s.ok) {
+        setPermBtnText('✅ Granted!');
+      } else {
+        setPermBtnText('❌ Denied');
+        setPermBtnDisabled(false);
+      }
+      setTimeout(function() { setPermBtnText('🔓 Permission'); setPermBtnDisabled(false); }, 4000);
+    }).catch(function() { setPermBtnText('🔓 Permission'); setPermBtnDisabled(false); });
+  }
+
+  const statusMsg = camStatus && detStatus ? ('Camera: ' + camStatus + ' | Detection: ' + detStatus) : 'Checking…';
+  const offlineMsg = camStatus ? ('📷 Camera: ' + camStatus + ' | Detection: ' + (detStatus || '?')) : '📷 Camera offline or not started';
+
+  return React.createElement('div', { className: 'camera-area open' },
+    React.createElement('div', { className: 'cam-feed-wrap' },
+      React.createElement('img', { ref: imgRef, alt: 'Camera', draggable: false }),
+      !camOnline && React.createElement('div', { className: 'cam-offline' }, offlineMsg)
+    ),
+    React.createElement('div', { className: 'cam-toolbar' },
+      React.createElement('span', { style: { fontSize: '0.72rem', color: '#64748b' } }, statusMsg),
+      React.createElement('button', {
+        className: 'log-clear-btn',
+        onClick: requestPermission,
+        disabled: permBtnDisabled
+      }, permBtnText)
+    ),
+    React.createElement('div', { className: 'cam-detect-feed' },
+      detections.map(function(ev, i) {
+        const ts = (ev.timestamp || '').split(' ')[1] || '';
+        const chips = [];
+        if (ev.persons > 0) chips.push(React.createElement('span', { key: 'p', className: 'det-chip person' }, '👤 ' + (ev.persons === 1 ? 'person' : ev.persons + ' people')));
+        (ev.gestures || []).forEach(function(g, gi) { chips.push(React.createElement('span', { key: 'g'+gi, className: 'det-chip gesture' }, '✋ ' + g.gesture)); });
+        (ev.objects  || []).forEach(function(o, oi) { chips.push(React.createElement('span', { key: 'o'+oi, className: 'det-chip object' }, o.label)); });
+        return React.createElement('div', { key: i, className: 'det-row' },
+          React.createElement('span', { className: 'det-time' }, ts),
+          React.createElement('span', { className: 'det-body' }, chips.length ? chips : 'no detection')
+        );
+      })
+    )
+  );
+}
+
+// ── DartsTab ───────────────────────────────────────────────────────────────────
+function DartsTab({ active, hits, game }) {
+  const imgRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const [camOnline, setCamOnline] = React.useState(false);
+  const [speakDisabled, setSpeakDisabled] = React.useState(false);
+  const [calBtnText, setCalBtnText] = React.useState('🎯 Calibrate');
+  const [calDisabled, setCalDisabled] = React.useState(false);
+
+  function refreshDartsCam() {
+    if (!active) return;
+    const tmp = new Image();
+    tmp.onload = function() {
+      if (imgRef.current) {
+        imgRef.current.src = tmp.src;
+        imgRef.current.className = 'visible';
+      }
+      setCamOnline(true);
+      timerRef.current = setTimeout(refreshDartsCam, 200);
+    };
+    tmp.onerror = function() {
+      if (imgRef.current) imgRef.current.className = '';
+      setCamOnline(false);
+      timerRef.current = setTimeout(refreshDartsCam, 2000);
+    };
+    tmp.src = '/api/camera.jpg?annotated=1&t=' + Date.now();
+  }
+
+  React.useEffect(function() {
+    if (active) {
+      refreshDartsCam();
+      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:true})}).catch(function(){});
+    } else {
+      clearTimeout(timerRef.current);
+      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
+    }
+    return function() { clearTimeout(timerRef.current); };
+  }, [active]);
+
+  function handleSpeak() {
+    setSpeakDisabled(true);
+    apiAction('dart_speak');
+    setTimeout(function() { setSpeakDisabled(false); }, 1500);
+  }
+
+  function handleNextPlayer() {
+    apiAction('dart_next_player');
+  }
+
+  function handleCalibrate() {
+    setCalBtnText('⏳ Setting…');
+    setCalDisabled(true);
+    fetch('/api/laser/calibrate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(r) { return r.json(); }).then(function(d) {
+        setCalBtnText(d.ok ? '✅ Set!' : '❌ ' + (d.error || 'Failed'));
+        setTimeout(function() { setCalBtnText('🎯 Calibrate'); setCalDisabled(false); }, 3500);
+      }).catch(function() { setCalBtnText('❌ Error'); setTimeout(function() { setCalBtnText('🎯 Calibrate'); setCalDisabled(false); }, 3500); });
+  }
+
+  function handleNewGame() {
+    if (!window.confirm('Start a new game? This clears all scores.')) return;
+    apiAction('dart_new_game');
+  }
+
+  // Build leaderboard from game.rounds
+  const rounds = (game && game.rounds) || [];
+  const players = {};
+  rounds.forEach(function(r) {
+    if (!players[r.player]) players[r.player] = { turns:0, total:0, lastShots:[] };
+    players[r.player].turns++;
+    players[r.player].total += r.total;
+    players[r.player].lastShots = r.shots || [];
+  });
+  const sortedPlayers = Object.keys(players).sort(function(a,b){ return players[b].total - players[a].total; });
+
+  // Shot dots
+  const shotsDone = (game && game.shots_done) || 0;
+  const shotsTotal = (game && game.shots_total) || 5;
+  const dots = [];
+  for (let i = 0; i < shotsTotal; i++) {
+    dots.push(React.createElement('span', {
+      key: i,
+      style: { color: i < shotsDone ? '#4ade80' : '#334155' }
+    }, i < shotsDone ? '●' : '○'));
+  }
+
+  const awaiting = !!(game && game.awaiting);
+
+  return React.createElement('div', { className: 'darts-area open' },
+    React.createElement('div', { className: 'darts-top-row' },
+      React.createElement('div', { className: 'cam-feed-wrap', style: { flex: 1 } },
+        React.createElement('img', { ref: imgRef, alt: 'Darts camera', draggable: false }),
+        !camOnline && React.createElement('div', { className: 'cam-offline' }, '📷 Camera offline or not started'),
+        React.createElement('div', { className: 'darts-hit-layer' },
+          hits.map(function(hit, i) {
+            const col = dartColor(hit.score);
+            return React.createElement('div', {
+              key: i,
+              className: 'dart-hit-dot',
+              style: {
+                left: (hit.x * 100) + '%',
+                top: (hit.y * 100) + '%',
+                background: col,
+                boxShadow: '0 0 10px ' + col + ', 0 0 20px ' + col + '60'
+              }
+            },
+              React.createElement('span', { className: 'dart-score-badge' },
+                hit.score === 100 ? '🎯' : hit.score === 0 ? '💨' : String(hit.score)
+              )
+            );
+          })
+        )
+      ),
+      React.createElement('div', { className: 'darts-leaderboard' },
+        React.createElement('div', { className: 'dart-lb-title' }, '🏆 Leaderboard'),
+        sortedPlayers.length === 0
+          ? React.createElement('div', { className: 'dart-lb-empty' }, 'No scores yet')
+          : sortedPlayers.map(function(pid) {
+              const p = players[pid];
+              const col = dartColor(p.total / Math.max(1, p.turns));
+              const isActive = game && Number(pid) === game.player;
+              return React.createElement('div', { key: pid, className: 'dart-lb-row' + (isActive ? ' lb-active' : '') },
+                React.createElement('span', { className: 'dart-lb-player' }, 'P' + pid),
+                React.createElement('span', { className: 'dart-lb-turns' }, p.turns + ' turn' + (p.turns > 1 ? 's' : '')),
+                React.createElement('span', { className: 'dart-lb-shots' }, p.lastShots.map(function(s){ return s.score; }).join(' · ')),
+                React.createElement('span', { className: 'dart-lb-total', style: { color: col } }, p.total)
+              );
+            })
+      )
+    ),
+
+    React.createElement('div', { className: 'darts-gamebar' },
+      React.createElement('span', { className: 'dgb-player' }, 'P' + ((game && game.player) || 1)),
+      React.createElement('span', { className: 'dgb-dots' }, dots),
+      React.createElement('span', { className: 'dgb-score' }, ((game && game.turn_total) || 0) + ' pts')
+    ),
+
+    React.createElement('div', { className: 'darts-toolbar' },
+      React.createElement('button', { className: 'darts-btn speak-btn', onClick: handleSpeak, disabled: speakDisabled, title: 'Speak last score' }, '🔊'),
+      React.createElement('button', { className: 'darts-btn next-btn' + (awaiting ? ' awaiting' : ''), onClick: handleNextPlayer },
+        awaiting ? '→ Next Player ⚡' : '→ Next Player'
+      ),
+      React.createElement('button', { className: 'darts-btn cal-btn', onClick: handleCalibrate, disabled: calDisabled }, calBtnText),
+      React.createElement('button', { className: 'darts-btn new-btn', onClick: handleNewGame }, '✕ New Game')
+    ),
+
+    React.createElement('div', { className: 'darts-score-list' },
+      hits.slice().reverse().map(function(hit, i) {
+        const col = dartColor(hit.score);
+        const label = hit.score === 100 ? 'Bullseye!' : hit.score === 0 ? 'Miss' : hit.score + ' pts';
+        return React.createElement('div', { key: i, className: 'dart-score-row' },
+          React.createElement('span', { className: 'dart-score-num', style: { color: col } }, hit.score),
+          React.createElement('span', { className: 'dart-score-label' }, label),
+          React.createElement('span', { className: 'dart-score-pos' }, '(' + ((hit.x||0).toFixed(2)) + ', ' + ((hit.y||0).toFixed(2)) + ')')
+        );
+      })
+    )
+  );
+}
+
+// ── LogTab ─────────────────────────────────────────────────────────────────────
+function LogTab({ logs, onClear }) {
+  return React.createElement('div', { className: 'log-area open' },
+    React.createElement('div', { className: 'log-toolbar' },
+      React.createElement('span', null, 'Live log — newest first'),
+      React.createElement('button', { className: 'log-clear-btn', onClick: onClear }, 'Clear')
+    ),
+    React.createElement('div', { className: 'log-entries' },
+      logs.map(function(entry, i) {
+        const icon = LOG_ICONS[entry.level] || '⚪';
+        const color = LOG_COLORS[entry.level] || '#94a3b8';
+        return React.createElement('div', {
+          key: i,
+          className: 'log-entry log-' + entry.level,
+          style: { borderLeftColor: color }
+        },
+          React.createElement('span', { className: 'log-icon' }, icon),
+          React.createElement('div', { className: 'log-body' },
+            React.createElement('span', { className: 'log-msg' }, entry.msg),
+            React.createElement('span', { className: 'log-ts' }, entry.ts + ' · ' + entry.level)
+          )
+        );
+      })
+    )
+  );
+}
+
+// ── NavBar ─────────────────────────────────────────────────────────────────────
+function NavBar({ tab, onTab }) {
+  const tabs = [
+    { id: 'home',  icon: '🏠', label: 'Home' },
+    { id: 'cam',   icon: '📷', label: 'Camera' },
+    { id: 'darts', icon: '🎯', label: 'Darts' },
+    { id: 'log',   icon: '📋', label: 'Log' },
+  ];
+  return React.createElement('nav', { className: 'pinky-nav' },
+    tabs.map(function(t) {
+      return React.createElement('button', {
+        key: t.id,
+        className: 'pinky-nav-item' + (tab === t.id ? ' active' : ''),
+        onClick: function() { onTab(t.id); }
+      },
+        React.createElement('span', { className: 'pinky-nav-ic' }, t.icon),
+        t.label
+      );
+    })
+  );
+}
+
+// ── App ────────────────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = React.useState('home');
+  const [status, setStatus] = React.useState({
+    state: 'idle', muted: false, speaking: false,
+    last_transcript: '', last_reply: '',
+    cam_status: '', det_status: '',
+    persons: 0,
+  });
+  const [detectFlash, setDetectFlash] = React.useState(false);
+  const [detections, setDetections] = React.useState([]);
+  const [logs, setLogs] = React.useState([]);
+  const [dartHits, setDartHits] = React.useState([]);
+  const [dartGame, setDartGame] = React.useState({ player:1, shots_done:0, shots_total:5, turn_total:0, awaiting:false, rounds:[] });
+  const [connected, setConnected] = React.useState(false);
+  const [appHeight, setAppHeight] = React.useState(window.innerHeight);
+
+  const detectTimerRef = React.useRef(null);
+  const esRef = React.useRef(null);
+  const statusRef = React.useRef(status);
+  statusRef.current = status;
+
+  // Window height (iOS 9 dvh fix)
+  React.useEffect(function() {
+    function onResize() { setAppHeight(window.innerHeight); }
+    window.addEventListener('resize', onResize);
+    return function() { window.removeEventListener('resize', onResize); };
+  }, []);
+
+  // Load dart data when switching to darts tab
+  React.useEffect(function() {
+    if (tab === 'darts') {
+      fetch('/api/dart/hits').then(function(r){ return r.json(); }).then(function(hits){ setDartHits(hits); }).catch(function(){});
+      fetch('/api/dart/game').then(function(r){ return r.json(); }).then(function(g){ setDartGame(g); }).catch(function(){});
+    }
+  }, [tab]);
+
+  // SSE connection
+  React.useEffect(function() {
+    function connect() {
+      if (esRef.current) { try { esRef.current.close(); } catch(e) {} esRef.current = null; }
+      var es = new EventSource('/api/stream');
+      esRef.current = es;
+      setConnected(false);
+
+      es.onopen = function() { setConnected(true); };
+      es.onerror = function() {
+        setConnected(false);
+        try { es.close(); } catch(e) {}
+        esRef.current = null;
+        setTimeout(connect, 3000);
+      };
+      es.onmessage = function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.type === 'status') {
+            setStatus(function(prev) {
+              return Object.assign({}, prev, {
+                state: data.state || prev.state,
+                muted: !!data.muted,
+                speaking: !!data.speaking,
+                last_transcript: data.last_transcript || prev.last_transcript,
+                last_reply: data.last_reply || prev.last_reply,
+                cam_status: data.cam_status !== undefined ? data.cam_status : prev.cam_status,
+                det_status: data.det_status !== undefined ? data.det_status : prev.det_status,
+              });
+            });
+          } else if (data.type === 'detection') {
+            var persons = data.persons || 0;
+            setStatus(function(prev) { return Object.assign({}, prev, { persons: persons }); });
+            setDetections(function(prev) { return [data].concat(prev).slice(0, 60); });
+            setDetectFlash(true);
+            clearTimeout(detectTimerRef.current);
+            detectTimerRef.current = setTimeout(function() { setDetectFlash(false); }, 1500);
+          } else if (data.type === 'log') {
+            setLogs(function(prev) {
+              return [{ level: data.level || 'info', msg: data.msg || '', ts: data.ts || '' }].concat(prev).slice(0, 200);
+            });
+          } else if (data.type === 'dart_hit') {
+            setDartHits(function(prev) { return prev.concat([data]).slice(-20); });
+          } else if (data.type === 'dart_reset') {
+            setDartHits([]);
+            setDartGame(function(prev) { return Object.assign({}, prev, { rounds: [], turn_total: 0, shots_done: 0 }); });
+          } else if (data.type === 'dart_hits_clear') {
+            setDartHits([]);
+          } else if (data.type === 'dart_game') {
+            setDartGame(data);
+          }
+        } catch(err) {}
+      };
+    }
+    connect();
+    // Ensure laser off on load
+    fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
+    return function() {
+      if (esRef.current) { try { esRef.current.close(); } catch(e) {} }
+    };
+  }, []);
+
+  function handleTab(newTab) {
+    if (newTab !== 'darts' && tab === 'darts') {
+      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
+    }
+    setTab(newTab);
+  }
+
+  function handleWake() {
+    apiAction('wake');
+    setStatus(function(prev) { return Object.assign({}, prev, { state: 'awake' }); });
+  }
+  function handlePause() { apiAction('pause'); }
+  function handleMuteToggle() { apiAction('mute_toggle'); }
+  function handleRestart() {
+    fetch('/api/restart', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({token:'pinku'}),
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) setTimeout(function(){ location.reload(); }, 5000);
+    }).catch(function(){});
+  }
+
+  return React.createElement('div', { id: 'app', style: { height: appHeight + 'px', display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
+    React.createElement(Header, { status: status, onWake: handleWake, onPause: handlePause, onMuteToggle: handleMuteToggle, onRestart: handleRestart }),
+    tab === 'home'  && React.createElement(HomeTab,   { status: status, detectFlash: detectFlash, connected: connected, onWake: handleWake }),
+    tab === 'cam'   && React.createElement(CameraTab,  { active: tab === 'cam',   camStatus: status.cam_status, detStatus: status.det_status, detections: detections }),
+    tab === 'darts' && React.createElement(DartsTab,   { active: tab === 'darts', hits: dartHits, game: dartGame }),
+    tab === 'log'   && React.createElement(LogTab,     { logs: logs, onClear: function(){ setLogs([]); } }),
+    React.createElement(NavBar, { tab: tab, onTab: handleTab })
+  );
+}
+
+ReactDOM.render(React.createElement(App), document.getElementById('root'));
 </script>
 </body>
 </html>
