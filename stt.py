@@ -285,6 +285,7 @@ def transcribe(pcm: bytes) -> str:
     """
     # Amplify quiet distant speech, then gate on minimum energy.
     pcm, rms = amplify_pcm(pcm)
+    print(f"[STT] RMS={rms:.4f} dur={len(pcm)/(16000*2):.1f}s")
     if rms < _MIN_RMS:
         print(f"[STT] Dropped — RMS {rms:.4f} below threshold {_MIN_RMS}")
         return ""
@@ -298,8 +299,8 @@ def transcribe(pcm: bytes) -> str:
         beam_size=3,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
-        no_speech_threshold=0.55,
-        log_prob_threshold=-0.8,
+        no_speech_threshold=0.40,    # was 0.55 — more accepting of quiet/distant speech
+        log_prob_threshold=-1.0,     # was -0.8 — accept lower-confidence transcriptions
         compression_ratio_threshold=2.4,
         # Minimal prompt — just the wake word so Whisper spells it right.
         # Longer prompts (cricket names etc.) get echoed back as hallucinations
