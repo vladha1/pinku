@@ -140,20 +140,28 @@ class AudioRecorder:
         min_speech_frames     = int(VAD_MIN_SPEECH_MS / frame_ms)
         preroll_frames        = 20   # 600 ms ring buffer
 
-        # Adaptive noise floor — starts at 0.010 (roughly a quiet room) and
-        # drifts toward the actual room noise during silence frames.
-        # speech_mult: frame RMS must exceed noise_floor * speech_mult to count
-        # as speech.  2.5× ≈ +8 dB above floor, which reliably separates a human
-        # voice from ambient TV / AC without needing per-room calibration.
-        noise_floor = 0.010
-        noise_alpha = 0.01    # 1 % adaptation per 30 ms frame (~3 s to fully settle)
-        speech_mult = 2.5
+        # Adaptive noise floor.
+        # noise_floor tracks room ambient (TV, AC, etc.) during silence frames.
+        # speech_mult: RMS must be > noise_floor * speech_mult to count as speech.
+        #
+        # DETECT_GAIN: fixed pre-boost applied before the threshold comparison.
+        # Distant speech arrives at very low amplitude (~0.003–0.010 normalised).
+        # Without a boost the noise floor adapts to ambient and the speech/noise
+        # ratio never reaches speech_mult.  The gain is only used for the energy
+        # comparison — raw frames are stored in speech_buf and amplified later
+        # by amplify_pcm() before Whisper / Gemini.
+        noise_floor  = 0.020   # initial estimate (reset each call)
+        noise_alpha  = 0.01    # 1 % per 30 ms frame ≈ 3 s to fully settle
+        speech_mult  = 2.5     # need 2.5× noise floor to trigger
+        DETECT_GAIN  = 8.0     # pre-boost for detection only (≈ +18 dB)
 
         ring:       collections.deque[bytes] = collections.deque(maxlen=preroll_frames)
         speech_buf: list[bytes] = []
         in_speech       = False
         silence_streak  = 0
         speech_frames   = 0
+        total_frames    = 0
+        peak_rms_det    = 0.0   # for diagnostics
         deadline = time.time() + timeout
 
         # Drain stale frames so we start clean
@@ -176,15 +184,20 @@ class AudioRecorder:
                 chunks = [raw[i:i+frame_b] for i in range(0, len(raw), frame_b)
                           if len(raw[i:i+frame_b]) == frame_b]
                 for chunk in chunks:
-                    audio = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                    rms   = float(np.sqrt(np.mean(audio ** 2)))
+                    total_frames += 1
+                    audio    = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                    rms_raw  = float(np.sqrt(np.mean(audio ** 2)))
+                    rms_det  = min(rms_raw * DETECT_GAIN, 1.0)   # boosted, capped
 
-                    is_speech = rms > noise_floor * speech_mult
+                    if rms_det > peak_rms_det:
+                        peak_rms_det = rms_det
 
-                    # Noise floor adapts only during silence so TV/AC won't
-                    # raise it mid-utterance and swallow the end of a sentence.
+                    is_speech = rms_det > noise_floor * speech_mult
+
+                    # Noise floor adapts only during silence and on the boosted
+                    # scale so the threshold stays proportional.
                     if not in_speech and not is_speech:
-                        noise_floor = noise_floor * (1 - noise_alpha) + rms * noise_alpha
+                        noise_floor = noise_floor * (1 - noise_alpha) + rms_det * noise_alpha
 
                     if not in_speech:
                         ring.append(chunk)
@@ -193,6 +206,7 @@ class AudioRecorder:
                             silence_streak = 0
                             speech_frames  = 1
                             speech_buf     = list(ring)   # include preroll
+                            print(f"[STT] speech start — rms_det={rms_det:.4f} floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
                     else:
                         speech_buf.append(chunk)
                         if is_speech:
@@ -208,7 +222,12 @@ class AudioRecorder:
                                 speech_buf = []
                                 ring.clear()
 
-        return None   # timed out
+        # Timed out — print diagnostics so we can tune thresholds
+        if total_frames > 0:
+            print(f"[STT] timeout: frames={total_frames} peak_det={peak_rms_det:.4f} "
+                  f"floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f} "
+                  f"(DETECT_GAIN={DETECT_GAIN})")
+        return None
 
 
 # ── Hallucination filter ──────────────────────────────────────────────────────
