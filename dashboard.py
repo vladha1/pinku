@@ -1522,19 +1522,40 @@ function Header({ status, onWake, onPause, onMuteToggle, onRestart }) {
 }
 
 // ── HomeTab ────────────────────────────────────────────────────────────────────
-function HomeTab({ status, detectFlash, connected, onWake }) {
+function HomeTab({ status, detectFlash, connected, onWake, lastConvTime }) {
   const faceClass = getFaceClass(status, detectFlash);
   const ui = STATE_UI[faceClass] || STATE_UI.sleeping;
   const showBubble = faceClass === 'thinking' || faceClass === 'triggered';
-  const bubbleColor = faceClass === 'triggered' ? '#fb923c' : '#c084fc';
   const showQuestion = !!status.last_transcript;
   const showReply = !!status.last_reply;
   const showPersonBadge = status.persons > 0;
 
+  // Format HH:MM for the conversation timestamp
+  function fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+
+  // Dynamic sub text — show question when thinking, reply snippet when speaking
+  var dynamicSub = ui.sub;
+  if (faceClass === 'thinking' && status.last_transcript) {
+    var q = status.last_transcript;
+    dynamicSub = '“' + (q.length > 32 ? q.slice(0, 32) + '…' : q) + '”';
+  } else if (faceClass === 'speaking' && status.last_reply) {
+    var r = status.last_reply;
+    dynamicSub = r.length > 38 ? r.slice(0, 38) + '…' : r;
+  }
+
+  var convTimeLabel = lastConvTime ? fmtTime(lastConvTime) : '';
+
   return React.createElement('div', { className: 'main-area' },
     React.createElement('div', { className: 'pinky-stage' },
       showQuestion && React.createElement('div', { className: 'question-cloud has-text' },
-        React.createElement('span', { className: 'question-cloud-label' }, 'You said'),
+        React.createElement('span', { className: 'question-cloud-label' },
+          'You said' + (convTimeLabel ? '  ·  ' + convTimeLabel : '')
+        ),
         React.createElement('span', null, status.last_transcript)
       ),
 
@@ -1577,7 +1598,7 @@ function HomeTab({ status, detectFlash, connected, onWake }) {
         React.createElement('span', { className: 'status-bar-icon ' + faceClass }, ui.icon),
         React.createElement('div', { className: 'status-bar-text' },
           React.createElement('span', { className: 'status-bar-label' }, ui.label),
-          React.createElement('span', { className: 'status-bar-sub' }, ui.sub)
+          React.createElement('span', { className: 'status-bar-sub' }, dynamicSub)
         ),
         React.createElement('div', { className: 'status-bar-right' },
           React.createElement('span', { className: 'ws-dot ' + (connected ? 'on' : 'off') })
@@ -1893,9 +1914,11 @@ function App() {
   const [dartHits, setDartHits] = React.useState([]);
   const [dartGame, setDartGame] = React.useState({ player:1, shots_done:0, shots_total:5, turn_total:0, awaiting:false, rounds:[] });
   const [connected, setConnected] = React.useState(false);
+  const [lastConvTime, setLastConvTime] = React.useState(0);
   const [appHeight, setAppHeight] = React.useState(window.innerHeight);
 
   const detectTimerRef = React.useRef(null);
+  const clearTimerRef  = React.useRef(null);
   const esRef = React.useRef(null);
   const statusRef = React.useRef(status);
   statusRef.current = status;
@@ -1906,6 +1929,17 @@ function App() {
     window.addEventListener('resize', onResize);
     return function() { window.removeEventListener('resize', onResize); };
   }, []);
+
+  // Auto-clear conversation clouds after 3 minutes of inactivity
+  React.useEffect(function() {
+    if (!(status.last_transcript || status.last_reply)) return;
+    clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = setTimeout(function() {
+      setStatus(function(prev) {
+        return Object.assign({}, prev, { last_transcript: '', last_reply: '' });
+      });
+    }, 3 * 60 * 1000);
+  }, [status.last_transcript, status.last_reply]);
 
   // Load dart data when switching to darts tab
   React.useEffect(function() {
@@ -1934,6 +1968,7 @@ function App() {
         try {
           var data = JSON.parse(e.data);
           if (data.type === 'status') {
+            if (data.last_transcript || data.last_reply) setLastConvTime(Date.now());
             setStatus(function(prev) {
               return Object.assign({}, prev, {
                 state: data.state || prev.state,
@@ -1958,6 +1993,7 @@ function App() {
             });
             // Show what Whisper heard immediately in the question cloud
             if (data.level === 'stt' && data.msg) {
+              setLastConvTime(Date.now());
               setStatus(function(prev) { return Object.assign({}, prev, { last_transcript: data.msg }); });
             }
           } else if (data.type === 'dart_hit') {
@@ -2005,7 +2041,7 @@ function App() {
 
   return React.createElement('div', { id: 'app', style: { height: appHeight + 'px', display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
     React.createElement(Header, { status: status, onWake: handleWake, onPause: handlePause, onMuteToggle: handleMuteToggle, onRestart: handleRestart }),
-    tab === 'home'  && React.createElement(HomeTab,   { status: status, detectFlash: detectFlash, connected: connected, onWake: handleWake }),
+    tab === 'home'  && React.createElement(HomeTab,   { status: status, detectFlash: detectFlash, connected: connected, onWake: handleWake, lastConvTime: lastConvTime }),
     tab === 'cam'   && React.createElement(CameraTab,  { active: tab === 'cam',   camStatus: status.cam_status, detStatus: status.det_status, detections: detections }),
     tab === 'darts' && React.createElement(DartsTab,   { active: tab === 'darts', hits: dartHits, game: dartGame }),
     tab === 'log'   && React.createElement(LogTab,     { logs: logs, onClear: function(){ setLogs([]); } }),
