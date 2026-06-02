@@ -131,7 +131,7 @@ class AudioRecorder:
         frame_b    = _frame_bytes(frame_ms)
         silence_frames_needed = int(VAD_SILENCE_SEC * 1000 / frame_ms)
         min_speech_frames     = int(VAD_MIN_SPEECH_MS / frame_ms)
-        preroll_frames        = 10   # 300 ms ring buffer
+        preroll_frames        = 20   # 600 ms ring buffer — captures speech start missed by quiet-VAD
 
         ring:       collections.deque[bytes] = collections.deque(maxlen=preroll_frames)
         speech_buf: list[bytes] = []
@@ -257,9 +257,9 @@ def _is_hallucination(text: str) -> bool:
 _ALLOWED_LANGUAGES = {"en", "hi"}
 
 
-_MIN_RMS    = float(os.getenv("WHISPER_MIN_RMS",    "0.008"))  # below this = silence/noise, skip Whisper
+_MIN_RMS    = float(os.getenv("WHISPER_MIN_RMS",    "0.004"))  # below this = silence/noise, skip Whisper
 _TARGET_RMS = float(os.getenv("WHISPER_TARGET_RMS", "0.060"))  # amplify quiet speech up to this level
-_MAX_GAIN   = float(os.getenv("WHISPER_MAX_GAIN",   "8.0"))    # cap amplification (avoid blowing up noise)
+_MAX_GAIN   = float(os.getenv("WHISPER_MAX_GAIN",   "12.0"))   # cap amplification
 
 
 def amplify_pcm(pcm: bytes) -> tuple[bytes, float]:
