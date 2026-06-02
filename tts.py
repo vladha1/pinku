@@ -281,8 +281,17 @@ _ENTRY_CHIME_COOLDOWN = 25.0   # seconds
 
 def play_beep(entry: bool = False):
     """Soft two-note C5→G5 — wake confirmed / action acknowledged / person entry.
-    Pass entry=True for camera person-detection chimes to apply cooldown."""
-    return   # tones disabled — only mute/unmute tones are active
+    Pass entry=True for camera person-detection chimes to apply cooldown.
+    NOTE: temporary — will be removed once listening behaviour is smooth."""
+    global _last_entry_chime_at
+    if _silent.is_set():
+        return
+    if entry:
+        now = time.time()
+        if now - _last_entry_chime_at < _ENTRY_CHIME_COOLDOWN:
+            return
+        _last_entry_chime_at = now
+    _play(_CHIME_PATH)
 
 
 def play_think():

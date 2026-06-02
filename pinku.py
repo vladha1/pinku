@@ -337,8 +337,7 @@ def _handle_pause():
     Muted → unmute + reopen session immediately (no wake word needed).
     Unmuted → stop speech + user-mute (stays muted until voice/gesture)."""
     if _user_muted.is_set():
-        _handle_unmute()
-        _extend_session()   # re-open session so you can talk right away
+        _handle_unmute()   # _handle_unmute() already calls _extend_session() internally
     else:
         tts.stop_speaking()
         _log("info", "Paused ⏸ — press again, wave, or say 'Pinku' to resume")
@@ -684,12 +683,13 @@ def on_detection(event: dict):
         _last_human_at = now
         if not _user_muted.is_set():
             if not _awake.is_set():
-                # Person detected — silently re-open session (no beep — too many
-                # false triggers from people walking past / borderline distances)
+                # Person detected — gentle ack chime + open session
+                # NOTE: chime is temporary (entry=True applies 25s cooldown)
                 _last_speech_at = now
                 _awake.set()
                 dashboard.update_status(state="awake")
                 _log("wake", "👤 Face detected → listening")
+                tts.play_beep(entry=True)
             else:
                 # Already awake — keep the inactivity timer alive while person is visible
                 _last_speech_at = now
