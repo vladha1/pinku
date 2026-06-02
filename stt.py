@@ -21,7 +21,6 @@ import numpy as np
 from config import (
     WHISPER_MODEL, WHISPER_DEVICE, WHISPER_LANGUAGE,
     MIC_SAMPLE_RATE, MIC_CHUNK_MS, VAD_SILENCE_SEC, VAD_MIN_SPEECH_MS,
-    VAD_AGGRESSIVENESS,
 )
 
 # ── lazy imports (heavy libs loaded once on first use) ────────────────────────
@@ -78,9 +77,7 @@ class AudioRecorder:
     """
 
     def __init__(self):
-        import webrtcvad
         import pyaudio
-        self._vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)   # 0-3; default 2 — balance distance vs TV rejection
         self._pa  = pyaudio.PyAudio()
         self._stream   = None
         self._running  = False
@@ -112,16 +109,6 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
-        # Pre-amplify at the mic source so VAD sees distant speech as speech.
-        # Without this, distant quiet voice never triggers in_speech=True and
-        # wait_for_utterance() only ever captures ambient noise bursts.
-        audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32)
-        rms = float(np.sqrt(np.mean(audio ** 2))) / 32768.0
-        if rms > 0.0001:  # skip dead silence
-            gain = min(_TARGET_RMS / (rms + 1e-9), _MAX_GAIN)
-            if gain > 1.0:
-                audio = np.clip(audio * gain, -32767, 32767)
-                in_data = audio.astype(np.int16).tobytes()
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
@@ -134,14 +121,33 @@ class AudioRecorder:
         Block until a complete utterance is detected (speech + trailing silence).
         Returns raw PCM bytes, or None on timeout/stop.
 
-        Ring-buffer pre-roll (300 ms) captures the start of speech that arrives
-        before VAD fires — avoids clipping the first syllable.
+        Uses adaptive RMS energy detection rather than WebRTC VAD.
+        WebRTC VAD fails for distant/quiet speech because:
+          - VAD aggressiveness > 0 rejects quiet distant speech entirely
+          - VAD aggressiveness = 0 marks everything as speech so silence is
+            never detected and the utterance never ends
+
+        Adaptive noise floor: noise_floor tracks the room's ambient level (TV,
+        AC, etc.).  Speech is detected when a frame exceeds noise_floor * SPEECH_MULT.
+        The floor only adapts during silence so loud TV doesn't raise it mid-speech.
+
+        Ring-buffer pre-roll (600 ms) captures the start of speech that arrives
+        before energy crosses the threshold — avoids clipping the first syllable.
         """
         frame_ms   = MIC_CHUNK_MS
         frame_b    = _frame_bytes(frame_ms)
         silence_frames_needed = int(VAD_SILENCE_SEC * 1000 / frame_ms)
         min_speech_frames     = int(VAD_MIN_SPEECH_MS / frame_ms)
-        preroll_frames        = 20   # 600 ms ring buffer — captures speech start missed by quiet-VAD
+        preroll_frames        = 20   # 600 ms ring buffer
+
+        # Adaptive noise floor — starts at 0.010 (roughly a quiet room) and
+        # drifts toward the actual room noise during silence frames.
+        # speech_mult: frame RMS must exceed noise_floor * speech_mult to count
+        # as speech.  2.5× ≈ +8 dB above floor, which reliably separates a human
+        # voice from ambient TV / AC without needing per-room calibration.
+        noise_floor = 0.010
+        noise_alpha = 0.01    # 1 % adaptation per 30 ms frame (~3 s to fully settle)
+        speech_mult = 2.5
 
         ring:       collections.deque[bytes] = collections.deque(maxlen=preroll_frames)
         speech_buf: list[bytes] = []
@@ -167,14 +173,18 @@ class AudioRecorder:
                 self._frames.clear()
 
             for raw in new_frames:
-                # Ensure exactly frame_b bytes for VAD
                 chunks = [raw[i:i+frame_b] for i in range(0, len(raw), frame_b)
                           if len(raw[i:i+frame_b]) == frame_b]
                 for chunk in chunks:
-                    try:
-                        is_speech = self._vad.is_speech(chunk, MIC_SAMPLE_RATE)
-                    except Exception:
-                        is_speech = False
+                    audio = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                    rms   = float(np.sqrt(np.mean(audio ** 2)))
+
+                    is_speech = rms > noise_floor * speech_mult
+
+                    # Noise floor adapts only during silence so TV/AC won't
+                    # raise it mid-utterance and swallow the end of a sentence.
+                    if not in_speech and not is_speech:
+                        noise_floor = noise_floor * (1 - noise_alpha) + rms * noise_alpha
 
                     if not in_speech:
                         ring.append(chunk)
