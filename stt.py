@@ -27,6 +27,17 @@ from config import (
 _whisper_model  = None
 _whisper_lock   = threading.Lock()
 
+# ── Mic level meter (updated in _callback, read by dashboard) ─────────────────
+_mic_rms: float = 0.0   # smoothed RMS updated every 30 ms in the PyAudio callback
+
+def get_mic_level() -> float:
+    """
+    Return normalised mic level for the dashboard meter (0.0 – 1.0).
+    Scale factor of 25× maps typical quiet-room RMS (~0.002) → ~0.05 and
+    normal conversational speech (~0.04) → ~1.0.
+    """
+    return min(_mic_rms * 25.0, 1.0)
+
 # Optional external log callback — set by pinku.py to route STT diagnostics
 # into the dashboard log.  Signature: (level: str, msg: str) -> None
 _log_cb = None
@@ -125,9 +136,17 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
+        global _mic_rms
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
+        # Track smoothed RMS for the dashboard mic meter (fast EWA, no blocking)
+        try:
+            audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            _mic_rms = _mic_rms * 0.6 + rms * 0.4   # 40% weight → reacts quickly
+        except Exception:
+            pass
         return (None, pyaudio.paContinue)
 
     def wait_for_utterance(self,

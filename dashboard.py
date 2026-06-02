@@ -255,6 +255,16 @@ def camera_snapshot():
     except Exception as e:
         return (str(e), 503)
 
+@_app.route("/api/mic_level")
+def mic_level_api():
+    """Fast-poll endpoint for the dashboard mic meter (~12 fps)."""
+    try:
+        import stt as _stt
+        level = _stt.get_mic_level()
+    except Exception:
+        level = 0.0
+    return json.dumps({"level": round(level, 3)})
+
 @_app.route("/api/dart/hits")
 def dart_hits():
     from flask import jsonify
@@ -754,6 +764,9 @@ body {
 .ws-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .ws-dot.on  { background: #4ade80; -webkit-box-shadow: 0 0 5px rgba(74,222,128,0.6); box-shadow: 0 0 5px rgba(74,222,128,0.6); }
 .ws-dot.off { background: #64748b; }
+/* ── Mic level meter ── */
+.mic-meter { display: -webkit-flex; display: flex; -webkit-align-items: flex-end; align-items: flex-end; gap: 2px; height: 18px; }
+.mic-bar { width: 3px; min-height: 2px; border-radius: 2px; background: rgba(147,197,253,0.7); -webkit-will-change: height,opacity; will-change: height,opacity; }
 
 /* ── Face wrap ── */
 .face-wrap {
@@ -1523,6 +1536,68 @@ function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
   );
 }
 
+// ── MicMeter ───────────────────────────────────────────────────────────────────
+// Polls /api/mic_level every 80 ms; drives bar heights via requestAnimationFrame.
+function MicMeter({ muted }) {
+  var N = 8;
+  var barsRef   = React.useRef([]);
+  var levelRef  = React.useRef(0);
+  var smoothRef = React.useRef(0);
+  var frameRef  = React.useRef(null);
+  var tRef      = React.useRef(0);
+
+  // Poll backend for actual mic RMS
+  React.useEffect(function() {
+    var alive = true;
+    function poll() {
+      if (!alive) return;
+      fetch('/api/mic_level')
+        .then(function(r) { return r.json(); })
+        .then(function(d) { levelRef.current = d.level || 0; })
+        .catch(function() {})
+        .finally(function() { if (alive) setTimeout(poll, 80); });
+    }
+    poll();
+    return function() { alive = false; };
+  }, []);
+
+  // RAF animation loop — smooth interpolation + per-bar wave offset
+  React.useEffect(function() {
+    function frame() {
+      tRef.current += 0.09;
+      var t  = tRef.current;
+      var lv = muted ? 0 : levelRef.current;
+      // Smooth toward target level
+      smoothRef.current = smoothRef.current * 0.72 + lv * 0.28;
+      var s = smoothRef.current;
+      barsRef.current.forEach(function(bar, i) {
+        if (!bar) return;
+        // Each bar has a unique phase; speed scales up with level (more energy = faster)
+        var wave  = Math.sin(t * (2.5 + s * 4) + i * 1.05) * 0.5 + 0.5;
+        var h     = Math.max(2, Math.round(2 + s * 15 * wave));
+        var alpha = (0.30 + s * 0.70).toFixed(2);
+        bar.style.height  = h + 'px';
+        bar.style.opacity = alpha;
+      });
+      frameRef.current = requestAnimationFrame(frame);
+    }
+    frameRef.current = requestAnimationFrame(frame);
+    return function() { cancelAnimationFrame(frameRef.current); };
+  }, [muted]);
+
+  var bars = [];
+  for (var i = 0; i < N; i++) {
+    (function(idx) {
+      bars.push(React.createElement('div', {
+        key: idx,
+        className: 'mic-bar',
+        ref: function(el) { barsRef.current[idx] = el; }
+      }));
+    })(i);
+  }
+  return React.createElement('div', { className: 'mic-meter', title: 'Mic level' }, bars);
+}
+
 // ── HomeTab ────────────────────────────────────────────────────────────────────
 function HomeTab({ status, detectFlash, connected, onWake, lastConvTime }) {
   const faceClass = getFaceClass(status, detectFlash);
@@ -1603,6 +1678,7 @@ function HomeTab({ status, detectFlash, connected, onWake, lastConvTime }) {
           React.createElement('span', { className: 'status-bar-sub' }, dynamicSub)
         ),
         React.createElement('div', { className: 'status-bar-right' },
+          React.createElement(MicMeter, { muted: status.muted }),
           React.createElement('span', { className: 'ws-dot ' + (connected ? 'on' : 'off') })
         )
       )
