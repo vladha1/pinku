@@ -1172,6 +1172,7 @@ def main():
         print("[MIC] Input volume set to 100")
     except Exception as _e:
         print(f"[MIC] Could not set input volume: {_e}")
+    stt.set_log_callback(_log)   # route STT diagnostics → dashboard log
     recorder = stt.AudioRecorder()
     recorder.start()
 

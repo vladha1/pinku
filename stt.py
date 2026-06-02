@@ -27,6 +27,22 @@ from config import (
 _whisper_model  = None
 _whisper_lock   = threading.Lock()
 
+# Optional external log callback — set by pinku.py to route STT diagnostics
+# into the dashboard log.  Signature: (level: str, msg: str) -> None
+_log_cb = None
+
+def set_log_callback(fn):
+    global _log_cb
+    _log_cb = fn
+
+def _stt_log(msg: str):
+    print(msg)
+    if _log_cb:
+        try:
+            _log_cb("info", msg)
+        except Exception:
+            pass
+
 def _load_whisper():
     global _whisper_model
     if _whisper_model is not None:
@@ -206,7 +222,7 @@ class AudioRecorder:
                             silence_streak = 0
                             speech_frames  = 1
                             speech_buf     = list(ring)   # include preroll
-                            print(f"[STT] speech start — rms_det={rms_det:.4f} floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
+                            _stt_log(f"[STT] speech start — det={rms_det:.4f} floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
                     else:
                         speech_buf.append(chunk)
                         if is_speech:
@@ -222,11 +238,10 @@ class AudioRecorder:
                                 speech_buf = []
                                 ring.clear()
 
-        # Timed out — print diagnostics so we can tune thresholds
+        # Timed out — log diagnostics so we can tune thresholds
         if total_frames > 0:
-            print(f"[STT] timeout: frames={total_frames} peak_det={peak_rms_det:.4f} "
-                  f"floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f} "
-                  f"(DETECT_GAIN={DETECT_GAIN})")
+            _stt_log(f"[STT] no-speech: peak={peak_rms_det:.4f} floor={noise_floor:.4f} "
+                     f"thr={noise_floor*speech_mult:.4f} frames={total_frames}")
         return None
 
 
