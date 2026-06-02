@@ -206,11 +206,11 @@ Is the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in
 - Wake word alone (nothing actionable after it) → "ignore"."""
 
 _WAKE_RULE_SESSION = """\
-You are in an ACTIVE CONVERSATION SESSION — the person is already talking to you.
-No wake word is required. Respond to any clear question or command directed at you.
-Note: background music may be playing through a speaker — focus only on the human voice.
-- Clear question, request, or statement → pick the appropriate action.
-- Pure background noise, TV audio, or someone talking to another person → "ignore".
+You are in an ACTIVE CONVERSATION SESSION — the person is talking TO YOU.
+No wake word is required. Everything a human voice says is addressed to you until the session ends.
+Do NOT require the wake word. Do NOT second-guess whether it was meant for you.
+- Any spoken words from a human → respond (question, statement, joke, insult, anything).
+- Only ignore: clear TV/music playing in the background (not a live human voice), or complete silence/unintelligible audio.
 - Silence / unintelligible → "ignore"."""
 
 def _make_transcribe_system(session_active: bool) -> str:
