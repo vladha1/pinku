@@ -981,8 +981,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         triggered, _ = _check_wake(text)
                         if triggered:
                             _log("wake", "🔤 Wake word heard while muted → unmuting + opening session")
-                            _handle_unmute()
-                            _extend_session()
+                            _handle_unmute()   # _handle_unmute() already calls _extend_session()
                     else:
                         _log("info", f"Muted — no speech ({dur:.1f}s)")
             continue
@@ -1150,6 +1149,14 @@ def main():
         set_laser_bull(_laser_bull_x, _laser_bull_y)
 
     # ── Mic ───────────────────────────────────────────────────────────────────
+    # Boost macOS input volume to maximum so distant speech reaches the mic pipeline
+    try:
+        import subprocess as _sp
+        _sp.run(["osascript", "-e", "set volume input volume 100"],
+                capture_output=True, timeout=3)
+        print("[MIC] Input volume set to 100")
+    except Exception as _e:
+        print(f"[MIC] Could not set input volume: {_e}")
     recorder = stt.AudioRecorder()
     recorder.start()
 

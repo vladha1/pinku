@@ -112,6 +112,16 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
+        # Pre-amplify at the mic source so VAD sees distant speech as speech.
+        # Without this, distant quiet voice never triggers in_speech=True and
+        # wait_for_utterance() only ever captures ambient noise bursts.
+        audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32)
+        rms = float(np.sqrt(np.mean(audio ** 2))) / 32768.0
+        if rms > 0.0001:  # skip dead silence
+            gain = min(_TARGET_RMS / (rms + 1e-9), _MAX_GAIN)
+            if gain > 1.0:
+                audio = np.clip(audio * gain, -32767, 32767)
+                in_data = audio.astype(np.int16).tobytes()
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
