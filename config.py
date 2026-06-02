@@ -56,7 +56,7 @@ LASER_MAX_AREA    = int(os.getenv("LASER_MAX_AREA", "400"))
 LASER_MAX_DOTS    = int(os.getenv("LASER_MAX_DOTS", "5"))
 
 # ── Voice activity detection ──────────────────────────────────────────────────
-VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "1.2"))  # wait longer for silence — captures full distant utterance
+VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.8"))  # silence needed to end utterance — 0.8s balances response speed vs cutting off speech
 VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "150"))  # ignore clips shorter than this
 # VAD aggressiveness 0-3: 0=breaks silence detection (everything=speech, never ends)
 # 1 = permissive enough for distance, still detects silence gaps properly

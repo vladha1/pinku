@@ -33,10 +33,10 @@ _mic_rms: float = 0.0   # smoothed RMS updated every 30 ms in the PyAudio callba
 def get_mic_level() -> float:
     """
     Return normalised mic level for the dashboard meter (0.0 – 1.0).
-    Scale factor of 25× maps typical quiet-room RMS (~0.002) → ~0.05 and
-    normal conversational speech (~0.04) → ~1.0.
+    Scale factor of 8× keeps normal speech around 0.4–0.7 instead of
+    clipping at 1.0 immediately.
     """
-    return min(_mic_rms * 25.0, 1.0)
+    return min(_mic_rms * 8.0, 1.0)
 
 # Optional external log callback — set by pinku.py to route STT diagnostics
 # into the dashboard log.  Signature: (level: str, msg: str) -> None
@@ -175,20 +175,27 @@ class AudioRecorder:
         min_speech_frames     = int(VAD_MIN_SPEECH_MS / frame_ms)
         preroll_frames        = 20   # 600 ms ring buffer
 
-        # Adaptive noise floor.
-        # noise_floor tracks room ambient (TV, AC, etc.) during silence frames.
-        # speech_mult: RMS must be > noise_floor * speech_mult to count as speech.
+        # ── Detection tuning ─────────────────────────────────────────────────
+        # DETECT_GAIN: boost quiet distant speech for the threshold comparison.
+        # Only used for detection — raw frames stored in speech_buf, amplified
+        # later by amplify_pcm() before Whisper/Gemini.
         #
-        # DETECT_GAIN: fixed pre-boost applied before the threshold comparison.
-        # Distant speech arrives at very low amplitude (~0.003–0.010 normalised).
-        # Without a boost the noise floor adapts to ambient and the speech/noise
-        # ratio never reaches speech_mult.  The gain is only used for the energy
-        # comparison — raw frames are stored in speech_buf and amplified later
-        # by amplify_pcm() before Whisper / Gemini.
-        noise_floor  = 0.020   # initial estimate (reset each call)
-        noise_alpha  = 0.01    # 1 % per 30 ms frame ≈ 3 s to fully settle
-        speech_mult  = 2.5     # need 2.5× noise floor to trigger
-        DETECT_GAIN  = 8.0     # pre-boost for detection only (≈ +18 dB)
+        # Adaptive noise floor:
+        #   • Starts high (0.10) so the first few frames never false-trigger.
+        #   • CALIBRATION_FRAMES (15 × 30 ms = 450 ms) run at fast alpha (0.35)
+        #     so the floor drops to the actual room ambient before detection starts.
+        #   • After calibration, adapts slowly (1 % per frame) during silence only.
+        #   • If speech stays "on" for > MAX_SPEECH_SEC it's background noise;
+        #     floor is nudged up and the capture is reset.
+        DETECT_GAIN        = 8.0
+        CALIBRATION_FRAMES = 15      # 450 ms fast-settle at start of each call
+        CAL_ALPHA          = 0.35    # fast floor adaptation during calibration
+        noise_floor        = 0.10    # starts HIGH — drops to ambient during calibration
+        noise_alpha        = 0.01    # slow adaptation after calibration
+        speech_mult        = 2.5     # speech must be 2.5× floor
+        MAX_SPEECH_SEC     = 3.5     # if "speech" runs this long, assume background noise
+
+        max_speech_frames = int(MAX_SPEECH_SEC * 1000 / frame_ms)
 
         ring:       collections.deque[bytes] = collections.deque(maxlen=preroll_frames)
         speech_buf: list[bytes] = []
@@ -222,15 +229,22 @@ class AudioRecorder:
                     total_frames += 1
                     audio    = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
                     rms_raw  = float(np.sqrt(np.mean(audio ** 2)))
-                    rms_det  = min(rms_raw * DETECT_GAIN, 1.0)   # boosted, capped
+                    rms_det  = min(rms_raw * DETECT_GAIN, 1.0)
 
                     if rms_det > peak_rms_det:
                         peak_rms_det = rms_det
 
+                    # ── Calibration phase ────────────────────────────────────
+                    # Spend the first 450 ms just settling the noise floor to the
+                    # real room ambient.  No speech detection during this window.
+                    if total_frames <= CALIBRATION_FRAMES:
+                        noise_floor = noise_floor * (1 - CAL_ALPHA) + rms_det * CAL_ALPHA
+                        ring.append(chunk)
+                        continue
+
                     is_speech = rms_det > noise_floor * speech_mult
 
-                    # Noise floor adapts only during silence and on the boosted
-                    # scale so the threshold stays proportional.
+                    # Noise floor adapts during silence only
                     if not in_speech and not is_speech:
                         noise_floor = noise_floor * (1 - noise_alpha) + rms_det * noise_alpha
 
@@ -240,24 +254,38 @@ class AudioRecorder:
                             in_speech = True
                             silence_streak = 0
                             speech_frames  = 1
-                            speech_buf     = list(ring)   # include preroll
-                            _stt_log(f"[STT] speech start — det={rms_det:.4f} floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
+                            speech_buf     = list(ring)
+                            _stt_log(f"[STT] speech start — det={rms_det:.4f} "
+                                     f"floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
                     else:
                         speech_buf.append(chunk)
                         if is_speech:
                             silence_streak = 0
                             speech_frames += 1
+                            # ── Background-noise guard ────────────────────────
+                            # If "speech" has been running for > MAX_SPEECH_SEC,
+                            # it's almost certainly TV/music, not a voice command.
+                            # Nudge the floor up and reset so we can re-calibrate.
+                            if speech_frames >= max_speech_frames:
+                                noise_floor = noise_floor * 0.85 + rms_det * 0.15
+                                _stt_log(f"[STT] reset: >{MAX_SPEECH_SEC}s sustained audio "
+                                         f"→ background noise, floor→{noise_floor:.4f}")
+                                in_speech = False
+                                speech_buf = []
+                                ring.clear()
+                                speech_frames = 0
+                                silence_streak = 0
                         else:
                             silence_streak += 1
                             if silence_streak >= silence_frames_needed:
                                 if speech_frames >= min_speech_frames:
                                     return b"".join(speech_buf)
-                                # Too short — probably a noise click; reset
+                                # Too short — noise click; reset
                                 in_speech = False
                                 speech_buf = []
                                 ring.clear()
 
-        # Timed out — log diagnostics so we can tune thresholds
+        # Timed out — log diagnostics
         if total_frames > 0:
             _stt_log(f"[STT] no-speech: peak={peak_rms_det:.4f} floor={noise_floor:.4f} "
                      f"thr={noise_floor*speech_mult:.4f} frames={total_frames}")
