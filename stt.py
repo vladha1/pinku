@@ -21,6 +21,7 @@ import numpy as np
 from config import (
     WHISPER_MODEL, WHISPER_DEVICE, WHISPER_LANGUAGE,
     MIC_SAMPLE_RATE, MIC_CHUNK_MS, VAD_SILENCE_SEC, VAD_MIN_SPEECH_MS,
+    VAD_AGGRESSIVENESS,
 )
 
 # ── lazy imports (heavy libs loaded once on first use) ────────────────────────
@@ -79,7 +80,7 @@ class AudioRecorder:
     def __init__(self):
         import webrtcvad
         import pyaudio
-        self._vad = webrtcvad.Vad(3)   # aggressiveness 0-3; 3 = most aggressive (rejects TV/ambient)
+        self._vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)   # 0-3; default 2 — balance distance vs TV rejection
         self._pa  = pyaudio.PyAudio()
         self._stream   = None
         self._running  = False
@@ -256,7 +257,25 @@ def _is_hallucination(text: str) -> bool:
 _ALLOWED_LANGUAGES = {"en", "hi"}
 
 
-_MIN_RMS = float(os.getenv("WHISPER_MIN_RMS", "0.015"))  # below this = too quiet, skip Whisper
+_MIN_RMS    = float(os.getenv("WHISPER_MIN_RMS",    "0.008"))  # below this = silence/noise, skip Whisper
+_TARGET_RMS = float(os.getenv("WHISPER_TARGET_RMS", "0.060"))  # amplify quiet speech up to this level
+_MAX_GAIN   = float(os.getenv("WHISPER_MAX_GAIN",   "8.0"))    # cap amplification (avoid blowing up noise)
+
+
+def amplify_pcm(pcm: bytes) -> tuple[bytes, float]:
+    """
+    Amplify quiet PCM audio to _TARGET_RMS so distant speech is clear to Whisper/Gemini.
+    Returns (amplified_pcm, original_rms).
+    Audio below _MIN_RMS is returned unchanged — caller should discard it.
+    """
+    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    rms = float(np.sqrt(np.mean(audio ** 2)))
+    if rms >= _MIN_RMS and rms < _TARGET_RMS:
+        gain = min(_TARGET_RMS / rms, _MAX_GAIN)
+        audio = np.clip(audio * gain, -1.0, 1.0)
+        pcm = (audio * 32767).astype(np.int16).tobytes()
+    return pcm, rms
+
 
 def transcribe(pcm: bytes) -> str:
     """
@@ -264,13 +283,12 @@ def transcribe(pcm: bytes) -> str:
     Returns the cleaned transcript string, or "" if likely hallucination/noise.
     Silently drops any language other than English or Hindi.
     """
-    # Energy gate — reject audio that's too quiet to be intentional speech.
-    # TV audio picked up from across the room is typically low RMS at the mic.
-    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    rms = float(np.sqrt(np.mean(audio ** 2)))
+    # Amplify quiet distant speech, then gate on minimum energy.
+    pcm, rms = amplify_pcm(pcm)
     if rms < _MIN_RMS:
         print(f"[STT] Dropped — RMS {rms:.4f} below threshold {_MIN_RMS}")
         return ""
+    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
     model = _load_whisper()
 

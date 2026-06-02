@@ -240,6 +240,13 @@ def transcribe_and_respond(
     if not GEMINI_API_KEY:
         return None
 
+    # Amplify quiet/distant speech before sending to Gemini
+    try:
+        from stt import amplify_pcm
+        pcm, _ = amplify_pcm(pcm)
+    except Exception:
+        pass
+
     # Pack PCM into a WAV buffer
     buf = io.BytesIO()
     with _wave.open(buf, "wb") as wf:
