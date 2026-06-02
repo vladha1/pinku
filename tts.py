@@ -163,6 +163,11 @@ def stop_speaking():
 
 
 def is_speaking() -> bool:
+    global _speaking
+    # Self-heal: if the proc finished but _speaking wasn't cleared (e.g. hung wait),
+    # detect it here so the voice loop never stays blocked forever.
+    if _speaking and _current_proc is not None and _current_proc.poll() is not None:
+        _speaking = False
     return _speaking
 
 
@@ -190,7 +195,11 @@ def _speak_edge(text: str, voice: str) -> float:
             ["afplay", tmp.name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        _current_proc.wait()
+        try:
+            _current_proc.wait(timeout=60)   # never hang forever
+        except subprocess.TimeoutExpired:
+            _current_proc.terminate()
+            print("[TTS] afplay timed out — killed")
     except Exception as e:
         print(f"[TTS] edge-tts error: {e} — falling back to say")
         return _speak_say(text, SAY_VOICE_HI if _is_hindi(text) else SAY_VOICE_EN)
@@ -231,7 +240,11 @@ def _speak_say(text: str, voice: str) -> float:
             ["say", "-v", voice, "-r", str(SAY_RATE), text],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        _current_proc.wait()
+        try:
+            _current_proc.wait(timeout=60)   # never hang forever
+        except subprocess.TimeoutExpired:
+            _current_proc.terminate()
+            print("[TTS] say timed out — killed")
     except Exception as e:
         print(f"[TTS] say error: {e}")
     return duration
