@@ -269,6 +269,7 @@ def transcribe(pcm: bytes) -> str:
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     rms = float(np.sqrt(np.mean(audio ** 2)))
     if rms < _MIN_RMS:
+        print(f"[STT] Dropped — RMS {rms:.4f} below threshold {_MIN_RMS}")
         return ""
 
     model = _load_whisper()

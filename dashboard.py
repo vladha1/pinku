@@ -1069,7 +1069,7 @@ body {
 
 .face.listening .mouth, .face.awake .mouth {
   width: 36%; top: 70.5%; height: 21px;
-  -webkit-animation: lip-soft 2s ease-in-out infinite; animation: lip-soft 2s ease-in-out infinite;
+  /* no lip animation when listening — lips only move when actually speaking */
 }
 .face.listening .eye:after { -webkit-animation: eye-glow 1.4s ease-in-out infinite; animation: eye-glow 1.4s ease-in-out infinite; }
 .face.listening .eye:before { -webkit-animation: eye-sparkle 2.4s ease-in-out infinite; animation: eye-sparkle 2.4s ease-in-out infinite; }
@@ -1079,7 +1079,7 @@ body {
 .face.awake .eye:after { -webkit-animation: eye-glow 1.05s ease-in-out infinite; animation: eye-glow 1.05s ease-in-out infinite; }
 .face.awake .eye:before { -webkit-animation: eye-sparkle 1.6s ease-in-out infinite; animation: eye-sparkle 1.6s ease-in-out infinite; }
 .face.awake .cheek { -webkit-animation: cheek-pulse 1.5s ease-in-out infinite; animation: cheek-pulse 1.5s ease-in-out infinite; }
-.face.awake .mouth { -webkit-animation: lip-soft 1.8s ease-in-out infinite; animation: lip-soft 1.8s ease-in-out infinite; }
+/* .face.awake .mouth — no lip animation; overridden above */
 .face.thinking .eye:after { top:46%; left:52%; -webkit-animation: eye-glow-think 2.2s ease-in-out infinite; animation: eye-glow-think 2.2s ease-in-out infinite; }
 .face.thinking .brow.left  { -webkit-transform: rotate(-5deg) translateY(0); transform: rotate(-5deg) translateY(0); }
 .face.thinking .brow.right { -webkit-transform: rotate(5deg) translateY(0); transform: rotate(5deg) translateY(0); }
@@ -1089,7 +1089,7 @@ body {
   background: linear-gradient(180deg, rgba(253,242,248,0.5), rgba(236,72,153,0.48));
   -webkit-box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
   box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
-  -webkit-animation: lip-think 1.8s ease-in-out infinite; animation: lip-think 1.8s ease-in-out infinite;
+  /* no lip animation while thinking */
 }
 .face.thinking .eye:before { -webkit-animation: eye-sparkle 3.4s ease-in-out infinite; animation: eye-sparkle 3.4s ease-in-out infinite; }
 .face.thinking .cheek { -webkit-animation: cheek-pulse 3s ease-in-out infinite; animation: cheek-pulse 3s ease-in-out infinite; }
@@ -1100,7 +1100,7 @@ body {
   background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.35), rgba(251,113,133,0.45));
   -webkit-box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
   box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
-  -webkit-animation: lip-soft 0.45s ease-in-out infinite; animation: lip-soft 0.45s ease-in-out infinite;
+  /* no lip animation for triggered */
 }
 .face.triggered .eye:after { -webkit-animation: eye-glow 0.6s ease-in-out infinite; animation: eye-glow 0.6s ease-in-out infinite; }
 .face.triggered .eye:before { -webkit-animation: eye-sparkle 1.1s ease-in-out infinite; animation: eye-sparkle 1.1s ease-in-out infinite; }
@@ -1375,12 +1375,12 @@ body {
 <script type="text/babel">
 // ── Constants ──────────────────────────────────────────────────────────────────
 const STATE_UI = {
-  sleeping:  { icon:'😴', label:'Sleeping',   sub:'Say "Pinku" to wake me' },
-  awake:     { icon:'👂', label:'Listening…', sub:'Speak freely — or tap 🎙️' },
-  thinking:  { icon:'⚡', label:'On it…',     sub:'Processing your request' },
-  speaking:  { icon:'🗣️', label:'Speaking…',  sub:'Tap ⏸ to stop' },
-  paused:    { icon:'🔇', label:'Muted',      sub:'Tap mic or wave ✋ to resume' },
-  triggered: { icon:'⚡', label:'On it…',     sub:'Running your command' },
+  sleeping:  { icon:'😴', label:'Idle',        sub:'Say "Pinku" to wake — or tap 🎙️' },
+  awake:     { icon:'👂', label:'Listening',   sub:'Go ahead, I\'m listening…' },
+  thinking:  { icon:'⚡', label:'Thinking…',   sub:'Sending to Gemini' },
+  speaking:  { icon:'🗣️', label:'Speaking…',   sub:'Tap ⏸ to stop' },
+  paused:    { icon:'🔇', label:'Muted',       sub:'Tap ⏸ again or wave to resume' },
+  triggered: { icon:'⚡', label:'Working…',    sub:'Running your command' },
 };
 
 const LOG_COLORS = {
@@ -1956,6 +1956,10 @@ function App() {
             setLogs(function(prev) {
               return [{ level: data.level || 'info', msg: data.msg || '', ts: data.ts || '' }].concat(prev).slice(0, 200);
             });
+            // Show what Whisper heard immediately in the question cloud
+            if (data.level === 'stt' && data.msg) {
+              setStatus(function(prev) { return Object.assign({}, prev, { last_transcript: data.msg }); });
+            }
           } else if (data.type === 'dart_hit') {
             setDartHits(function(prev) { return prev.concat([data]).slice(-20); });
           } else if (data.type === 'dart_reset') {

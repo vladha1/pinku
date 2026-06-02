@@ -969,10 +969,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if _user_muted.is_set():
             pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
             if pcm and not tts.is_speaking():
-                # Skip long utterances — wake word is always < 3s; TV speech is long.
-                # 16-bit mono: bytes / (rate * 2 bytes/sample) = seconds
-                duration_est = len(pcm) / (16000 * 2)
-                if duration_est <= 3.5:
+                dur = len(pcm) / (16000 * 2)
+                if dur > 6.0:
+                    _log("info", f"Muted — skipped long audio ({dur:.1f}s)")
+                else:
                     try:
                         text = stt.transcribe(pcm)
                     except Exception:
@@ -983,6 +983,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
                             _log("wake", "🔤 Wake word heard while muted → unmuting + opening session")
                             _handle_unmute()
                             _extend_session()
+                    else:
+                        _log("info", f"Muted — no speech ({dur:.1f}s)")
             continue
 
         # ── Brief/automatic mute (TTS settle, post-action pause) — skip ──────
@@ -1033,8 +1035,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 continue
 
             # ── Gate: idle mode — Whisper locally for wake word only ─────────
-            # Wake word is always < 3s — skip longer utterances (TV monologues)
-            if len(pcm) / (16000 * 2) > 3.5:
+            dur = len(pcm) / (16000 * 2)
+            if dur > 6.0:
+                _log("info", f"Idle — skipped long audio ({dur:.1f}s)")
                 continue
             try:
                 text = stt.transcribe(pcm)
@@ -1042,6 +1045,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _log("error", f"STT error: {e}")
                 continue
             if not text:
+                _log("info", f"Idle — no speech ({dur:.1f}s)")
                 continue
 
             _log("stt", text)
@@ -1050,7 +1054,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _log("info", f'Idle — no wake word: "{text}"')
                 continue
 
-            # Wake word confirmed
+            # Wake word confirmed — update question cloud immediately
+            if command:
+                dashboard.update_status(last_transcript=command)
             _awake.set()
             _last_speech_at = time.time()
             _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
