@@ -1375,11 +1375,11 @@ body {
 <script type="text/babel">
 // ── Constants ──────────────────────────────────────────────────────────────────
 const STATE_UI = {
-  sleeping:  { icon:'😴', label:'Idle',        sub:'Say "Pinku" to wake — or tap 🎙️' },
+  sleeping:  { icon:'💤', label:'Sleeping',    sub:'Face or "Pinku" to wake' },
   awake:     { icon:'👂', label:'Listening',   sub:'Go ahead, I\'m listening…' },
   thinking:  { icon:'⚡', label:'Thinking…',   sub:'Sending to Gemini' },
   speaking:  { icon:'🗣️', label:'Speaking…',   sub:'Tap ⏸ to stop' },
-  paused:    { icon:'🔇', label:'Muted',       sub:'Tap ⏸ again or wave to resume' },
+  paused:    { icon:'🔇', label:'Muted',       sub:'Tap 🎙️ or wave to unmute' },
   triggered: { icon:'⚡', label:'Working…',    sub:'Running your command' },
 };
 
@@ -1473,9 +1473,10 @@ function Face({ faceClass }) {
 }
 
 // ── Header ─────────────────────────────────────────────────────────────────────
-function Header({ status, onWake, onPause, onMuteToggle, onRestart }) {
+function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
   const faceClass = getFaceClass(status, false);
   const isMuted = status.muted;
+  const isActive = status.state === 'awake' || status.state === 'processing' || status.speaking;
 
   function handleRestart() {
     if (!window.confirm('git pull + restart Pinku?')) return;
@@ -1496,20 +1497,21 @@ function Header({ status, onWake, onPause, onMuteToggle, onRestart }) {
             title: 'Person detected'
           }, '👤'),
           React.createElement('span', {
-            className: 'spill' + (status.state === 'awake' || status.state === 'processing' || status.speaking ? ' on' : ''),
+            className: 'spill' + (isActive ? ' on' : ''),
             title: 'Session'
           }, '💬')
         )
       )
     ),
     React.createElement('div', { className: 'header-btns' },
-      React.createElement('button', {
-        className: 'hdr-btn stop-btn', title: 'Pause',
-        onClick: onPause
-      }, '⏸'),
+      !isMuted && React.createElement('button', {
+        className: 'hdr-btn stop-btn',
+        title: isActive ? 'Sleep — end conversation, stay listening' : 'Sleep',
+        onClick: onSleep
+      }, '💤'),
       React.createElement('button', {
         className: 'hdr-btn mute-btn' + (isMuted ? ' active' : ''),
-        title: isMuted ? 'Unmute' : 'Mute',
+        title: isMuted ? 'Unmute — back to standby' : 'Mute — hard off, no listening',
         onClick: onMuteToggle
       }, isMuted ? '🎙️' : '🔇'),
       React.createElement('button', {
@@ -2028,6 +2030,10 @@ function App() {
     apiAction('wake');
     setStatus(function(prev) { return Object.assign({}, prev, { state: 'awake' }); });
   }
+  function handleSleep() {
+    apiAction('sleep');
+    setStatus(function(prev) { return Object.assign({}, prev, { state: 'idle', speaking: false }); });
+  }
   function handlePause() { apiAction('pause'); }
   function handleMuteToggle() { apiAction('mute_toggle'); }
   function handleRestart() {
@@ -2040,7 +2046,7 @@ function App() {
   }
 
   return React.createElement('div', { id: 'app', style: { height: appHeight + 'px', display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
-    React.createElement(Header, { status: status, onWake: handleWake, onPause: handlePause, onMuteToggle: handleMuteToggle, onRestart: handleRestart }),
+    React.createElement(Header, { status: status, onWake: handleWake, onSleep: handleSleep, onPause: handlePause, onMuteToggle: handleMuteToggle, onRestart: handleRestart }),
     tab === 'home'  && React.createElement(HomeTab,   { status: status, detectFlash: detectFlash, connected: connected, onWake: handleWake, lastConvTime: lastConvTime }),
     tab === 'cam'   && React.createElement(CameraTab,  { active: tab === 'cam',   camStatus: status.cam_status, detStatus: status.det_status, detections: detections }),
     tab === 'darts' && React.createElement(DartsTab,   { active: tab === 'darts', hits: dartHits, game: dartGame }),

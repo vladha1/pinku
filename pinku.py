@@ -303,20 +303,46 @@ def _handle_scripture(action: dict):
 
 
 
+def _handle_sleep():
+    """End the active session and return to standby / sleep.
+
+    Pinku stays LISTENING in the background — she will auto-wake on face
+    detection or wake word.  Use this to end a conversation without switching
+    off the microphone entirely.  Different from mute: she can still wake up
+    on her own.
+    """
+    global _last_speech_at
+    tts.stop_speaking()
+    _awake.clear()
+    _session_hist.clear()
+    _last_speech_at = 0.0
+    tts.play_sleep()
+    dashboard.update_status(state="idle")
+    _log("info", "Sleeping 💤 — will wake on face or 'Pinku'")
+
+
 def _handle_mute():
+    """Hard mute — mic is fully disabled, no listening at all.
+
+    Use when TV is playing loudly, people are sleeping, or you want Pinku
+    completely silent.  She will NOT auto-wake on face detection or wake word
+    while muted — only an explicit gesture/button unmutes her.
+    """
     global _settle_until
-    _user_muted.set()    # track user intent separately from speaking-mute
+    _user_muted.set()    # hard-mute flag checked in voice loop
     _muted.set()
     _awake.clear()
+    _session_hist.clear()
     _settle_until = 0.0   # cancel any pending settle window
     tts.stop_speaking()
     tts.set_silent(True)  # suppress all tones while muted
-    tts.play_mute()       # entry tone is still OK (transition, not during muted state)
+    tts.play_mute()       # transition tone is still OK
     dashboard.update_status(state="idle", muted=True)
-    _log("info", "Muted 🔇")
+    _log("info", "Muted 🔇 — hard off, no listening")
 
 
 def _handle_unmute():
+    """Unmute from hard-mute state and open a fresh session."""
     global _settle_until
     tts.set_silent(False)  # re-enable tones before playing wake sound
     _user_muted.clear()
@@ -333,15 +359,18 @@ def _handle_unmute():
 
 
 def _handle_pause():
-    """Pause / stop button — toggles user-mute for reliability.
-    Muted → unmute + reopen session immediately (no wake word needed).
-    Unmuted → stop speech + user-mute (stays muted until voice/gesture)."""
+    """⏸ button handler.
+
+    In active session  → sleep (end conversation, stay in standby).
+    In standby/sleep   → no-op (already resting).
+    Hard muted         → unmute back to standby.
+    """
     if _user_muted.is_set():
-        _handle_unmute()   # _handle_unmute() already calls _extend_session() internally
-    else:
+        _handle_unmute()   # hard-mute → back to standby
+    elif _awake.is_set() or tts.is_speaking():
         tts.stop_speaking()
-        _log("info", "Paused ⏸ — press again, wave, or say 'Pinku' to resume")
-        _handle_mute()
+        _handle_sleep()    # end active conversation
+    # else: already sleeping — nothing to do
 
 
 def _extend_session():
@@ -392,23 +421,26 @@ def _gesture_hands_up():
 
 
 def _gesture_open_hand():
-    """🖐 Open hand / wave — mute toggle from any state.
-    Muted → unmute + open session.  Unmuted → stop speech + mute."""
+    """🖐 Open hand / wave.
+    Hard-muted  → unmute back to standby.
+    In session  → sleep (end conversation, stay listening).
+    Sleeping    → hard mute (next wave unmutes)."""
     if _user_muted.is_set():
         _log("wake", "🖐 Open Hand → unmute")
         _handle_unmute()
+    elif _awake.is_set() or tts.is_speaking():
+        tts.stop_speaking()
+        _log("wake", "🖐 Open Hand → sleep")
+        _handle_sleep()
     else:
-        if tts.is_speaking():
-            tts.stop_speaking()
         _log("wake", "🖐 Open Hand → mute")
         _handle_mute()
 
 
 def _gesture_fist():
-    """✊ Closed fist — sleep / mute."""
-    _log("wake", "✊ Fist gesture → sleep")
-    tts.stop_speaking()
-    _handle_mute()
+    """✊ Closed fist — sleep (end session, stay in standby)."""
+    _log("wake", "✊ Fist → sleep")
+    _handle_sleep()
 
 
 _GESTURE_FN_MAP: dict[str, object] = {
@@ -961,29 +993,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
             time.sleep(0.2)
             continue
 
-        # ── User-explicitly-muted: listen for wake word only ─────────────────
-        # Brief automatic mutes (TTS settle, post-action pause) fall through to
-        # the next block and just sleep.  But when the user intentionally muted
-        # (gesture / button), we keep Whisper running so they can say
-        # "hey Pinku" to unmute hands-free instead of needing a gesture.
+        # ── Hard mute: mic completely off — no listening at all ──────────────
+        # Use mute when TV is on loud or people are sleeping.
+        # Sleep/idle (not muted) is the standby state — it still listens.
         if _user_muted.is_set():
-            pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
-            if pcm and not tts.is_speaking():
-                dur = len(pcm) / (16000 * 2)
-                if dur > 6.0:
-                    _log("info", f"Muted — skipped long audio ({dur:.1f}s)")
-                else:
-                    try:
-                        text = stt.transcribe(pcm)
-                    except Exception:
-                        text = ""
-                    if text:
-                        triggered, _ = _check_wake(text)
-                        if triggered:
-                            _log("wake", "🔤 Wake word heard while muted → unmuting + opening session")
-                            _handle_unmute()   # _handle_unmute() already calls _extend_session()
-                    else:
-                        _log("info", f"Muted — no speech ({dur:.1f}s)")
+            time.sleep(0.5)
             continue
 
         # ── Brief/automatic mute (TTS settle, post-action pause) — skip ──────
@@ -1123,6 +1137,7 @@ def main():
         dashboard.start(logger=_det_logger, port=args.port)
         # Wire dashboard buttons → pinku actions
         dashboard.register_action("wake",             _extend_session)
+        dashboard.register_action("sleep",            _handle_sleep)
         dashboard.register_action("mute",             _handle_mute)
         dashboard.register_action("unmute",           _handle_unmute)
         dashboard.register_action("pause",            _handle_pause)
