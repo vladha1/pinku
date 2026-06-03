@@ -1570,7 +1570,7 @@ function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
 
 // ── MicMeter ───────────────────────────────────────────────────────────────────
 // Polls /api/mic_level every 80 ms; drives bar heights via requestAnimationFrame.
-function MicMeter({ muted }) {
+function MicMeter({ muted, speaking }) {
   var N = 8;
   var barsRef   = React.useRef([]);
   var levelRef  = React.useRef(0);
@@ -1598,7 +1598,7 @@ function MicMeter({ muted }) {
     function frame() {
       tRef.current += 0.09;
       var t  = tRef.current;
-      var lv = muted ? 0 : levelRef.current;
+      var lv = (muted || speaking) ? 0 : levelRef.current;
       // Smooth toward target level (faster rise 0.40, slower fall 0.78)
       var alpha_up   = lv > smoothRef.current ? 0.40 : 0.22;
       smoothRef.current = smoothRef.current * (1 - alpha_up) + lv * alpha_up;
@@ -1618,7 +1618,7 @@ function MicMeter({ muted }) {
     }
     frameRef.current = requestAnimationFrame(frame);
     return function() { cancelAnimationFrame(frameRef.current); };
-  }, [muted]);
+  }, [muted, speaking]);
 
   var bars = [];
   for (var i = 0; i < N; i++) {
@@ -1713,7 +1713,7 @@ function HomeTab({ status, detectFlash, connected, onWake, lastConvTime }) {
           React.createElement('span', { className: 'status-bar-sub' }, dynamicSub)
         ),
         React.createElement('div', { className: 'status-bar-right' },
-          React.createElement(MicMeter, { muted: status.muted }),
+          React.createElement(MicMeter, { muted: status.muted, speaking: status.speaking }),
           React.createElement('span', { className: 'ws-dot ' + (connected ? 'on' : 'off') })
         )
       )

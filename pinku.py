@@ -976,6 +976,7 @@ def _fallback_process(pcm: bytes):
         return
     _log("user",   text)
     _log("source", f"Whisper + Ollama fallback")
+    dashboard.update_status(state="processing", last_transcript=text)
     action = llm.route(text)
     _log("info",   f"route={action.get('action')} lang={action.get('lang','en')}")
     _dispatch_action(action)

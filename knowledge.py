@@ -274,7 +274,7 @@ def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = N
     _log("user",   tr)
     _log("source", info["name"])
     reply  = _llm.chat(tr, system_extra=system, history=session_hist, is_hi=is_hi)
-    _log("pinku",  reply)
+    # Note: do NOT log("pinku") here — speak_fn (_speak_reply) does it already.
 
     if update_fn:
         update_fn(last_transcript=tr, last_reply=reply)
