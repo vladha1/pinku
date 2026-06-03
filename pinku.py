@@ -276,19 +276,28 @@ def _handle_weather(action: dict):
 
 def _handle_describe(action: dict):
     """Grab camera frame, describe via vision LLM."""
-    from camera import get_frame, frame_to_b64
-    frame = get_frame()
-    if frame is None:
-        tts.speak("Camera isn't available right now.")
-        return
     tr   = action.get("transcript", "What do you see?")
     lang = action.get("lang", "en")
-    tts.speak("Let me look…")
+    is_hi = lang == "hi"
+    try:
+        from camera import get_frame, frame_to_b64
+        frame = get_frame()
+    except Exception:
+        frame = None
+    if frame is None:
+        reply = "कैमरा अभी उपलब्ध नहीं है।" if is_hi else "Camera isn't available right now."
+        dashboard.update_status(last_transcript=tr, last_reply=reply)
+        _speak_reply(reply, is_hi)
+        return
+    tts.speak("Let me look…" if not is_hi else "देखती हूँ…")
     b64  = frame_to_b64(frame)
-    desc = llm.describe_image(b64, question=tr, is_hi=(lang == "hi"))
+    desc = llm.describe_image(b64, question=tr, is_hi=is_hi)
     print(f"[Vision] {desc!r}")
+    # Gracefully handle vision model failures
+    if desc.startswith("[") and ("error" in desc.lower() or "Error" in desc):
+        desc = "माफ करना, अभी देख नहीं पा रही।" if is_hi else "Sorry, I couldn't see anything right now."
     dashboard.update_status(last_transcript=tr, last_reply=desc)
-    _speak_reply(desc, lang == "hi")
+    _speak_reply(desc, is_hi)
 
 
 def _handle_scripture(action: dict):
