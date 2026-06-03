@@ -294,7 +294,7 @@ def _handle_describe(action: dict):
     desc = llm.describe_image(b64, question=tr, is_hi=is_hi)
     print(f"[Vision] {desc!r}")
     # Gracefully handle vision model failures
-    if desc.startswith("[") and ("error" in desc.lower() or "Error" in desc):
+    if desc == "__vision_error__" or (desc.startswith("[") and "error" in desc.lower()):
         desc = "माफ करना, अभी देख नहीं पा रही।" if is_hi else "Sorry, I couldn't see anything right now."
     dashboard.update_status(last_transcript=tr, last_reply=desc)
     _speak_reply(desc, is_hi)

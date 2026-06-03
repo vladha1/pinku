@@ -455,7 +455,6 @@ def chat(transcript: str,
 def describe_image(image_b64: str, question: str = "", is_hi: bool = False) -> str:
     """
     Send a base64 JPEG to Gemini Vision and return a description.
-    Falls back to Ollama llava if Gemini unavailable.
     """
     lang_note = " Reply in Hindi (Devanagari)." if is_hi else ""
     prompt    = (question or "Describe what you see briefly.") + lang_note
@@ -471,23 +470,8 @@ def describe_image(image_b64: str, question: str = "", is_hi: bool = False) -> s
         result = _gemini_call(contents, temperature=0.5, max_tokens=200)
         return result
     except Exception as e:
-        print(f"[LLM] Gemini vision failed ({e}) — trying Ollama llava")
-        # Fallback to local llava
-        payload = json.dumps({
-            "model": "llava:7b",
-            "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
-            "stream": False,
-            "options": {"temperature": 0.5, "num_predict": 200},
-        }).encode()
-        req = urllib.request.Request(
-            f"{OLLAMA_URL}/api/chat", data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read())["message"]["content"].strip()
-        except Exception as e2:
-            return f"[Vision error: {e2}]"
+        print(f"[LLM] Gemini vision failed: {e}")
+        return "__vision_error__"
 
 
 def models_available() -> list[str]:
