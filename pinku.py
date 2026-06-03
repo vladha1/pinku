@@ -135,13 +135,11 @@ def _speak_reply(reply: str, is_hi: bool):
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
 
-    # Release the processing lock now so the voice loop can re-enter once the
-    # settle window expires (it checks _settle_until separately).
-    try:
-        _processing.release()
-    except RuntimeError:
-        pass
-
+    # NOTE: _processing is intentionally NOT released here.
+    # tts.speak(block=True) blocks the voice loop thread anyway, so releasing
+    # early would only allow a second queued clip to slip in BEFORE the settle
+    # window is enforced — causing double-processing.  The finally block in
+    # _voice_loop releases the lock after _speak_reply returns.
     tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
@@ -405,6 +403,7 @@ def _extend_session():
 #
 # Cooldown prevents repeat-firing while hand is held steady.
 _gesture_last_at: dict[str, float] = {}
+_gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
 _GESTURE_COOLDOWN = 4.0   # seconds between same-gesture re-fires (was 8s — lowered for responsiveness)
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
@@ -416,12 +415,15 @@ _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
 
 
 def _gesture_throttle(label: str) -> bool:
-    """Return True if we should fire (not in cooldown)."""
-    now = time.time()
-    if now - _gesture_last_at.get(label, 0) < _GESTURE_COOLDOWN:
-        return False
-    _gesture_last_at[label] = now
-    return True
+    """Return True if we should fire (not in cooldown).
+    Lock makes the read-check-write atomic so simultaneous on_detection
+    calls from the camera thread can't both slip past the cooldown."""
+    with _gesture_throttle_lock:
+        now = time.time()
+        if now - _gesture_last_at.get(label, 0) < _GESTURE_COOLDOWN:
+            return False
+        _gesture_last_at[label] = now
+        return True
 
 
 def _gesture_hands_up():
@@ -987,6 +989,20 @@ def _fallback_process(pcm: bytes):
     _log("source", f"Whisper + Ollama fallback")
     dashboard.update_status(state="processing", last_transcript=text)
     action = llm.route(text)
+    act = action.get("action", "chat")
+
+    # ── Sanity guard: Ollama 3b sometimes misroutes background speech as mute/unmute.
+    # Require the actual command keyword to be present in the transcript.
+    # Without this, a phrase like "they need permission here" can become "mute".
+    _MUTE_KW   = {"mute", "stop", "quiet", "sleep", "shh", "chup", "band", "stop listening"}
+    _UNMUTE_KW = {"unmute", "wake", "listen", "start", "pinku", "pinky"}
+    if act == "mute" and not any(kw in text.lower() for kw in _MUTE_KW):
+        _log("info", f"Fallback: rejected spurious mute (no keyword): {text!r}")
+        action["action"] = "chat"
+    elif act == "unmute" and not any(kw in text.lower() for kw in _UNMUTE_KW):
+        _log("info", f"Fallback: rejected spurious unmute (no keyword): {text!r}")
+        action["action"] = "chat"
+
     _log("info",   f"route={action.get('action')} lang={action.get('lang','en')}")
     _dispatch_action(action)
 
