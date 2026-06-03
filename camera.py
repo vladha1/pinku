@@ -191,8 +191,8 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
         return None
     cnt  = max(cnts, key=cv2.contourArea)
     area = cv2.contourArea(cnt)
-    # Must cover at least 8% of crop — filters out noise
-    if area < roi.shape[0] * roi.shape[1] * 0.08:
+    # Must cover at least 7% of crop — filters out noise
+    if area < roi.shape[0] * roi.shape[1] * 0.07:
         return None
 
     # ── Convex hull + defects ─────────────────────────────────────────────────
@@ -211,13 +211,22 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
         for d in defects:
             _, _, _, depth = d[0]
             # depth is in 8.8 fixed-point → divide by 256 for pixels
-            if depth / 256.0 > sz * 0.08:   # gap > 8% of crop size
+            if depth / 256.0 > sz * 0.07:   # gap > 7% of crop size
                 n_gaps += 1
 
     # ── Classify ──────────────────────────────────────────────────────────────
-    # Only report Open Hand — a clearly open palm with 4+ finger gaps.
-    # Fist is too common a false positive (normal resting hand = zero gaps, high solidity).
-    if n_gaps >= 4:
+    # Open Hand: requires BOTH gap count AND low solidity.
+    #
+    # solidity = contour_area / hull_area
+    #   • Raised spread hand (wave): 0.55 – 0.78  → lots of concavity between fingers
+    #   • Typing / resting hand:     0.82 – 0.95  → compact blob, fingers pressed together
+    #   • Non-hand blob / arm:       > 0.90       → essentially convex
+    #
+    # Requiring solidity < 0.82 eliminates false positives from hands at keyboard
+    # or wrist regions with no intentional gesture, while accepting real waves.
+    # n_gaps >= 3: four spread fingers → three clear inter-finger gaps (thumb
+    # gap from side-on is unreliable, so we accept 3 rather than 4).
+    if n_gaps >= 3 and solidity < 0.82:
         return "Open Hand"
 
     return None
@@ -502,12 +511,15 @@ class CameraDetector:
         # much more reliable than YOLO "person" which fires on partial bodies.
         # Falls back to YOLO person count if pose model not loaded.
         if pose_model is not None:
-            pose_res = pose_model(frame, conf=0.5, verbose=False)[0]
+            pose_res = pose_model(frame, conf=0.35, verbose=False)[0]
             if pose_res.keypoints is not None:
                 for kps in pose_res.keypoints.data:
                     kps_np = kps.cpu().numpy()   # (17, 3)
 
-                    def vis(i): return kps_np[i][2] > 0.3
+                    # Lowered from 0.3 → 0.22 so distant keypoints still count.
+                    # At 3-5 m the pose model scores nose/shoulder at 0.25-0.35;
+                    # cutting at 0.3 was silently dropping real people.
+                    def vis(i): return kps_np[i][2] > 0.22
                     def kx(i):  return float(kps_np[i][0])
                     def ky(i):  return float(kps_np[i][1])
 
@@ -519,8 +531,9 @@ class CameraDetector:
                             shoulder_w = abs(kx(_KP_R_SHO) - kx(_KP_L_SHO))
                             close_enough = shoulder_w >= MIN_SHOULDER_PX
                         else:
+                            # One shoulder not visible — trust nose confidence alone
                             nose_conf = float(kps_np[_KP_NOSE][2])
-                            close_enough = nose_conf >= 0.75
+                            close_enough = nose_conf >= 0.55   # was 0.75 — too strict
                         if close_enough:
                             event["persons"] += 1
 
