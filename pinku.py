@@ -973,6 +973,24 @@ def _handle_gemini_result(result: dict):
                           "transcript": transcript, **result})
 
 
+def _has_repeated_phrase(text: str, n: int = 3) -> bool:
+    """
+    Return True if any n-gram (word sequence) appears more than once.
+    Repeated phrases are a strong signal of song lyrics or TV audio —
+    real speech almost never repeats 3-word chunks within one utterance.
+    """
+    words = text.lower().split()
+    if len(words) < n * 2:
+        return False
+    seen: set[str] = set()
+    for i in range(len(words) - n + 1):
+        ng = " ".join(words[i:i + n])
+        if ng in seen:
+            return True
+        seen.add(ng)
+    return False
+
+
 def _fallback_process(pcm: bytes):
     """
     Old pipeline: Whisper → Ollama route → handler.
@@ -985,6 +1003,14 @@ def _fallback_process(pcm: bytes):
         return
     if not text:
         return
+
+    # ── Repeated-phrase filter: song lyrics / TV audio ────────────────────────
+    # Real speech never repeats a 3-word sequence in one utterance.
+    # This catches "give her to me give her to me", "baby baby baby", etc.
+    if _has_repeated_phrase(text):
+        _log("info", f"Fallback: repeated phrase → ignoring (likely song/TV): {text!r}")
+        return
+
     _log("user",   text)
     _log("source", f"Whisper + Ollama fallback")
     dashboard.update_status(state="processing", last_transcript=text)

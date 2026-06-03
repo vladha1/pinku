@@ -68,18 +68,23 @@ Actions:
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
-- "ignore"      → background noise, unintelligible, not addressed to Pinku
+- "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
+                  unintelligible speech, or speech not clearly addressed to Pinku
 
 Rules:
 - Return ONLY valid JSON, no explanation, no markdown.
 - Include "transcript" with the user's exact words.
 - Include "lang": "en" or "lang": "hi" based on language spoken.
+- When in doubt between "chat" and "ignore", prefer "ignore".
 
 Examples:
 {"action":"chat","transcript":"what is the capital of France","lang":"en"}
 {"action":"time","transcript":"what time is it","lang":"en"}
 {"action":"scripture","topic":"gita","transcript":"what does the Gita say about fear","lang":"en"}
 {"action":"ignore","transcript":"","lang":"en"}
+{"action":"ignore","transcript":"give her to me give her to me","lang":"en"}
+{"action":"ignore","transcript":"yeh dil maange more","lang":"en"}
+{"action":"ignore","transcript":"breaking news tonight","lang":"en"}
 """
 
 _PERSONALITY = """\
@@ -287,7 +292,9 @@ def transcribe_and_respond(
                            system=system)
         print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
     except Exception as e:
-        print(f"[LLM] transcribe_and_respond: Gemini failed ({e})")
+        msg = f"Gemini audio error: {e}"
+        print(f"[LLM] {msg}")
+        _dashboard_log("warn", msg)   # show actual error in dashboard, not just "unavailable"
         return None
 
     m = re.search(r'\{.*\}', raw, re.DOTALL)
