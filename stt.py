@@ -320,6 +320,36 @@ class AudioRecorder:
         return None
 
 
+# ── Pinku-echo filter ─────────────────────────────────────────────────────────
+# When Pinku speaks, the mic can pick up her own TTS output and transcribe it
+# as a new user utterance.  We register the last 3 replies she spoke; if the
+# transcribed text shares a 4-gram with any of them it's an echo → discard.
+
+_pinku_recent: list[str] = []   # last 3 spoken replies (registered by pinku.py)
+_pinku_lock   = threading.Lock()
+
+def register_pinku_speech(text: str):
+    """Call immediately before TTS so echo-filter knows what to reject."""
+    with _pinku_lock:
+        _pinku_recent.insert(0, text.lower())
+        del _pinku_recent[3:]          # keep only last 3
+
+def _is_pinku_echo(text: str) -> bool:
+    """True if text is likely Pinku's own TTS being picked up by the mic."""
+    t = text.lower()
+    words = t.split()
+    if len(words) < 3:
+        return False
+    with _pinku_lock:
+        for reply in _pinku_recent:
+            # Check if any 4-gram from the transcript appears in Pinku's recent reply
+            for i in range(len(words) - 3):
+                ng = " ".join(words[i:i + 4])
+                if ng in reply:
+                    return True
+    return False
+
+
 # ── Hallucination filter ──────────────────────────────────────────────────────
 # Whisper hallucinates these on silence / background noise — discard them.
 _HALLUCINATION_EXACT = {
@@ -458,6 +488,10 @@ def transcribe(pcm: bytes) -> str:
 
     if _is_hallucination(text):
         print(f"[STT] Dropped hallucination: {text!r}")
+        return ""
+
+    if _is_pinku_echo(text):
+        print(f"[STT] Dropped echo of Pinku's own TTS: {text!r}")
         return ""
 
     print(f"[STT] lang={info.language} → {text!r}")

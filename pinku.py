@@ -120,6 +120,7 @@ def _speak_reply(reply: str, is_hi: bool):
         _log("info", "Already speaking — discarded duplicate reply")
         return
     _log("pinku", reply)
+    stt.register_pinku_speech(reply)   # echo filter: reject this text if mic picks it up
     dashboard.update_status(speaking=True)
     _muted.set()
 
@@ -130,7 +131,10 @@ def _speak_reply(reply: str, is_hi: bool):
     # Edge-tts can speak noticeably faster than the 95 WPM word-count estimate,
     # so without re-anchoring the mic would be dead for several extra seconds.
     known_duration = tts.known_duration(reply)
-    settle          = max(1.5, min(known_duration * 0.12, 2.5))   # 1.5 – 2.5 s
+    # Minimum 3.0 s settle — if edge-tts fails silently and returns immediately,
+    # the voice loop would otherwise resume after only ~1.5 s while room echo
+    # of the "spoken" reply is still audible (or the next utterance isn't ready).
+    settle          = max(3.0, min(known_duration * 0.15, 5.0))   # 3.0 – 5.0 s
     _settle_until   = time.time() + known_duration + settle        # upper bound
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
