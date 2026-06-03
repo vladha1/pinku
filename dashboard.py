@@ -11,8 +11,10 @@ import threading
 from flask import Flask, Response, render_template_string
 from config import DASHBOARD_PORT, DASHBOARD_HOST, LOG_DIR
 
-_app    = Flask(__name__)
-_logger = None
+_app        = Flask(__name__)
+_logger     = None
+_start_time    = time.time()                        # unix ts — reset each restart
+_start_time_str = time.strftime("%H:%M:%S")         # "07:16:42" — shown in header
 _status = {
     "state": "idle", "muted": False, "model": "",
     "last_transcript": "", "last_reply": "", "speaking": False,
@@ -97,7 +99,7 @@ def _broadcast(data: dict):
 
 def update_status(**kwargs):
     _status.update(kwargs)
-    _broadcast({"type": "status", **_status})
+    _broadcast({"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str})
 
 def push_camera_status(camera: str, detection: str):
     """Called by camera.py whenever its status changes (ok / error / starting)."""
@@ -176,22 +178,36 @@ def stream():
             try:
                 from camera import get_status as _cam_get_status
                 cs = _cam_get_status()
-                init = {"type": "status", **_status,
+                init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str,
                         "cam_status": cs["camera"], "det_status": cs["detection"]}
             except Exception:
-                init = {"type": "status", **_status}
+                init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
             yield f"data: {json.dumps(init)}\n\n"
             last_heartbeat = time.time()
+            last_client_activity = time.time()
             while True:
                 time.sleep(0.05)
+                flushed = False
                 while q:
                     yield q.pop(0)
-                # Heartbeat every 15s — causes GeneratorExit on disconnected clients
-                # so they are cleaned up from _clients rather than accumulating
-                if time.time() - last_heartbeat > 15:
+                    flushed = True
+                if flushed:
+                    last_client_activity = time.time()
+                now = time.time()
+                # Heartbeat every 15s keeps the connection alive and detects dead clients:
+                # when the write fails on a disconnected client, GeneratorExit is raised.
+                if now - last_heartbeat > 15:
                     yield ": heartbeat\n\n"
-                    last_heartbeat = time.time()
+                    last_heartbeat = now
+                    last_client_activity = now
+                # Hard timeout: if no successful write in 10 min, assume zombie and exit.
+                # Prevents stale threads from accumulating and exhausting Flask's thread pool.
+                if now - last_client_activity > 600:
+                    break
         except GeneratorExit:
+            pass
+        finally:
+            # Always clean up — catches both GeneratorExit and the zombie timeout break.
             with _clients_lock:
                 try: _clients.remove(q)
                 except ValueError: pass
@@ -590,6 +606,14 @@ body {
 .hdr-btn.mute-btn.active { background: rgba(192,132,252,0.18); border-color: rgba(192,132,252,0.5); }
 .hdr-btn.resume-btn{ border-color: rgba(74,222,128,0.4); color: #4ade80; }
 .hdr-btn.restart-btn { border-color: rgba(251,191,36,0.4); color: #fbbf24; font-size: 0.8rem; }
+.uptime-badge {
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 0.66rem; letter-spacing: 0.04em;
+  color: #4ade80; background: rgba(74,222,128,0.07);
+  border: 1px solid rgba(74,222,128,0.18);
+  border-radius: 6px; padding: 2px 6px;
+  min-width: 38px; text-align: center; -webkit-user-select: none; user-select: none;
+}
 
 /* ── Main area ── */
 .main-area {
@@ -1491,6 +1515,10 @@ function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
   const isMuted = status.muted;
   const isActive = status.state === 'awake' || status.state === 'processing' || status.speaking;
 
+  // Startup time badge — shows when Pinku last started, e.g. "07:16:42".
+  // Changes on every restart so you can confirm the new code is running.
+  const startLabel = status.start_time_str || '—:——:——';
+
   function handleRestart() {
     if (!window.confirm('git pull + restart Pinku?')) return;
     onRestart();
@@ -1512,7 +1540,11 @@ function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
           React.createElement('span', {
             className: 'spill' + (isActive ? ' on' : ''),
             title: 'Session'
-          }, '💬')
+          }, '💬'),
+          React.createElement('span', {
+            className: 'uptime-badge',
+            title: 'Startup time — changes on each restart to confirm new code is running'
+          }, startLabel)
         )
       )
     ),
@@ -1553,8 +1585,8 @@ function MicMeter({ muted }) {
       if (!alive) return;
       fetch('/api/mic_level')
         .then(function(r) { return r.json(); })
-        .then(function(d) { levelRef.current = d.level || 0; })
-        .catch(function() {})
+        .then(function(d) { levelRef.current = typeof d.level === 'number' ? d.level : 0; })
+        .catch(function(e) { console.warn('[MicMeter] poll error:', e); })
         .finally(function() { if (alive) setTimeout(poll, 80); });
     }
     poll();
@@ -1567,15 +1599,18 @@ function MicMeter({ muted }) {
       tRef.current += 0.09;
       var t  = tRef.current;
       var lv = muted ? 0 : levelRef.current;
-      // Smooth toward target level
-      smoothRef.current = smoothRef.current * 0.72 + lv * 0.28;
+      // Smooth toward target level (faster rise 0.40, slower fall 0.78)
+      var alpha_up   = lv > smoothRef.current ? 0.40 : 0.22;
+      smoothRef.current = smoothRef.current * (1 - alpha_up) + lv * alpha_up;
       var s = smoothRef.current;
       barsRef.current.forEach(function(bar, i) {
         if (!bar) return;
-        // Each bar has a unique phase; speed scales up with level (more energy = faster)
-        var wave  = Math.sin(t * (2.5 + s * 4) + i * 1.05) * 0.5 + 0.5;
-        var h     = Math.max(2, Math.round(2 + s * 15 * wave));
-        var alpha = (0.30 + s * 0.70).toFixed(2);
+        // Reactive wave: speed and amplitude driven by level
+        var wave     = Math.sin(t * (2.8 + s * 5) + i * 1.05) * 0.5 + 0.5;
+        // Idle pulse: slow breathe so bars are never completely static
+        var idlePulse = Math.sin(t * 1.1 + i * 0.8) * 0.38 + 0.38;
+        var h     = Math.max(2, Math.round(1 + s * 15 * wave + idlePulse));
+        var alpha = (0.28 + s * 0.65 + idlePulse * 0.08).toFixed(2);
         bar.style.height  = h + 'px';
         bar.style.opacity = alpha;
       });

@@ -33,10 +33,10 @@ _mic_rms: float = 0.0   # smoothed RMS updated every 30 ms in the PyAudio callba
 def get_mic_level() -> float:
     """
     Return normalised mic level for the dashboard meter (0.0 – 1.0).
-    Scale factor of 8× keeps normal speech around 0.4–0.7 instead of
-    clipping at 1.0 immediately.
+    Scale factor of 20× — at 3m distance rms is ~0.01-0.03, giving 0.2-0.6
+    which maps to clearly visible bars.  8× was too subtle (2-3 px change).
     """
-    return min(_mic_rms * 8.0, 1.0)
+    return min(_mic_rms * 20.0, 1.0)
 
 # Optional external log callback — set by pinku.py to route STT diagnostics
 # into the dashboard log.  Signature: (level: str, msg: str) -> None
@@ -47,12 +47,11 @@ def set_log_callback(fn):
     _log_cb = fn
 
 def _stt_log(msg: str):
+    # STT diagnostics go to stdout/log file only — not the dashboard.
+    # The dashboard Log tab gets the important events (wake, user transcript,
+    # Pinku reply) via _log() in pinku.py; flooding it with per-frame noise
+    # floor readings makes it unreadable.
     print(msg)
-    if _log_cb:
-        try:
-            _log_cb("info", msg)
-        except Exception:
-            pass
 
 def _load_whisper():
     global _whisper_model
@@ -114,7 +113,8 @@ class AudioRecorder:
 
     def start(self):
         import pyaudio
-        self._stream = self._pa.open(
+        from config import MIC_DEVICE_INDEX
+        kwargs = dict(
             format=pyaudio.paInt16,
             channels=1,
             rate=MIC_SAMPLE_RATE,
@@ -122,9 +122,13 @@ class AudioRecorder:
             frames_per_buffer=_frame_bytes() // 2,
             stream_callback=self._callback,
         )
+        if MIC_DEVICE_INDEX >= 0:
+            kwargs["input_device_index"] = MIC_DEVICE_INDEX
+        self._stream = self._pa.open(**kwargs)
         self._running = True
         self._stream.start_stream()
-        print("[STT] Mic open")
+        dev = f" (device {MIC_DEVICE_INDEX})" if MIC_DEVICE_INDEX >= 0 else " (system default)"
+        print(f"[STT] Mic open{dev}")
 
     def stop(self):
         self._running = False
@@ -194,6 +198,11 @@ class AudioRecorder:
         noise_alpha        = 0.01    # slow adaptation after calibration
         speech_mult        = 2.5     # speech must be 2.5× floor
         MAX_SPEECH_SEC     = 3.5     # if "speech" runs this long, assume background noise
+        # Hard minimum: regardless of how quiet the room is, never trigger on
+        # anything below this det value.  In a silent room the floor drops to
+        # ~0.017 and thr falls to 0.043 — fan vibration / distant noise at
+        # det=0.08-0.11 then false-triggers.  Real speech at 3m = det 0.14+.
+        MIN_SPEECH_DET     = 0.12
 
         max_speech_frames = int(MAX_SPEECH_SEC * 1000 / frame_ms)
 
@@ -237,12 +246,22 @@ class AudioRecorder:
                     # ── Calibration phase ────────────────────────────────────
                     # Spend the first 450 ms just settling the noise floor to the
                     # real room ambient.  No speech detection during this window.
+                    # Skip frames where raw RMS > 0.10 (TTS echo / chime) so a
+                    # still-ringing speak output doesn't corrupt the floor and
+                    # push the threshold above 1.0 (which makes speech undetectable).
                     if total_frames <= CALIBRATION_FRAMES:
-                        noise_floor = noise_floor * (1 - CAL_ALPHA) + rms_det * CAL_ALPHA
                         ring.append(chunk)
+                        # Only use quiet frames for calibration.
+                        # Beep/chime echo at the mic = rms_raw ≈ 0.03-0.08.
+                        # Ambient noise (fan, hum, quiet room) = rms_raw ≈ 0.003-0.020.
+                        # Threshold 0.030 lets ambient through and blocks chime echo,
+                        # preventing the floor from spiking to 0.39+ after unmute.
+                        if rms_raw < 0.030:
+                            noise_floor = noise_floor * (1 - CAL_ALPHA) + rms_det * CAL_ALPHA
                         continue
 
-                    is_speech = rms_det > noise_floor * speech_mult
+                    is_speech = (rms_det > noise_floor * speech_mult
+                                 and rms_det > MIN_SPEECH_DET)
 
                     # Noise floor adapts during silence only
                     if not in_speech and not is_speech:
@@ -257,6 +276,15 @@ class AudioRecorder:
                             speech_buf     = list(ring)
                             _stt_log(f"[STT] speech start — det={rms_det:.4f} "
                                      f"floor={noise_floor:.4f} thr={noise_floor*speech_mult:.4f}")
+                            # Extend the deadline so the utterance has time to complete.
+                            # Speech often starts near the end of a 5s window, leaving
+                            # no time for the trailing silence — the call timed out and
+                            # returned None even though the person was mid-sentence.
+                            # Give at least MAX_SPEECH_SEC + 1s from now regardless of
+                            # where we are in the original timeout window.
+                            speech_deadline = time.time() + MAX_SPEECH_SEC + 1.0
+                            if speech_deadline > deadline:
+                                deadline = speech_deadline
                     else:
                         speech_buf.append(chunk)
                         if is_speech:
@@ -335,7 +363,8 @@ def _is_hallucination(text: str) -> bool:
         # Exception: let wake-word variants through so _check_wake can act on them.
         # Silence-triggered echoes are already caught above by no_speech_prob.
         _WAKE_VARIANTS = {"pinku", "pinky", "pinko", "pink", "pingu", "pinkoo", "penku", "penko",
-                          "पिंकू", "पिंकु", "पिंको", "पिंकी"}
+                          "पिंकू", "पिंकु", "पिंको", "पिंकी",
+                          "पिकु", "पिकू"}   # Whisper drops anusvara ं on पिंकु
         if t not in _WAKE_VARIANTS:
             return True
     # Pinku's own TTS output being picked up by mic
@@ -418,8 +447,10 @@ def transcribe(pcm: bytes) -> str:
         print(f"[STT] Dropped — language={info.language!r} (only en/hi accepted)")
         return ""
 
-    # Drop if any segment has high no-speech probability
-    if any(getattr(s, "no_speech_prob", 0) > 0.55 for s in segs):
+    # Drop if any segment has high no-speech probability.
+    # Raised from 0.55 → 0.70: distant Hindi speech gets scored 0.55–0.65 by
+    # Whisper and was being silently dropped despite real speech being present.
+    if any(getattr(s, "no_speech_prob", 0) > 0.70 for s in segs):
         print(f"[STT] Dropped — no_speech_prob too high")
         return ""
 

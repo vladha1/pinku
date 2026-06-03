@@ -351,11 +351,13 @@ def _handle_unmute():
     dashboard.update_status(state="idle", muted=False)
     _log("info", "Unmuted 🎙️")
     _extend_session()
-    # Settle: the recorder buffer may still contain audio from the gesture /
-    # voice command that triggered unmute.  Block the voice loop for 1.5s so
-    # that stale audio is not immediately sent to Gemini as a new command.
-    _settle_until = time.time() + 1.5
-    _brief_mute(1.5)
+    # Settle: block the voice loop while the unmute chime + beep echo dies down.
+    # 1.5s was not enough — the beep echo (rms_raw ≈ 0.03–0.05) was still
+    # audible during the calibration phase and drove the noise floor to 0.39,
+    # making speech detection impossible for ~15s. 2.5s gives the room time
+    # to go quiet before wait_for_utterance starts its calibration window.
+    _settle_until = time.time() + 2.5
+    _brief_mute(2.5)
 
 
 def _handle_pause():
@@ -394,7 +396,7 @@ def _extend_session():
 #
 # Cooldown prevents repeat-firing while hand is held steady.
 _gesture_last_at: dict[str, float] = {}
-_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
+_GESTURE_COOLDOWN = 4.0   # seconds between same-gesture re-fires (was 8s — lowered for responsiveness)
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     # requires_session=False → fires even from muted/idle state
@@ -764,14 +766,18 @@ import re as _re
 # Handles punctuation in prefix ("Hey, Pinku"), leading dots/spaces Whisper adds,
 # and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE_START = _re.compile(
-    r'^[.\s]*'                                            # strip leading dots/spaces Whisper adds
-    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे)[,.\s]+)?'   # optional prefix + any punctuation/space
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[,\s।]*',
+    r'^[.\s]*'                                                      # strip leading dots/spaces
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
+    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
+    r'|पिंकू|पिंकु|पिंको|पिंकी'
+    r'|पिकु|पिकू)\b[,\s।]*',                                       # पिकु = Whisper drops anusvara ं
     _re.IGNORECASE,
 )
-# Wake word anywhere in the utterance — "what's the time Pinky?"
+# Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
-    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink|पिंकू|पिंकु|पिंको|पिंकी)\b[\W]*$',
+    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
+    r'|पिंकू|पिंकु|पिंको|पिंकी'
+    r'|पिकु|पिकू)\b[\W]*$',
     _re.IGNORECASE,
 )
 

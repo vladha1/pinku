@@ -28,11 +28,11 @@ YOLO_MODEL    = os.getenv("YOLO_MODEL", "yolov8n.pt")   # person + object detect
 GESTURE_MODEL = os.getenv("GESTURE_MODEL", "gesture_yolo.pt")  # downloaded on first run
 YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))
 YOLO_IGNORE   = set(os.getenv("YOLO_IGNORE", "kite,ceiling fan").split(","))
-DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "3.0"))  # seconds between detection cycles
+DETECT_EVERY  = float(os.getenv("DETECT_EVERY", "1.5"))  # seconds between detection cycles (was 3.0 — faster for gesture responsiveness)
 # Minimum inter-shoulder width in pixels to count someone as "present" (proximity filter).
 # Raise to require the person to be closer; lower to accept from further away.
-# At 640px wide: ~100px ≈ 3-4m, ~140px ≈ 2m, ~60px ≈ 5-6m.
-MIN_SHOULDER_PX = int(os.getenv("MIN_SHOULDER_PX", "100"))
+# At 640px wide: ~80px ≈ 4-5m, ~100px ≈ 3-4m, ~140px ≈ 2m, ~60px ≈ 5-6m.
+MIN_SHOULDER_PX = int(os.getenv("MIN_SHOULDER_PX", "80"))
 
 # ── Laser dot detection ───────────────────────────────────────────────────────
 # Detects a green laser pointer dot on the wall via HSV masking.
@@ -63,6 +63,10 @@ VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "150"))  # ignore clips
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "1"))
 MIC_SAMPLE_RATE   = 16000
 MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
+# Explicit mic device index — avoids grabbing iPhone/Bluetooth mics that lock PortAudio.
+# -1 = use system default.  Run: python3 -c "import pyaudio; p=pyaudio.PyAudio();
+# [print(i, p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
+MIC_DEVICE_INDEX  = int(os.getenv("MIC_DEVICE_INDEX", "-1"))
 
 # ── Music generation ──────────────────────────────────────────────────────────
 # Backend: "musicgen" (local Meta AudioCraft) or "abc" (Ollama → MIDI, lightweight)
