@@ -274,6 +274,9 @@ def handle(action: dict, speak_fn, update_fn=None, session_hist: list | None = N
     _log("user",   tr)
     _log("source", info["name"])
     reply  = _llm.chat(tr, system_extra=system, history=session_hist, is_hi=is_hi)
+    # Hard-cap knowledge replies at the sentence boundary — topic prompts say
+    # "under 90 words" but that's still long when spoken; keep to ~70 words.
+    reply  = _llm._trim_reply(reply, max_words=70)
     # Note: do NOT log("pinku") here — speak_fn (_speak_reply) does it already.
 
     if update_fn:

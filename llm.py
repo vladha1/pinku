@@ -111,7 +111,8 @@ If anyone asks your name, say: "My name is Pinky — but everyone here lovingly 
 The home is located in Gurugram, India. Use Gurugram as the default location for any weather,
 local services, time zone, or location-based questions unless the user specifies otherwise.
 """ + _PERSONALITY + """\
-Respond naturally and concisely — you are speaking aloud, so keep replies under 60 words unless asked to elaborate.
+Respond naturally and concisely — you are speaking aloud, so keep replies under 40 words.
+If a topic needs more, give the single most important fact and stop.
 No markdown, no bullet points. Plain conversational sentences only.
 Be precise with facts and numbers.
 """
@@ -124,9 +125,9 @@ The home is located in Gurugram, India. Use Gurugram as the default location for
 local services, or location-based questions unless the user specifies otherwise.
 The user is speaking Hindi. Reply in natural spoken Hindi using Devanagari script.
 """ + _PERSONALITY + """\
-Keep replies under 60 words unless asked to elaborate. No markdown, no bullet points.
-Plain conversational sentences only. Do not mix English unless the user does.
-Be precise with facts and numbers.
+Keep replies under 40 words. If a topic needs more, give the single most important fact and stop.
+No markdown, no bullet points. Plain conversational sentences only.
+Do not mix English unless the user does. Be precise with facts and numbers.
 """
 
 # ── Gemini audio: transcription + routing + reply in one call ─────────────────
@@ -205,7 +206,7 @@ RULES:
 - Reply is SPOKEN ALOUD — no bullet points, no markdown, natural sentences only
 - Hindi: Devanagari script in reply, no English unless user mixed it
 - Scripture: include original script verse if relevant, then meaning + one insight
-- Keep replies ≤60 words (scripture/knowledge: ≤100 words)
+- Keep replies ≤40 words (scripture/knowledge: ≤70 words)
 - For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS,
   or anything requiring real-time information → set reply: "" (system will fetch fresh data)
 """
@@ -383,6 +384,32 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _trim_reply(text: str, max_words: int = 55) -> str:
+    """
+    Hard-cap a spoken reply at the nearest sentence boundary after max_words.
+    Prevents Gemini from ignoring the word-count instruction in the system prompt.
+    Keeps the last complete sentence rather than cutting mid-word.
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    # Join enough words to have a few sentences to work with
+    chunk = " ".join(words[:max_words + 15])
+    # Split at sentence-ending punctuation followed by whitespace
+    parts = re.split(r'(?<=[.!?।])\s+', chunk)
+    result = ""
+    for part in parts:
+        candidate = (result + " " + part).strip()
+        if len(candidate.split()) > max_words:
+            break
+        result = candidate
+    # Fall back: cut at last sentence-end punctuation we can find
+    if not result:
+        m = re.search(r'^(.+[.!?।])', " ".join(words[:max_words + 5]))
+        result = m.group(1) if m else " ".join(words[:max_words])
+    return result.strip()
+
+
 def route(transcript: str) -> dict:
     """
     Route via local Ollama — fast, no network, just keyword classification.
@@ -442,8 +469,9 @@ def chat(transcript: str,
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        reply = _gemini_call(contents, temperature=0.9, max_tokens=400,
+        reply = _gemini_call(contents, temperature=0.9, max_tokens=300,
                              system=system, use_search=True)
+        reply = _trim_reply(reply, max_words=55)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
         return reply
     except Exception as e:
@@ -454,7 +482,8 @@ def chat(transcript: str,
             msgs.extend(history[-6:])
         msgs.append({"role": "user", "content": transcript})
         try:
-            return _ollama_call(msgs, temperature=0.75, max_tokens=300)
+            reply = _ollama_call(msgs, temperature=0.75, max_tokens=200)
+            return _trim_reply(reply, max_words=55)
         except Exception as e2:
             return f"Sorry, I couldn't reach either AI right now. ({e2})"
 
