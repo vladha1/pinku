@@ -211,22 +211,21 @@ def _classify_hand(frame: np.ndarray, wx: float, wy: float) -> str | None:
         for d in defects:
             _, _, _, depth = d[0]
             # depth is in 8.8 fixed-point → divide by 256 for pixels
-            if depth / 256.0 > sz * 0.07:   # gap > 7% of crop size
+            if depth / 256.0 > sz * 0.10:   # gap > 10% of crop size (was 7%)
                 n_gaps += 1
 
     # ── Classify ──────────────────────────────────────────────────────────────
     # Open Hand: requires BOTH gap count AND low solidity.
     #
     # solidity = contour_area / hull_area
-    #   • Raised spread hand (wave): 0.55 – 0.78  → lots of concavity between fingers
+    #   • Raised spread hand (wave): 0.55 – 0.75  → lots of concavity between fingers
     #   • Typing / resting hand:     0.82 – 0.95  → compact blob, fingers pressed together
     #   • Non-hand blob / arm:       > 0.90       → essentially convex
     #
-    # Requiring solidity < 0.82 eliminates false positives from hands at keyboard
-    # or wrist regions with no intentional gesture, while accepting real waves.
-    # n_gaps >= 3: four spread fingers → three clear inter-finger gaps (thumb
-    # gap from side-on is unreliable, so we accept 3 rather than 4).
-    if n_gaps >= 3 and solidity < 0.82:
+    # Thresholds chosen to be strict: prefer missing a real wave over false-positives.
+    # n_gaps >= 4: all four finger gaps visible (thumb gap side-on excluded).
+    # solidity < 0.78: clearly spread hand, not a compact or semi-open fist.
+    if n_gaps >= 4 and solidity < 0.78:
         return "Open Hand"
 
     return None
@@ -325,6 +324,10 @@ class CameraDetector:
         self._last_snapshot = None
         self._last_laser_key: tuple = ()   # dedup key: quantized dot positions
         self._laser_warmup  = 8            # ignore first N laser frames (lets LEDs settle)
+        # Consecutive-frame streak counter per gesture label.
+        # A gesture must appear in ≥ 2 consecutive detection cycles before it
+        # fires — eliminates single-frame false positives from arm/wrist noise.
+        self._gesture_streak: dict[str, int] = {}
 
     def start(self):
         threading.Thread(target=self._capture_loop, daemon=True, name="cam-capture").start()
@@ -538,6 +541,7 @@ class CameraDetector:
                             event["persons"] += 1
 
                     # Check each visible wrist
+                    raw_gesture = None
                     for wri, sho in [(_KP_R_WRI, _KP_R_SHO), (_KP_L_WRI, _KP_L_SHO)]:
                         if not vis(wri):
                             continue
@@ -547,8 +551,24 @@ class CameraDetector:
                             # Distinguish Hands Up (wrist above shoulder) from Open Hand (arm down)
                             if gesture == "Open Hand" and vis(sho) and ky(wri) < ky(sho):
                                 gesture = "Hands Up"   # arm raised above shoulder
-                            event["gestures"].append({"gesture": gesture})
+                            raw_gesture = gesture
                             break   # one gesture per frame is enough
+
+                    # Consecutive-frame confirmation: gesture must appear in ≥ 2
+                    # consecutive detection cycles before it fires.  Single-frame
+                    # flickers (arm noise, partial occlusion) are silently dropped.
+                    if raw_gesture:
+                        self._gesture_streak[raw_gesture] = (
+                            self._gesture_streak.get(raw_gesture, 0) + 1
+                        )
+                        # Reset streak for any other gesture not seen this cycle
+                        for k in list(self._gesture_streak):
+                            if k != raw_gesture:
+                                self._gesture_streak[k] = 0
+                        if self._gesture_streak[raw_gesture] >= 2:
+                            event["gestures"].append({"gesture": raw_gesture})
+                    else:
+                        self._gesture_streak.clear()
 
         else:
             # No pose model — fall back to YOLO person detection

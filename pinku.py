@@ -404,7 +404,7 @@ def _extend_session():
 # Cooldown prevents repeat-firing while hand is held steady.
 _gesture_last_at: dict[str, float] = {}
 _gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
-_GESTURE_COOLDOWN = 4.0   # seconds between same-gesture re-fires (was 8s — lowered for responsiveness)
+_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     # requires_session=False → fires even from muted/idle state
