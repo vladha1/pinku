@@ -107,6 +107,7 @@ class AudioRecorder:
         self._pa  = pyaudio.PyAudio()
         self._stream   = None
         self._running  = False
+        self._paused   = False
         self._buf_lock = threading.Lock()
         self._frames: collections.deque[bytes] = collections.deque(maxlen=500)
         self._new_audio = threading.Event()
@@ -138,12 +139,26 @@ class AudioRecorder:
         self._pa.terminate()
         print("[STT] Mic closed")
 
+    def pause(self):
+        """Stop capturing mic audio — call before TTS starts."""
+        self._paused = True
+        with self._buf_lock:
+            self._frames.clear()   # discard anything already buffered
+
+    def resume(self):
+        """Resume mic capture — call after TTS + settle window."""
+        with self._buf_lock:
+            self._frames.clear()   # discard any audio that slipped in during settle
+        self._new_audio.clear()
+        self._paused = False
+
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
         global _mic_rms
-        with self._buf_lock:
-            self._frames.append(in_data)
-        self._new_audio.set()
+        if not self._paused:
+            with self._buf_lock:
+                self._frames.append(in_data)
+            self._new_audio.set()
         # Track smoothed RMS for the dashboard mic meter (fast EWA, no blocking)
         try:
             audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0

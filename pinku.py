@@ -64,6 +64,7 @@ _processing    = threading.Lock()    # held while handling an utterance end-to-e
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _det_logger    = log_module.DetectionLogger()
 
+_recorder: "stt.AudioRecorder | None" = None   # set in main(); used to pause mic during TTS
 _last_speech_at: float = time.time()   # reset on every utterance / wake / gesture
 _last_human_at:  float = 0.0           # last time camera saw a person in frame
 _camera_enabled: bool  = False         # True once camera starts; enables auto-wake
@@ -156,6 +157,12 @@ def _speak_reply(reply: str, is_hi: bool):
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
 
+    # Pause the mic before speaking — stops audio capture entirely during TTS.
+    # This is the primary echo defence: nothing enters the audio buffer while
+    # Pinku's voice is audible, so Whisper/Gemini never see it.
+    if _recorder:
+        _recorder.pause()
+
     # NOTE: _processing is intentionally NOT released here.
     # tts.speak(block=True) blocks the voice loop thread anyway, so releasing
     # early would only allow a second queued clip to slip in BEFORE the settle
@@ -166,7 +173,7 @@ def _speak_reply(reply: str, is_hi: bool):
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
     # TTS is done. Re-anchor settle window to actual end of speech.
-    # This corrects for edge-tts speaking faster than the word-count estimate.
+    # Resume the mic only after the full settle window so room echo dies down.
     if not _user_muted.is_set():
         _settle_until = time.time() + settle
         _muted.set()   # keep muted during settle (may already be set)
@@ -174,7 +181,13 @@ def _speak_reply(reply: str, is_hi: bool):
             time.sleep(settle)
             if not _user_muted.is_set():
                 _muted.clear()
+            if _recorder:
+                _recorder.resume()   # re-enable mic capture after settle
         threading.Thread(target=_clear_after_settle, daemon=True, name="tts-settle").start()
+    else:
+        # User is hard-muted — resume mic capture so it's ready when unmuted
+        if _recorder:
+            _recorder.resume()
 
 
 def _handle_chat(action: dict):
@@ -1310,8 +1323,10 @@ def main():
     except Exception as _e:
         print(f"[MIC] Could not set input volume: {_e}")
     stt.set_log_callback(_log)   # route STT diagnostics → dashboard log
-    recorder = stt.AudioRecorder()
-    recorder.start()
+    global _recorder
+    _recorder = stt.AudioRecorder()
+    _recorder.start()
+    recorder = _recorder   # local alias for _voice_loop
 
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
     _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")
