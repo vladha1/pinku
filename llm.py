@@ -19,10 +19,24 @@ import urllib.error
 from pathlib import Path
 from config import OLLAMA_URL, OLLAMA_MODEL
 
-# ── Gemini audio rate-limit backoff ───────────────────────────────────────────
-# Set to time.time() + N when a 429 is received; Gemini audio calls are skipped
-# silently until the window expires, avoiding log spam and API hammering.
-_gemini_audio_blocked_until: float = 0.0
+# ── Gemini audio rate limiting ────────────────────────────────────────────────
+# Three independent guards, all checked in transcribe_and_respond():
+#
+#  1. Hard backoff  — set to now+60 on HTTP 429; calls skipped silently until expiry.
+#  2. Minimum gap   — enforces _GEMINI_MIN_GAP_SEC between consecutive audio calls
+#                     so background-noise loops cannot slam the API faster than that.
+#  3. Rolling cap   — allows at most _GEMINI_MAX_PER_WINDOW calls per
+#                     _GEMINI_RATE_WINDOW seconds; a sliding-window counter.
+#
+# Mirrors the three-layer scheme that worked well in the D:\cam predecessor project.
+import collections as _collections
+
+_gemini_audio_blocked_until: float = 0.0          # 429 backoff: skip until this epoch
+_GEMINI_MIN_GAP_SEC:         float = 3.0           # minimum seconds between audio calls
+_gemini_last_call_at:        float = 0.0           # epoch of most recent audio call
+_GEMINI_MAX_PER_WINDOW:      int   = 10            # rolling cap: max calls per window
+_GEMINI_RATE_WINDOW:         float = 60.0          # rolling cap window in seconds
+_gemini_call_times: _collections.deque = _collections.deque()  # timestamps of recent calls
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 # Simple parser — avoids dependency on python-dotenv
@@ -262,7 +276,7 @@ def transcribe_and_respond(
     Returns dict {transcript, lang, action, reply} or None if Gemini unavailable.
     Falls back to None so caller can use the old Whisper+Ollama path.
     """
-    global _gemini_audio_blocked_until
+    global _gemini_audio_blocked_until, _gemini_last_call_at
 
     import base64
     import io
@@ -271,9 +285,30 @@ def transcribe_and_respond(
     if not GEMINI_API_KEY:
         return None
 
-    # ── 429 backoff: skip silently until window expires ───────────────────────
-    if _time.time() < _gemini_audio_blocked_until:
+    now = _time.time()
+
+    # ── Guard 1: 429 backoff — skip silently until window expires ─────────────
+    if now < _gemini_audio_blocked_until:
         return None
+
+    # ── Guard 2: minimum gap between consecutive audio calls ──────────────────
+    elapsed = now - _gemini_last_call_at
+    if elapsed < _GEMINI_MIN_GAP_SEC:
+        return None   # too soon — caller falls back to Whisper
+
+    # ── Guard 3: rolling window cap (max calls per minute) ────────────────────
+    cutoff = now - _GEMINI_RATE_WINDOW
+    while _gemini_call_times and _gemini_call_times[0] < cutoff:
+        _gemini_call_times.popleft()
+    if len(_gemini_call_times) >= _GEMINI_MAX_PER_WINDOW:
+        _dashboard_log("warn",
+            f"Gemini audio rate cap hit ({_GEMINI_MAX_PER_WINDOW}/{_GEMINI_RATE_WINDOW:.0f}s) "
+            f"— Whisper fallback active")
+        return None
+
+    # ── All guards passed — record this call ──────────────────────────────────
+    _gemini_last_call_at = now
+    _gemini_call_times.append(now)
 
     # Amplify quiet/distant speech before sending to Gemini
     try:
