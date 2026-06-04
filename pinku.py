@@ -1154,8 +1154,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 if result is not None:
                     _handle_gemini_result(result)
                 else:
-                    # Gemini unavailable → fall back to Whisper + Ollama
-                    _log("warn", "Gemini audio unavailable — using Whisper fallback")
+                    # Gemini unavailable or rate-guard skipped — fall back to Whisper + Ollama.
+                    # Real errors are already logged in llm.py; don't double-log here.
                     _fallback_process(pcm)
                 continue
 
