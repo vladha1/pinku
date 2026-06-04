@@ -419,6 +419,12 @@ _gesture_last_at: dict[str, float] = {}
 _gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
 _GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
+# Lock that makes the face-detection wake block atomic.
+# The camera thread fires on_detection at frame-rate (≥15 fps); without a lock
+# two rapid frames both pass "if not _awake.is_set()" before either sets it,
+# causing duplicate wake logs, duplicate beeps, and duplicate Gemini calls.
+_face_wake_lock = threading.Lock()
+
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     # requires_session=False → fires even from muted/idle state
     "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → unmute + wake
@@ -740,17 +746,21 @@ def on_detection(event: dict):
         now = time.time()
         _last_human_at = now
         if not _user_muted.is_set():
-            if not _awake.is_set():
-                # Person detected — gentle ack chime + open session
-                # NOTE: chime is temporary (entry=True applies 25s cooldown)
-                _last_speech_at = now
-                _awake.set()
-                dashboard.update_status(state="awake")
-                _log("wake", "👤 Face detected → listening")
-                tts.play_beep(entry=True)
-            else:
-                # Already awake — keep the inactivity timer alive while person is visible
-                _last_speech_at = now
+            # Lock makes the check-and-set atomic: camera fires on_detection at
+            # frame-rate so two consecutive frames can both see _awake==False
+            # and both trigger the wake logic before either sets _awake.
+            with _face_wake_lock:
+                if not _awake.is_set():
+                    # Person detected — gentle ack chime + open session
+                    # NOTE: chime is temporary (entry=True applies 25s cooldown)
+                    _last_speech_at = now
+                    _awake.set()
+                    dashboard.update_status(state="awake")
+                    _log("wake", "👤 Face detected → listening")
+                    tts.play_beep(entry=True)
+                else:
+                    # Already awake — keep the inactivity timer alive while person is visible
+                    _last_speech_at = now
 
     if "laser" in event:   # always call — empty list = dot gone
         _handle_laser(event["laser"])

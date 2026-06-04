@@ -30,6 +30,7 @@ from config import OLLAMA_URL, OLLAMA_MODEL
 #
 # Mirrors the three-layer scheme that worked well in the D:\cam predecessor project.
 import collections as _collections
+import threading as _threading
 
 _gemini_audio_blocked_until: float = 0.0          # 429 backoff: skip until this epoch
 _GEMINI_MIN_GAP_SEC:         float = 3.0           # minimum seconds between audio calls
@@ -37,6 +38,9 @@ _gemini_last_call_at:        float = 0.0           # epoch of most recent audio 
 _GEMINI_MAX_PER_WINDOW:      int   = 10            # rolling cap: max calls per window
 _GEMINI_RATE_WINDOW:         float = 60.0          # rolling cap window in seconds
 _gemini_call_times: _collections.deque = _collections.deque()  # timestamps of recent calls
+# Lock makes guards 2 & 3 atomic: check-then-set on _gemini_last_call_at must be
+# one operation so two rapid calls can't both pass "elapsed < 3s" simultaneously.
+_gemini_rate_lock = _threading.Lock()
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 # Simple parser — avoids dependency on python-dotenv
@@ -291,24 +295,28 @@ def transcribe_and_respond(
     if now < _gemini_audio_blocked_until:
         return None
 
-    # ── Guard 2: minimum gap between consecutive audio calls ──────────────────
-    elapsed = now - _gemini_last_call_at
-    if elapsed < _GEMINI_MIN_GAP_SEC:
-        return None   # too soon — caller falls back to Whisper
+    # ── Guards 2 & 3: atomic check-and-set ───────────────────────────────────
+    # Lock prevents two rapid calls both passing "elapsed < 3s" before either
+    # updates _gemini_last_call_at (the TOCTTOU race that caused double 429s).
+    with _gemini_rate_lock:
+        # Guard 2: minimum gap between consecutive audio calls
+        elapsed = now - _gemini_last_call_at
+        if elapsed < _GEMINI_MIN_GAP_SEC:
+            return None   # too soon — caller falls back to Whisper
 
-    # ── Guard 3: rolling window cap (max calls per minute) ────────────────────
-    cutoff = now - _GEMINI_RATE_WINDOW
-    while _gemini_call_times and _gemini_call_times[0] < cutoff:
-        _gemini_call_times.popleft()
-    if len(_gemini_call_times) >= _GEMINI_MAX_PER_WINDOW:
-        _dashboard_log("warn",
-            f"Gemini audio rate cap hit ({_GEMINI_MAX_PER_WINDOW}/{_GEMINI_RATE_WINDOW:.0f}s) "
-            f"— Whisper fallback active")
-        return None
+        # Guard 3: rolling window cap (max calls per minute)
+        cutoff = now - _GEMINI_RATE_WINDOW
+        while _gemini_call_times and _gemini_call_times[0] < cutoff:
+            _gemini_call_times.popleft()
+        if len(_gemini_call_times) >= _GEMINI_MAX_PER_WINDOW:
+            _dashboard_log("warn",
+                f"Gemini audio rate cap hit ({_GEMINI_MAX_PER_WINDOW}/{_GEMINI_RATE_WINDOW:.0f}s) "
+                f"— Whisper fallback active")
+            return None
 
-    # ── All guards passed — record this call ──────────────────────────────────
-    _gemini_last_call_at = now
-    _gemini_call_times.append(now)
+        # All guards passed — record this call while still holding the lock
+        _gemini_last_call_at = now
+        _gemini_call_times.append(now)
 
     # Amplify quiet/distant speech before sending to Gemini
     try:
