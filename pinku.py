@@ -1033,6 +1033,17 @@ def _fallback_process(pcm: bytes):
         _log("info", f"Fallback: rejected spurious unmute (no keyword): {text!r}")
         action["action"] = "chat"
 
+    # ── Wake-word override: if Pinku is directly addressed, never ignore.
+    # Ollama 3b classifies many clear commands as "ignore" when Gemini is down.
+    # If the transcript contains Pinku's name, force chat so the personality
+    # prompt (including "nahi nahayegi" for shower etc.) can fire.
+    act = action.get("action", "chat")
+    if act == "ignore" and _re.search(
+            r'\b(pinku|pinky|pink|pinko|पिंकू|पिंकु|पिकु)\b', text, _re.IGNORECASE):
+        _log("info", f"Fallback: overriding ignore→chat (wake word in transcript)")
+        action["action"] = "chat"
+        act = "chat"
+
     _log("info",   f"route={action.get('action')} lang={action.get('lang','en')}")
     _dispatch_action(action)
 

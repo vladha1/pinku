@@ -13,10 +13,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import time as _time
 import urllib.request
 import urllib.error
 from pathlib import Path
 from config import OLLAMA_URL, OLLAMA_MODEL
+
+# ── Gemini audio rate-limit backoff ───────────────────────────────────────────
+# Set to time.time() + N when a 429 is received; Gemini audio calls are skipped
+# silently until the window expires, avoiding log spam and API hammering.
+_gemini_audio_blocked_until: float = 0.0
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 # Simple parser — avoids dependency on python-dotenv
@@ -256,11 +262,17 @@ def transcribe_and_respond(
     Returns dict {transcript, lang, action, reply} or None if Gemini unavailable.
     Falls back to None so caller can use the old Whisper+Ollama path.
     """
+    global _gemini_audio_blocked_until
+
     import base64
     import io
     import wave as _wave
 
     if not GEMINI_API_KEY:
+        return None
+
+    # ── 429 backoff: skip silently until window expires ───────────────────────
+    if _time.time() < _gemini_audio_blocked_until:
         return None
 
     # Amplify quiet/distant speech before sending to Gemini
@@ -293,9 +305,17 @@ def transcribe_and_respond(
                            system=system)
         print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
     except Exception as e:
-        msg = f"Gemini audio error: {e}"
-        print(f"[LLM] {msg}")
-        _dashboard_log("warn", msg)   # show actual error in dashboard, not just "unavailable"
+        err = str(e)
+        if "429" in err or "rate-limited" in err.lower():
+            # Set 60-second backoff — log once, then stay silent until expiry
+            _gemini_audio_blocked_until = _time.time() + 60.0
+            dash_msg = "Gemini audio rate-limited — backing off 60 s (Whisper fallback active)"
+            print(f"[LLM] {dash_msg}")
+            _dashboard_log("warn", dash_msg)
+        else:
+            msg = f"Gemini audio error: {e}"
+            print(f"[LLM] {msg}")
+            _dashboard_log("warn", msg)
         return None
 
     m = re.search(r'\{.*\}', raw, re.DOTALL)
@@ -376,6 +396,10 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
         parts = data["candidates"][0]["content"]["parts"]
         text = " ".join(p.get("text", "") for p in parts).strip()
         return text
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RuntimeError(f"Gemini rate-limited (HTTP 429: Too Many Requests)") from e
+        raise RuntimeError(f"Gemini unreachable (HTTP {e.code}: {e.reason})") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"Gemini unreachable ({e})") from e
     except (KeyError, IndexError) as e:
