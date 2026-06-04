@@ -1188,7 +1188,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             # ── Gate: idle mode — Whisper locally for wake word only ─────────
             dur = len(pcm) / (16000 * 2)
             if dur > 6.0:
-                _log("info", f"Idle — skipped long audio ({dur:.1f}s)")
+                print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
             try:
                 text = stt.transcribe(pcm)
@@ -1202,7 +1202,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _log("stt", text)
             triggered, command = _check_wake(text)
             if not triggered:
-                _log("info", f'Idle — no wake word: "{text}"')
+                print(f'[STT] Idle — no wake word: "{text}"')
                 continue
 
             # Wake word confirmed — update question cloud immediately
