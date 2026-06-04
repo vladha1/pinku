@@ -147,10 +147,11 @@ def _speak_reply(reply: str, is_hi: bool):
     # Edge-tts can speak noticeably faster than the 95 WPM word-count estimate,
     # so without re-anchoring the mic would be dead for several extra seconds.
     known_duration = tts.known_duration(reply)
-    # Minimum 3.0 s settle — if edge-tts fails silently and returns immediately,
-    # the voice loop would otherwise resume after only ~1.5 s while room echo
-    # of the "spoken" reply is still audible (or the next utterance isn't ready).
-    settle          = max(3.0, min(known_duration * 0.15, 5.0))   # 3.0 – 5.0 s
+    # Minimum 4.0 s settle — gives room echo time to die down before the mic
+    # reopens.  3 s was not enough for longer responses: a 10-second reply at
+    # 0.15 coefficient only gave 3 s, but the reverb tail persisted longer.
+    # 0.25 coefficient + 4-6 s range adds ~2 s of safety margin on long replies.
+    settle          = max(4.0, min(known_duration * 0.25, 6.0))   # 4.0 – 6.0 s
     _settle_until   = time.time() + known_duration + settle        # upper bound
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
@@ -920,6 +921,15 @@ def _handle_gemini_result(result: dict):
     is_hi      = lang == "hi"
 
     if not transcript:
+        return
+
+    # ── Echo filter: Gemini path ──────────────────────────────────────────────
+    # stt._is_pinku_echo() runs inside stt.transcribe() for the Whisper path,
+    # but Gemini receives raw PCM and transcribes independently — the filter
+    # was never applied to Gemini results.  Check here before doing anything.
+    if stt._is_pinku_echo(transcript):
+        _log("info", f'Gemini: echo of own TTS — ignored: "{transcript[:60]}"')
+        _brief_mute(2.0)
         return
 
     # ── Hallucination guard ───────────────────────────────────────────────────
