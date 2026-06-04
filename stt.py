@@ -336,16 +336,25 @@ def register_pinku_speech(text: str):
 
 def _is_pinku_echo(text: str) -> bool:
     """True if text is likely Pinku's own TTS being picked up by the mic."""
-    t = text.lower()
+    t = text.lower().strip()
     words = t.split()
-    if len(words) < 3:
-        return False
     with _pinku_lock:
         for reply in _pinku_recent:
-            # Check if any 4-gram from the transcript appears in Pinku's recent reply
+            r = reply.strip()
+            r_words = r.split()
+            # Short replies (≤ 3 words): use exact or substring match.
+            # 4-gram matching needs at least 4 words to be meaningful, and
+            # "nahi nahayegi" (2 words) was bypassing the filter entirely.
+            if len(r_words) <= 3:
+                if t == r or t in r or r in t:
+                    return True
+                continue
+            # Longer replies: 4-gram overlap check
+            if len(words) < 4:
+                continue
             for i in range(len(words) - 3):
                 ng = " ".join(words[i:i + 4])
-                if ng in reply:
+                if ng in r:
                     return True
     return False
 

@@ -78,6 +78,13 @@ _settle_until:   float = 0.0           # voice loop blocked until this time (TTS
 _gemini_halluc_count: int = 0
 _HALLUC_MAX:          int = 4   # close session after this many consecutive non-commands
 
+# Cooldown for repeated identical (or near-identical) Pinku replies.
+# Prevents the same personality trigger (e.g. "nahi nahayegi") from firing
+# twice in quick succession when the TTS echo is picked up and re-processed.
+_last_reply_text:  str   = ""
+_last_reply_at:    float = 0.0
+_REPLY_COOLDOWN:   float = 10.0   # seconds before the same reply can be spoken again
+
 # When hallucinations force-close the session, face-detection cannot reopen it
 # until this epoch — prevents the open→hallucinate×4→close→reopen cycle that
 # burned through the Gemini daily quota.  Only a spoken wake word (Whisper) or
@@ -125,7 +132,7 @@ def _brief_mute(seconds: float = 1.5):
 
 
 def _speak_reply(reply: str, is_hi: bool):
-    global _last_speech_at, _settle_until
+    global _last_speech_at, _settle_until, _last_reply_text, _last_reply_at
     # If user explicitly muted, discard reply entirely — don't speak even if
     # Gemini finished processing after the button was pressed.
     if _user_muted.is_set():
@@ -135,6 +142,17 @@ def _speak_reply(reply: str, is_hi: bool):
     if tts.is_speaking():
         _log("info", "Already speaking — discarded duplicate reply")
         return
+    # Cooldown: don't repeat the same short reply within _REPLY_COOLDOWN seconds.
+    # Catches "nahi nahayegi" echoing back through the mic and re-triggering
+    # the same personality response — especially when echo comes back in a
+    # different script (Roman TTS → Devanagari transcription) so text matching fails.
+    reply_norm = reply.strip().lower()
+    if (reply_norm == _last_reply_text
+            and time.time() - _last_reply_at < _REPLY_COOLDOWN):
+        _log("info", f"Duplicate reply suppressed (cooldown): {reply!r}")
+        return
+    _last_reply_text = reply_norm
+    _last_reply_at   = time.time()
     _log("pinku", reply)
     stt.register_pinku_speech(reply)   # echo filter: reject this text if mic picks it up
     dashboard.update_status(speaking=True)
