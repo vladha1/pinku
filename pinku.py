@@ -69,6 +69,15 @@ _last_human_at:  float = 0.0           # last time camera saw a person in frame
 _camera_enabled: bool  = False         # True once camera starts; enables auto-wake
 _settle_until:   float = 0.0           # voice loop blocked until this time (TTS + echo settle)
 
+# Consecutive Gemini wake-word-only / hallucination counter.
+# Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
+# increments this counter; a real command (with content words) resets it.
+# When it reaches _HALLUC_MAX the session is forcibly closed so the voice loop
+# drops back to cheap local Whisper wake-word detection instead of hammering
+# the Gemini audio API every ~3 s.
+_gemini_halluc_count: int = 0
+_HALLUC_MAX:          int = 4   # close session after this many consecutive non-commands
+
 # How long after last camera person detection before we consider room empty
 _HUMAN_GONE_SEC = 12.0
 
@@ -893,20 +902,39 @@ def _handle_gemini_result(result: dict):
     # ── Hallucination guard ───────────────────────────────────────────────────
     # If the transcript is only the wake word (nothing actionable after it),
     # treat as ignore — Gemini sometimes hallucinates "Pinku" from background noise.
+    global _gemini_halluc_count
     _WAKE_WORDS = {"pinku", "pinky", "pinko", "pink", "pingu", "pinkoo"}
     _transcript_words = [w.strip(".,!?।").lower() for w in transcript.split()]
     _content_words = [w for w in _transcript_words if w not in _WAKE_WORDS]
     if not _content_words:
+        _gemini_halluc_count += 1
+        if _gemini_halluc_count >= _HALLUC_MAX:
+            # Too many consecutive hallucinations — Gemini is seeing background
+            # noise and inventing wake words.  Close the session so the loop
+            # falls back to cheap local Whisper wake-word detection instead of
+            # hammering the Gemini audio API.
+            _log("info",
+                 f"Gemini hallucinated wake word {_gemini_halluc_count}× in a row "
+                 f"— closing session to stop API spam")
+            _gemini_halluc_count = 0
+            _awake.clear()
+            _session_hist.clear()
+            dashboard.update_status(state="idle")
+            _brief_mute(6.0)   # long pause before resuming wake-word listening
+            return
         if _human_is_present() or _awake.is_set():
-            # Person is present — intentional wake-word call, open/extend session
-            _log("wake", f'🔤 Wake word heard — waiting for command')
+            # Person is present — possible intentional wake-word call.
+            # IMPORTANT: do NOT update _last_speech_at here.  If this is a
+            # hallucination, updating the timer would keep the session open
+            # forever, causing a perpetual Gemini-hammering feedback loop.
+            _log("wake",
+                 f'🔤 Wake word ({_gemini_halluc_count}/{_HALLUC_MAX}) — waiting for command')
             _awake.set()
-            _last_speech_at = time.time()
             dashboard.update_status(state="awake")
-            _brief_mute(0.8)   # throttle: prevents rapid re-processing if Gemini hallucinates
+            _brief_mute(3.0)   # was 0.8 s — longer throttle limits Gemini call rate
             return
         _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
-        _brief_mute(1.0)
+        _brief_mute(3.0)   # was 1.0 s
         return
 
     if action == "ignore":
@@ -952,9 +980,10 @@ def _handle_gemini_result(result: dict):
         dashboard.update_status(state="idle", last_transcript=transcript, last_reply="")
         return
 
-    # ── Confirmed real command — play think tick now ──────────────────────────
+    # ── Confirmed real command — reset hallucination counter, play think tick ──
     # Fires only here, after all ignore/hallucination/wake-word-only paths have
     # returned early. This means beep = "I heard a real command, working on it."
+    _gemini_halluc_count = 0   # real speech confirmed — clear consecutive-hallucination tally
     tts.play_think()
 
     dashboard.update_status(state="processing", last_transcript=transcript)
@@ -1151,7 +1180,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # Wake word only — play beep so user knows Pinku heard them.
                 tts.play_beep()
                 dashboard.update_status(state="awake")
-                _brief_mute(0.6)   # just enough to clear the beep echo (~0.5s chime)
+                _brief_mute(1.5)   # was 0.6s — longer pause prevents double-fire & beep echo re-capture
                 continue
 
             # Wake word + inline command — send audio to Gemini for quality response
