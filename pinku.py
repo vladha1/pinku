@@ -382,12 +382,11 @@ def _handle_unmute():
     _log("info", "Unmuted 🎙️")
     _extend_session()
     # Settle: block the voice loop while the unmute chime + beep echo dies down.
-    # 1.5s was not enough — the beep echo (rms_raw ≈ 0.03–0.05) was still
-    # audible during the calibration phase and drove the noise floor to 0.39,
-    # making speech detection impossible for ~15s. 2.5s gives the room time
-    # to go quiet before wait_for_utterance starts its calibration window.
-    _settle_until = time.time() + 2.5
-    _brief_mute(2.5)
+    # 2.5s was not enough — the beep plays for ~0.5s, then room echo persists
+    # for another 1-2s; calibration started while echo was still audible and
+    # Whisper hallucinated "Pinku." from the tail.  4s gives full clearance.
+    _settle_until = time.time() + 4.0
+    _brief_mute(4.0)
 
 
 def _handle_pause():

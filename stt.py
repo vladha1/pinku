@@ -459,13 +459,12 @@ def transcribe(pcm: bytes) -> str:
         beam_size=3,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
-        no_speech_threshold=0.40,    # was 0.55 — more accepting of quiet/distant speech
-        log_prob_threshold=-1.0,     # was -0.8 — accept lower-confidence transcriptions
+        no_speech_threshold=0.45,    # slightly stricter — reduces "Pinku." hallucinations on noise
+        log_prob_threshold=-1.0,     # accept lower-confidence transcriptions
         compression_ratio_threshold=2.4,
-        # Minimal prompt — just the wake word so Whisper spells it right.
-        # Longer prompts (cricket names etc.) get echoed back as hallucinations
-        # when TV audio is in the room.
-        initial_prompt="Pinku.",
+        # No initial_prompt: "Pinku." as a prompt biases Whisper toward hallucinating
+        # the wake word on faint noise / beep echoes, causing spurious session opens.
+        # Removing it trades occasional mis-spelling of "Pinku" for far fewer false wakes.
     )
 
     segs = list(segments)
