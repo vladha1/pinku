@@ -78,6 +78,13 @@ _settle_until:   float = 0.0           # voice loop blocked until this time (TTS
 _gemini_halluc_count: int = 0
 _HALLUC_MAX:          int = 4   # close session after this many consecutive non-commands
 
+# When hallucinations force-close the session, face-detection cannot reopen it
+# until this epoch — prevents the open→hallucinate×4→close→reopen cycle that
+# burned through the Gemini daily quota.  Only a spoken wake word (Whisper) or
+# explicit gesture can reopen the session during the cooldown.
+_face_wake_blocked_until: float = 0.0
+_FACE_WAKE_BLOCK_SEC:     float = 60.0   # seconds to block face-detection wake after hallucination flush
+
 # How long after last camera person detection before we consider room empty
 _HUMAN_GONE_SEC = 12.0
 
@@ -751,13 +758,19 @@ def on_detection(event: dict):
             # and both trigger the wake logic before either sets _awake.
             with _face_wake_lock:
                 if not _awake.is_set():
-                    # Person detected — gentle ack chime + open session
-                    # NOTE: chime is temporary (entry=True applies 25s cooldown)
-                    _last_speech_at = now
-                    _awake.set()
-                    dashboard.update_status(state="awake")
-                    _log("wake", "👤 Face detected → listening")
-                    tts.play_beep(entry=True)
+                    if time.time() < _face_wake_blocked_until:
+                        # Session was recently closed due to hallucinations.
+                        # Don't reopen from face-detection alone — require an
+                        # explicit spoken wake word or gesture to break the cycle.
+                        pass
+                    else:
+                        # Person detected — gentle ack chime + open session
+                        # NOTE: chime is temporary (entry=True applies 25s cooldown)
+                        _last_speech_at = now
+                        _awake.set()
+                        dashboard.update_status(state="awake")
+                        _log("wake", "👤 Face detected → listening")
+                        tts.play_beep(entry=True)
                 else:
                     # Already awake — keep the inactivity timer alive while person is visible
                     _last_speech_at = now
@@ -923,12 +936,14 @@ def _handle_gemini_result(result: dict):
             # noise and inventing wake words.  Close the session so the loop
             # falls back to cheap local Whisper wake-word detection instead of
             # hammering the Gemini audio API.
+            global _face_wake_blocked_until
             _log("info",
                  f"Gemini hallucinated wake word {_gemini_halluc_count}× in a row "
-                 f"— closing session to stop API spam")
+                 f"— closing session, blocking face-wake for {_FACE_WAKE_BLOCK_SEC:.0f}s")
             _gemini_halluc_count = 0
             _awake.clear()
             _session_hist.clear()
+            _face_wake_blocked_until = time.time() + _FACE_WAKE_BLOCK_SEC
             dashboard.update_status(state="idle")
             _brief_mute(6.0)   # long pause before resuming wake-word listening
             return
