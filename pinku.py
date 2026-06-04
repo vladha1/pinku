@@ -1170,7 +1170,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _log("error", f"STT error: {e}")
                 continue
             if not text:
-                _log("info", f"Idle — no speech ({dur:.1f}s)")
+                print(f"[STT] Idle — no speech ({dur:.1f}s)")
                 continue
 
             _log("stt", text)
