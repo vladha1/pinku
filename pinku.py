@@ -85,6 +85,15 @@ _last_reply_text:  str   = ""
 _last_reply_at:    float = 0.0
 _REPLY_COOLDOWN:   float = 10.0   # seconds before the same reply can be spoken again
 
+# Transcript-level deduplication — catches the double-processing bug where
+# two audio captures of the same utterance are both queued (e.g., double
+# face-detection created two slightly-offset audio chunks of the same speech).
+# The output-side reply cooldown doesn't help when Gemini gives the same question
+# different language responses ("The square root..." vs "नमस्ते! 36 का वर्गमूल…").
+_last_user_transcript: str   = ""
+_last_transcript_at:   float = 0.0
+_TRANSCRIPT_DEDUP_SEC: float = 4.0   # seconds — same transcript in this window = duplicate
+
 # When hallucinations force-close the session, face-detection cannot reopen it
 # until this epoch — prevents the open→hallucinate×4→close→reopen cycle that
 # burned through the Gemini daily quota.  Only a spoken wake word (Whisper) or
@@ -950,6 +959,32 @@ def _handle_gemini_result(result: dict):
         _log("info", f'Gemini: echo of own TTS — ignored: "{transcript[:60]}"')
         _brief_mute(2.0)
         return
+
+    # ── Transcript dedup — same utterance queued twice ────────────────────────
+    # Root cause: double face-detection (two rapid frames both see _awake=False
+    # before the lock fires) queues two slightly-offset audio captures of the
+    # same speech.  The _face_wake_lock prevents future occurrences, but audio
+    # already in the queue before the lock can still race through.  An identical
+    # transcript within _TRANSCRIPT_DEDUP_SEC is almost certainly the same
+    # utterance — skip the second to prevent duplicate responses.
+    # NOTE: does NOT update _last_user_transcript for wake-word-only transcripts
+    # (those have no content words); the hallucination guard below handles them.
+    global _last_user_transcript, _last_transcript_at
+    _t_key = transcript.strip().lower()
+    _t_now = time.time()
+    _t_words = [w.strip(".,!?।").lower() for w in transcript.split()]
+    _WAKE_SET = {"pinku", "pinky", "pinko", "pink", "pingu", "pinkoo"}
+    _has_content = any(w for w in _t_words if w not in _WAKE_SET)
+    if _has_content:
+        if _t_key == _last_user_transcript and _t_now - _last_transcript_at < _TRANSCRIPT_DEDUP_SEC:
+            _log("info",
+                 f"Duplicate transcript suppressed "
+                 f"({_t_now - _last_transcript_at:.1f}s ago): \"{transcript[:60]}\"")
+            _brief_mute(1.0)
+            return
+        # Record this transcript so a repeat within the window is caught.
+        _last_user_transcript = _t_key
+        _last_transcript_at   = _t_now
 
     # ── Hallucination guard ───────────────────────────────────────────────────
     # If the transcript is only the wake word (nothing actionable after it),
