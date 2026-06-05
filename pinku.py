@@ -946,6 +946,14 @@ def _handle_gemini_result(result: dict):
     # characters, it can't be Hindi — force English.
     if lang == "hi" and not _re.search(r'[ऀ-ॿ]', transcript):
         lang = "en"
+        # If Gemini also generated its reply in Hindi, discard it so the action
+        # falls through to _dispatch_action → _handle_chat which will regenerate
+        # in English.  Keeping a Hindi reply and just changing the voice would
+        # speak Hindi words through the English TTS voice — sounds wrong.
+        _reply_raw = result.get("reply", "")
+        if _reply_raw and _re.search(r'[ऀ-ॿ]', _reply_raw):
+            _log("info", "Gemini replied in Hindi to an English question — discarding reply, regenerating")
+            result["reply"] = ""
     is_hi      = lang == "hi"
 
     if not transcript:
