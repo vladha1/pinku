@@ -274,15 +274,19 @@ RESPOND when:
 
 If you cannot clearly tell whether audio is from a real person or background media → "ignore"."""
 
-def _make_transcribe_system(session_active: bool) -> str:
+def _make_transcribe_system(session_active: bool, speaker: str | None = None) -> str:
     rule = _WAKE_RULE_SESSION if session_active else _WAKE_RULE_IDLE
-    return _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+    base = _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+    if speaker:
+        base += f"\n\nThe person speaking is {speaker}. Address them by name naturally in your reply."
+    return base
 
 
 def transcribe_and_respond(
     pcm: bytes,
     history: list[dict] | None = None,
     session_active: bool = False,
+    speaker: str | None = None,
 ) -> dict | None:
     """
     Send microphone PCM audio to Gemini for transcription + intent + reply in one call.
@@ -356,7 +360,7 @@ def transcribe_and_respond(
         "parts": [{"inline_data": {"mime_type": "audio/wav", "data": wav_b64}}],
     }]
 
-    system = _make_transcribe_system(session_active)
+    system = _make_transcribe_system(session_active, speaker=speaker)
     try:
         raw = _gemini_call(contents, temperature=0.0, max_tokens=700,
                            system=system)

@@ -52,6 +52,7 @@ import llm
 import knowledge
 import logger as log_module
 import dashboard
+import speaker_id
 
 
 # ── Global state ──────────────────────────────────────────────────────────────
@@ -64,10 +65,11 @@ _processing    = threading.Lock()    # held while handling an utterance end-to-e
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _det_logger    = log_module.DetectionLogger()
 
-_last_speech_at: float = time.time()   # reset on every utterance / wake / gesture
-_last_human_at:  float = 0.0           # last time camera saw a person in frame
-_camera_enabled: bool  = False         # True once camera starts; enables auto-wake
-_settle_until:   float = 0.0           # voice loop blocked until this time (TTS + echo settle)
+_last_speech_at:  float = time.time()   # reset on every utterance / wake / gesture
+_last_human_at:   float = 0.0           # last time camera saw a person in frame
+_camera_enabled:  bool  = False         # True once camera starts; enables auto-wake
+_settle_until:    float = 0.0           # voice loop blocked until this time (TTS + echo settle)
+_current_speaker: str | None = None    # name of identified speaker for this utterance
 
 # Consecutive Gemini wake-word-only / hallucination counter.
 # Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
@@ -211,7 +213,8 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("source", f"Gemini + Google Search ({llm.GEMINI_MODEL})")
-    reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
+    spk_ctx = f"The person speaking is {_current_speaker}." if _current_speaker else ""
+    reply = llm.chat(tr, history=_session_hist, is_hi=is_hi, system_extra=spk_ctx)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
     if len(_session_hist) > 12:
@@ -1185,7 +1188,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
     Fallback to Whisper + Ollama + Gemini if Gemini audio is unavailable.
     """
-    global _last_speech_at
+    global _last_speech_at, _current_speaker
 
     while not _stop_all.is_set():
         if tts.is_speaking():
@@ -1226,6 +1229,21 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if time.time() < _settle_until:
             continue
 
+        # ── Speaker gate ──────────────────────────────────────────────────────────
+        # Drop audio from unrecognised voices (TV, Pinky's TTS echo, guests) before
+        # any expensive Whisper / Gemini call.  Falls back to open gate when no
+        # profiles are enrolled so the system works out of the box.
+        if config.SPEAKER_ID_ENABLED and speaker_id.has_profiles():
+            _spk_name, _spk_score = speaker_id.identify(pcm)
+            if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
+                print(f"[SpeakerID] Unknown ({_spk_score:.2f}) — dropping")
+                continue
+            _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
+            if _spk_name:
+                print(f"[SpeakerID] {_spk_name} ({_spk_score:.2f})")
+        else:
+            _current_speaker = None
+
         # ── Processing lock: drop audio if already handling a previous utterance ─
         if not _processing.acquire(blocking=False):
             continue   # silently discard — previous response still in flight
@@ -1237,7 +1255,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # in conversation (face detected or awake session open).
                 dashboard.update_status(state="processing")
                 result = llm.transcribe_and_respond(
-                    pcm, history=_session_hist, session_active=True)
+                    pcm, history=_session_hist, session_active=True,
+                    speaker=_current_speaker)
                 if result is not None:
                     _handle_gemini_result(result)
                 else:
@@ -1282,7 +1301,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
             # Wake word + inline command — send audio to Gemini for quality response
             dashboard.update_status(state="processing")
-            result = llm.transcribe_and_respond(pcm, history=_session_hist)
+            result = llm.transcribe_and_respond(pcm, history=_session_hist,
+                                                speaker=_current_speaker)
             if result is not None:
                 _handle_gemini_result(result)
             else:
@@ -1374,6 +1394,15 @@ def main():
     stt.set_log_callback(_log)   # route STT diagnostics → dashboard log
     recorder = stt.AudioRecorder()
     recorder.start()
+
+    # ── Speaker identification ────────────────────────────────────────────────
+    if config.SPEAKER_ID_ENABLED:
+        n = speaker_id.load()
+        if n:
+            print(f"[SpeakerID] Gate active — {n} profile(s) loaded")
+        else:
+            print("[SpeakerID] No profiles enrolled — gate inactive (open to all voices)")
+            print("            Enroll with: python enroll_speakers.py --name <name> --record 10")
 
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
     _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")

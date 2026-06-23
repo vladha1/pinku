@@ -28,6 +28,10 @@ accelerate>=0.29.0             # speeds up model loading on MPS
 # ABC/MIDI fallback (optional, lightweight):
 #   brew install abcmidi fluidsynth fluid-soundfont-gm
 
+# ── Speaker identification ────────────────────────────────────────────────────
+resemblyzer>=0.1.1.dev0        # local speaker ID gate (Resemblyzer GE2E encoder)
+                               # Enroll: python enroll_speakers.py --name <name> --record 10
+
 # ── Optional / future ─────────────────────────────────────────────────────────
 # face-recognition             # face ID (requires dlib — brew install cmake first)
 # openai-whisper               # alternative to faster-whisper (slower but official)

@@ -87,6 +87,25 @@ MUSIC_MODEL_CACHE = os.getenv(
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5100"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
+# ── Speaker identification ─────────────────────────────────────────────────────
+# Resemblyzer-based local speaker gate. Audio from unrecognised voices is
+# dropped before wake-word detection, eliminating TV / TTS-echo false triggers.
+# Install: pip install resemblyzer
+# Enroll:  python enroll_speakers.py --name <name> --record 10
+#
+# Set SPEAKER_ID_ENABLED=0 to bypass (e.g. when no profiles are enrolled yet).
+SPEAKER_PROFILES_DIR        = os.getenv(
+    "SPEAKER_PROFILES_DIR",
+    os.path.join(os.path.expanduser("~"), "pinku", "profiles"),
+)
+SPEAKER_ID_ENABLED          = bool(int(os.getenv("SPEAKER_ID_ENABLED",          "1")))
+# Cosine similarity thresholds (0.0–1.0):
+#   >= ACCEPT    → confident match — attach speaker name to LLM context
+#   [UNCERTAIN, ACCEPT) → marginal — pass through as anonymous, no name attached
+#   < UNCERTAIN  → clearly unknown — drop silently (TV, echo, guests, etc.)
+SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.60"))
+SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.40"))
+
 # ── Wake / session ────────────────────────────────────────────────────────────
 SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "60.0"))  # seconds of silence before going idle (60 = enough time to think + respond)
 LOG_DIR           = os.getenv("LOG_DIR", os.path.join(os.path.expanduser("~"), "pinku", "logs"))
