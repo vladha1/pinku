@@ -1215,6 +1215,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
             dashboard.update_status(state="idle")
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
 
+        # ── Pause while dashboard Voices tab is recording enrollment audio ────
+        if dashboard.is_enrolling():
+            time.sleep(0.2)
+            continue
+
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
         if pcm is None:
             continue
