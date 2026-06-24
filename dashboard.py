@@ -482,65 +482,52 @@ def enroll_profiles():
     except Exception as e:
         return json.dumps({"profiles": [], "error": str(e)})
 
-@_app.route("/api/enroll/upload", methods=["POST"])
-def enroll_upload():
+@_app.route("/api/enroll/record", methods=["POST"])
+def enroll_record():
+    """Record N seconds from Pinku's own mic, create embedding, save profile."""
     from flask import request as _req
+    global _enrolling
+    body    = _req.get_json(silent=True) or {}
+    name    = body.get("name", "").strip()
+    seconds = min(int(body.get("seconds", 10)), 30)
+    if not name or not name.replace("_", "").replace("-", "").replace(" ", "").isalnum():
+        return json.dumps({"ok": False, "error": "Invalid name (letters/numbers/_ only)"}), 400
+    _enrolling = True
     try:
-        name = _req.form.get("name", "").strip()
-        if not name or not name.replace("_", "").replace("-", "").replace(" ", "").isalnum():
-            return json.dumps({"ok": False, "error": "Invalid name (letters/numbers/_ only)"}), 400
-
-        wav_file = _req.files.get("audio")
-        if wav_file is None:
-            return json.dumps({"ok": False, "error": "No audio file"}), 400
-
-        import numpy as np, io, wave
-        wav_bytes = wav_file.read()
-
-        with wave.open(io.BytesIO(wav_bytes)) as wf:
-            sr    = wf.getframerate()
-            nch   = wf.getnchannels()
-            sw    = wf.getsampwidth()
-            raw   = wf.readframes(wf.getnframes())
-
-        if sw == 2:
-            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        elif sw == 4:
-            audio = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
-        else:
-            audio = np.frombuffer(raw, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
-
-        if nch > 1:
-            audio = audio.reshape(-1, nch).mean(axis=1)
-
-        if sr != 16000:
-            from scipy.signal import resample
-            audio = resample(audio, int(len(audio) * 16000 / sr))
-
+        import numpy as np, pyaudio
+        from config import MIC_DEVICE_INDEX, SPEAKER_PROFILES_DIR
+        RATE  = 16000
+        CHUNK = 1024
+        p = pyaudio.PyAudio()
+        kw = dict(format=pyaudio.paInt16, channels=1, rate=RATE,
+                  input=True, frames_per_buffer=CHUNK)
+        if MIC_DEVICE_INDEX >= 0:
+            kw["input_device_index"] = MIC_DEVICE_INDEX
+        stream = p.open(**kw)
+        frames = [stream.read(CHUNK, exception_on_overflow=False)
+                  for _ in range(int(RATE / CHUNK * seconds))]
+        stream.stop_stream(); stream.close(); p.terminate()
+        audio = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32) / 32768.0
         from resemblyzer import VoiceEncoder, preprocess_wav
-        enc = VoiceEncoder()
-        wav_proc = preprocess_wav(audio, source_sr=16000)
+        enc       = VoiceEncoder()
+        wav_proc  = preprocess_wav(audio, source_sr=RATE)
         embedding = enc.embed_utterance(wav_proc)
         embedding = embedding / np.linalg.norm(embedding)
-
-        from config import SPEAKER_PROFILES_DIR
-        os.makedirs(SPEAKER_PROFILES_DIR, exist_ok=True)
         safe_name = name.replace(" ", "_")
-        out_path = os.path.join(SPEAKER_PROFILES_DIR, f"{safe_name}.npy")
-        np.save(out_path, embedding)
-
+        os.makedirs(SPEAKER_PROFILES_DIR, exist_ok=True)
+        np.save(os.path.join(SPEAKER_PROFILES_DIR, f"{safe_name}.npy"), embedding)
         try:
             import speaker_id as _sid
             _sid.load()
         except Exception:
             pass
-
-        log_message("info", f"SpeakerID: enrolled '{safe_name}' via dashboard")
+        log_message("info", f"SpeakerID: enrolled '{safe_name}' via Pinku mic")
         return json.dumps({"ok": True, "name": safe_name})
     except Exception as e:
-        import traceback
-        log_message("error", f"Enroll upload error: {e}")
+        log_message("error", f"Enroll record error: {e}")
         return json.dumps({"ok": False, "error": str(e)}), 500
+    finally:
+        _enrolling = False
 
 @_app.route("/api/enroll/delete/<name>", methods=["DELETE"])
 def enroll_delete(name):
@@ -2163,38 +2150,15 @@ function LogTab({ logs, onClear }) {
   );
 }
 
-// ── WAV encoder (Float32 → 16-bit PCM WAV Blob) ────────────────────────────────
-function encodeWav(samples, sr) {
-  var buf  = new ArrayBuffer(44 + samples.length * 2);
-  var view = new DataView(buf);
-  function ws(off, s) { for (var i=0; i<s.length; i++) view.setUint8(off+i, s.charCodeAt(i)); }
-  ws(0, 'RIFF');
-  view.setUint32(4, 36 + samples.length * 2, true);
-  ws(8, 'WAVE'); ws(12, 'fmt ');
-  view.setUint32(16, 16, true);    // chunk size
-  view.setUint16(20, 1, true);     // PCM
-  view.setUint16(22, 1, true);     // mono
-  view.setUint32(24, sr, true);    // sample rate
-  view.setUint32(28, sr * 2, true);// byte rate
-  view.setUint16(32, 2, true);     // block align
-  view.setUint16(34, 16, true);    // bits per sample
-  ws(36, 'data');
-  view.setUint32(40, samples.length * 2, true);
-  for (var i=0; i<samples.length; i++) {
-    view.setInt16(44 + i*2, Math.max(-32768, Math.min(32767, Math.round(samples[i]*32767))), true);
-  }
-  return new Blob([buf], { type: 'audio/wav' });
-}
-
 // ── EnrollTab ──────────────────────────────────────────────────────────────────
+// Records via Pinku's own mic on the server — no browser mic needed.
 function EnrollTab() {
   var [profiles, setProfiles] = React.useState([]);
   var [name, setName] = React.useState('');
-  var [recState, setRecState] = React.useState('idle'); // idle|recording|uploading|done|error
+  var [recState, setRecState] = React.useState('idle'); // idle|recording|done|error
   var [msg, setMsg] = React.useState('');
   var [countdown, setCountdown] = React.useState(0);
   var cdTimerRef = React.useRef(null);
-  var allSamplesRef = React.useRef([]);
 
   function loadProfiles() {
     fetch('/api/enroll/profiles').then(function(r){ return r.json(); })
@@ -2202,38 +2166,11 @@ function EnrollTab() {
   }
   React.useEffect(function(){ loadProfiles(); }, []);
 
-  function doUpload(samples, sr) {
-    var wavBlob = encodeWav(samples, sr);
-    var safeName = name.trim().replace(/\s+/g, '_');
-    var fd = new FormData();
-    fd.append('name', safeName);
-    fd.append('sr', String(sr));
-    fd.append('audio', wavBlob, 'enrollment.wav');
-    fetch('/api/enroll/upload', { method: 'POST', body: fd })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        fetch('/api/enroll/resume', { method: 'POST' }).catch(function(){});
-        if (d.ok) {
-          setRecState('done'); setMsg('Enrolled as "' + d.name + '"!');
-          setName(''); loadProfiles();
-          setTimeout(function(){ setRecState('idle'); setMsg(''); }, 3500);
-        } else {
-          setRecState('error'); setMsg(d.error || 'Upload failed');
-          setTimeout(function(){ setRecState('idle'); setMsg(''); }, 4500);
-        }
-      }).catch(function(e){
-        fetch('/api/enroll/resume', { method: 'POST' }).catch(function(){});
-        setRecState('error'); setMsg('Network error: ' + e.message);
-        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 4500);
-      });
-  }
-
   function startRecording() {
     var trimmedName = name.trim();
     if (!trimmedName) { setMsg('Enter a name first'); return; }
-    fetch('/api/enroll/pause', { method: 'POST' }).catch(function(){});
-    setRecState('recording'); setMsg(''); allSamplesRef.current = [];
-    var SEC = 8;
+    var SEC = 10;
+    setRecState('recording'); setMsg('Speak naturally for ' + SEC + ' seconds…');
     setCountdown(SEC);
     var cdVal = SEC;
     clearInterval(cdTimerRef.current);
@@ -2243,44 +2180,27 @@ function EnrollTab() {
       if (cdVal <= 0) clearInterval(cdTimerRef.current);
     }, 1000);
 
-    var constraints = { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
-    navigator.mediaDevices.getUserMedia(constraints)
-      .then(function(stream){
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        var sr  = ctx.sampleRate;
-        var src = ctx.createMediaStreamSource(stream);
-        var proc = ctx.createScriptProcessor(4096, 1, 1);
-        proc.onaudioprocess = function(e){
-          allSamplesRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-        };
-        src.connect(proc); proc.connect(ctx.destination);
-
-        setTimeout(function(){
-          clearInterval(cdTimerRef.current);
-          proc.disconnect(); src.disconnect();
-          stream.getTracks().forEach(function(t){ t.stop(); });
-          ctx.close();
-          setRecState('uploading'); setMsg('Processing…');
-
-          var chunks = allSamplesRef.current;
-          var total = chunks.reduce(function(a,b){ return a+b.length; }, 0);
-          var merged = new Float32Array(total);
-          var off = 0;
-          chunks.forEach(function(c){ merged.set(c, off); off += c.length; });
-          doUpload(merged, sr);
-        }, SEC * 1000);
-      })
-      .catch(function(e){
-        clearInterval(cdTimerRef.current);
-        fetch('/api/enroll/resume', { method: 'POST' }).catch(function(){});
-        setRecState('error');
-        var errMsg = e.message || String(e);
-        if (errMsg.toLowerCase().indexOf('permission') !== -1 || errMsg.toLowerCase().indexOf('allowed') !== -1) {
-          errMsg = 'Mic permission denied. On iPhone/Safari, access via HTTPS or use Mac at localhost:5100';
-        }
-        setMsg(errMsg);
-        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 6000);
-      });
+    fetch('/api/enroll/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmedName, seconds: SEC }),
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      clearInterval(cdTimerRef.current);
+      if (d.ok) {
+        setRecState('done'); setMsg('Enrolled as "' + d.name + '"!');
+        setName(''); loadProfiles();
+        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 3500);
+      } else {
+        setRecState('error'); setMsg(d.error || 'Failed');
+        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
+      }
+    }).catch(function(e){
+      clearInterval(cdTimerRef.current);
+      setRecState('error'); setMsg('Error: ' + e.message);
+      setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
+    });
   }
 
   function deleteProfile(pname) {
@@ -2291,11 +2211,8 @@ function EnrollTab() {
   }
 
   var isRecording = recState === 'recording';
-  var isBusy = recState === 'recording' || recState === 'uploading';
   var btnLabel = isRecording ? ('🔴 Recording… ' + countdown + 's') :
-    recState === 'uploading' ? '⏳ Processing…' :
-    recState === 'done'      ? '✅ Done!' :
-    '🎙️ Record (8s)';
+    recState === 'done'  ? '✅ Done!' : '🎙️ Record via Pinku mic (10s)';
 
   return React.createElement('div', { className: 'enroll-area open' },
     React.createElement('div', { className: 'enroll-card' },
@@ -2312,19 +2229,20 @@ function EnrollTab() {
     React.createElement('div', { className: 'enroll-card' },
       React.createElement('div', { className: 'enroll-title' }, 'Add Voice'),
       React.createElement('div', { className: 'enroll-hint' },
-        'Pinku pauses while you record. Say your name and a few sentences naturally (8 seconds).'
+        'Pinku records 10 seconds from its own mic — same microphone it listens on. ' +
+        'Speak naturally: say your name and a few sentences.'
       ),
       React.createElement('input', {
         className: 'enroll-input',
         type: 'text', placeholder: 'Your name  (e.g. vlad)',
         value: name,
         onChange: function(e){ setName(e.target.value); },
-        disabled: isBusy
+        disabled: isRecording
       }),
       React.createElement('button', {
         className: 'enroll-rec-btn' + (isRecording ? ' recording' : ''),
         onClick: startRecording,
-        disabled: isBusy || !name.trim()
+        disabled: isRecording || !name.trim()
       }, btnLabel),
       msg && React.createElement('div', { className: 'enroll-msg' + (recState === 'error' ? ' error' : '') }, msg)
     )
