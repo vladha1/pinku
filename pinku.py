@@ -1236,11 +1236,13 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if config.SPEAKER_ID_ENABLED and speaker_id.has_profiles():
             _spk_name, _spk_score = speaker_id.identify(pcm)
             if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
-                print(f"[SpeakerID] Unknown ({_spk_score:.2f}) — dropping")
+                _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
             if _spk_name:
-                print(f"[SpeakerID] {_spk_name} ({_spk_score:.2f})")
+                _log("info", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
+            else:
+                _log("info", f"SpeakerID: uncertain ({_spk_score:.2f}) — passing anonymously")
         else:
             _current_speaker = None
 
@@ -1399,10 +1401,9 @@ def main():
     if config.SPEAKER_ID_ENABLED:
         n = speaker_id.load()
         if n:
-            print(f"[SpeakerID] Gate active — {n} profile(s) loaded")
+            _log("info", f"SpeakerID: gate active — {n} profile(s) loaded: {', '.join(speaker_id._profiles)}")
         else:
-            print("[SpeakerID] No profiles enrolled — gate inactive (open to all voices)")
-            print("            Enroll with: python enroll_speakers.py --name <name> --record 10")
+            _log("info", "SpeakerID: no profiles enrolled — gate inactive (open to all voices)")
 
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
     _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")
