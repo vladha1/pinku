@@ -35,6 +35,8 @@
 
     <key>EnvironmentVariables</key>
     <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
         <key>TF_CPP_MIN_LOG_LEVEL</key>
         <string>3</string>
         <key>GRPC_VERBOSITY</key>
