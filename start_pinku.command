@@ -4,9 +4,25 @@
 
 cd "$(dirname "$0")"
 
-# ── Kill existing instances and free ports ────────────────────────────────────
+# ── Kill existing instances and wait for them to fully exit ───────────────────
 pkill -f pinku.py     2>/dev/null && echo "Stopped previous Pinku instance."     || true
 pkill -f music_app.py 2>/dev/null && echo "Stopped previous Music app instance." || true
+
+# Wait up to 8s for pinku.py to actually exit before proceeding.
+# pkill sends SIGTERM which Pinku handles cleanly; the process needs a moment
+# to flush threads and release the lockfile.  Without this wait, the new
+# instance starts before the old one exits — both try to acquire the lock,
+# the old one wins, the new one exits (code 2), and neither runs reliably.
+echo "Waiting for previous Pinku to exit..."
+for i in $(seq 8); do
+    pgrep -f "python.*pinku\.py" > /dev/null 2>&1 || break
+    sleep 1
+done
+# Force-kill anything still alive after the grace period
+pkill -9 -f "python.*pinku\.py" 2>/dev/null || true
+pkill -9 -f music_app.py 2>/dev/null || true
+sleep 0.5   # brief pause so OS fully releases the lockfile
+
 kill -9 $(lsof -ti :5100) 2>/dev/null || true
 kill -9 $(lsof -ti :5101) 2>/dev/null || true
 
@@ -49,7 +65,12 @@ while true; do
     .venv/bin/python3 pinku.py
     EXIT=$?
     echo ""
-    echo "$(date '+%H:%M:%S')  [Pinku] Exited (code $EXIT). Restarting in 5s..."
-    kill -9 $(lsof -ti :5100) 2>/dev/null || true
-    sleep 5
+    if [ $EXIT -eq 2 ]; then
+        echo "$(date '+%H:%M:%S')  [Pinku] Lock held by another instance — retrying in 10s..."
+        sleep 10
+    else
+        echo "$(date '+%H:%M:%S')  [Pinku] Exited (code $EXIT). Restarting in 5s..."
+        kill -9 $(lsof -ti :5100) 2>/dev/null || true
+        sleep 5
+    fi
 done

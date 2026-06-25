@@ -34,16 +34,17 @@ def _acquire_lock():
     try:
         fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        # Read the stale PID so we can report it
         try:
             pid = open(_LOCKFILE).read().strip()
         except Exception:
             pid = "?"
         print(f"[Pinku] Another instance is already running (PID {pid}). Exiting.")
-        sys.exit(1)
+        sys.exit(2)   # exit code 2 = lockfile conflict; start_pinku.command waits longer before retry
     _lock_fh.write(str(os.getpid()))
     _lock_fh.flush()
     return _lock_fh   # keep open — released automatically when process exits
+
+import signal
 
 import config
 import stt
@@ -53,6 +54,17 @@ import knowledge
 import logger as log_module
 import dashboard
 import speaker_id
+
+
+# ── SIGTERM handler — clean exit when pkill/kill sends SIGTERM ────────────────
+# Without this, Python's default SIGTERM kills the process but bypasses the
+# finally block in _voice_loop, leaving threads mid-flight.  Raising
+# KeyboardInterrupt re-uses the existing clean-shutdown path in main().
+def _handle_sigterm(signum, frame):
+    print("[Pinku] Received SIGTERM — shutting down cleanly …")
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 
 # ── Global state ──────────────────────────────────────────────────────────────
@@ -1244,10 +1256,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                 _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
-            # Inter-utterance cooldown: drop tail-audio reblips arriving within 1s
+            # Inter-utterance cooldown: drop tail-audio reblips arriving within 2s
             # of the previous utterance that passed the gate (prevents duplicate processing).
             _gate_now = time.time()
-            if _gate_now - _last_gate_at < 1.0:
+            if _gate_now - _last_gate_at < 2.0:
                 continue
             _last_gate_at = _gate_now
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
