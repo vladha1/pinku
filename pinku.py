@@ -1115,8 +1115,10 @@ def _handle_gemini_result(result: dict):
         _speak_reply(reply, is_hi)
     else:
         # Action needs Python handler (time, mute, describe, etc.)
-        _dispatch_action({"action": action, "lang": lang,
-                          "transcript": transcript, **result})
+        # Put explicit overrides AFTER **result so they win over Gemini's original values.
+        # ("lang": lang must come last — otherwise **result's lang:"hi" silently wins.)
+        _dispatch_action({**result, "action": action, "lang": lang,
+                          "transcript": transcript})
 
 
 def _has_repeated_phrase(text: str, n: int = 3) -> bool:
