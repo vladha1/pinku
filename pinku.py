@@ -1256,10 +1256,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                 _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
-            # Inter-utterance cooldown: drop tail-audio reblips arriving within 2s
+            # Inter-utterance cooldown: drop tail-audio reblips arriving within 3s
             # of the previous utterance that passed the gate (prevents duplicate processing).
             _gate_now = time.time()
-            if _gate_now - _last_gate_at < 2.0:
+            if _gate_now - _last_gate_at < 3.0:
                 continue
             _last_gate_at = _gate_now
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
