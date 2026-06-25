@@ -5,26 +5,40 @@
     <key>Label</key>
     <string>com.pinku</string>
 
-    <!--
-      Opens start_pinku.command in Terminal.app at login.
-      Terminal.app has camera permission → Pinku inherits it.
-      The .command file contains a watchdog loop so Pinku auto-restarts on crash.
-      'open' returns immediately; launchd runs it once at login (RunAtLoad).
-    -->
+    <!-- Run pinku.py directly in the user's GUI session (LaunchAgent) so it
+         gets full CoreAudio access for mic input and TTS output.
+         KeepAlive=true → launchd auto-restarts on crash.
+         ThrottleInterval=10 → never restarts faster than every 10s. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/open</string>
-        <string>-a</string>
-        <string>Terminal</string>
-        <string>/Users/vivekladha/pinku/start_pinku.command</string>
+        <string>/Users/vivekladha/pinku/.venv/bin/python3</string>
+        <string>/Users/vivekladha/pinku/pinku.py</string>
     </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/vivekladha/pinku</string>
 
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Do NOT use KeepAlive — 'open' exits immediately and KeepAlive would
-         spam new Terminal windows every few seconds. -->
     <key>KeepAlive</key>
-    <false/>
+    <true/>
+
+    <!-- Prevent rapid restart loops (e.g. if mic/model fails at startup) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/vivekladha/Library/Logs/pinku.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/vivekladha/Library/Logs/pinku.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TF_CPP_MIN_LOG_LEVEL</key>
+        <string>3</string>
+        <key>GRPC_VERBOSITY</key>
+        <string>ERROR</string>
+    </dict>
 </dict>
 </plist>
