@@ -70,6 +70,7 @@ _last_human_at:   float = 0.0           # last time camera saw a person in frame
 _camera_enabled:  bool  = False         # True once camera starts; enables auto-wake
 _settle_until:    float = 0.0           # voice loop blocked until this time (TTS + echo settle)
 _current_speaker: str | None = None    # name of identified speaker for this utterance
+_last_gate_at:    float = 0.0           # last time a PCM chunk passed the speaker gate
 
 # Consecutive Gemini wake-word-only / hallucination counter.
 # Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
@@ -849,14 +850,14 @@ _PINKU_RE_START = _re.compile(
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
-    r'|पिकु|पिकू)\b[,\s।]*',                                       # पिकु = Whisper drops anusvara ं
+    r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
-    r'|पिकु|पिकू)\b[\W]*$',
+    r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
     _re.IGNORECASE,
 )
 
@@ -1188,7 +1189,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
     Fallback to Whisper + Ollama + Gemini if Gemini audio is unavailable.
     """
-    global _last_speech_at, _current_speaker
+    global _last_speech_at, _current_speaker, _last_gate_at
 
     while not _stop_all.is_set():
         if tts.is_speaking():
@@ -1243,6 +1244,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                 _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
+            # Inter-utterance cooldown: drop tail-audio reblips arriving within 1s
+            # of the previous utterance that passed the gate (prevents duplicate processing).
+            _gate_now = time.time()
+            if _gate_now - _last_gate_at < 1.0:
+                continue
+            _last_gate_at = _gate_now
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
             if _spk_name:
                 _log("info", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
@@ -1272,11 +1279,27 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _fallback_process(pcm)
                 continue
 
-            # ── Gate: idle mode — Whisper locally for wake word only ─────────
+            # ── Gate: idle mode ───────────────────────────────────────────────
             dur = len(pcm) / (16000 * 2)
             if dur > 6.0:
                 print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
+
+            # Known speaker in idle mode → Gemini directly.
+            # Gemini is far better at recognising "Pinku" in Hindi/noisy speech
+            # than Whisper's local wake-word check.  Whisper is only used for the
+            # uncertain/anonymous path where we can't trust the audio is intentional.
+            if _current_speaker is not None:
+                dashboard.update_status(state="processing")
+                result = llm.transcribe_and_respond(
+                    pcm, history=_session_hist, session_active=False,
+                    speaker=_current_speaker)
+                if result is not None:
+                    _handle_gemini_result(result)
+                else:
+                    _fallback_process(pcm)
+                continue
+
             try:
                 text = stt.transcribe(pcm)
             except Exception as e:
