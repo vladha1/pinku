@@ -16,6 +16,7 @@ import numpy as np
 from config import (
     SPEAKER_PROFILES_DIR,
     SPEAKER_THRESHOLD_ACCEPT,
+    SPEAKER_ID_MARGIN,
 )
 
 _encoder      = None
@@ -106,16 +107,26 @@ def identify(pcm: bytes, sample_rate: int = 16000) -> tuple[str | None, float]:
         print(f"[SpeakerID] Embed error: {e} — passing through")
         return None, 1.0   # fail open
 
-    best_name  = None
-    best_score = 0.0
+    best_name   = None
+    best_score  = 0.0
+    second_best = 0.0
 
     for name, profile_emb in _profiles.items():
         # Both embeddings are unit-length → dot product == cosine similarity
         score = float(np.dot(embedding, profile_emb))
         if score > best_score:
-            best_score = score
-            best_name  = name
+            second_best = best_score
+            best_score  = score
+            best_name   = name
+        elif score > second_best:
+            second_best = score
 
-    if best_score >= SPEAKER_THRESHOLD_ACCEPT:
+    # Require both an absolute threshold AND a clear margin over the runner-up.
+    # Without the margin check, family members (who share vocal characteristics)
+    # can score high enough against a single profile to be falsely identified.
+    # With 2+ profiles: parent scores 0.74, child scores 0.68 → margin 0.06 < 0.08 → anonymous.
+    # With 1 profile:   margin is always best_score (second_best=0), so only threshold applies.
+    margin_ok = (best_score - second_best) >= SPEAKER_ID_MARGIN
+    if best_score >= SPEAKER_THRESHOLD_ACCEPT and margin_ok:
         return best_name, best_score
     return None, best_score

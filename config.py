@@ -103,8 +103,12 @@ SPEAKER_ID_ENABLED          = bool(int(os.getenv("SPEAKER_ID_ENABLED",          
 #   >= ACCEPT    → confident match — attach speaker name to LLM context
 #   [UNCERTAIN, ACCEPT) → marginal — pass through as anonymous, no name attached
 #   < UNCERTAIN  → clearly unknown — drop silently (TV, echo, guests, etc.)
-SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.60"))
-SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.40"))
+SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.72"))
+SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.42"))
+# Minimum margin by which the best-matching profile must beat the second-best.
+# Prevents family-voice confusion where related speakers score similarly against
+# the same profile (e.g. parent 0.74, child 0.68 → margin 0.06 < 0.08 → anonymous).
+SPEAKER_ID_MARGIN           = float(os.getenv("SPEAKER_ID_MARGIN",           "0.08"))
 
 # ── Wake / session ────────────────────────────────────────────────────────────
 SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "60.0"))  # seconds of silence before going idle (60 = enough time to think + respond)

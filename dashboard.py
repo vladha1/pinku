@@ -477,7 +477,14 @@ def enroll_profiles():
         if os.path.isdir(SPEAKER_PROFILES_DIR):
             for fn in sorted(os.listdir(SPEAKER_PROFILES_DIR)):
                 if fn.endswith(".npy"):
-                    profiles.append(fn[:-4])
+                    name = fn[:-4]
+                    count_path = os.path.join(SPEAKER_PROFILES_DIR, f"{name}.clips")
+                    clips = 1
+                    try:
+                        clips = int(open(count_path).read().strip())
+                    except Exception:
+                        pass
+                    profiles.append({"name": name, "clips": clips})
         return json.dumps({"profiles": profiles})
     except Exception as e:
         return json.dumps({"profiles": [], "error": str(e)})
@@ -489,7 +496,7 @@ def enroll_record():
     global _enrolling
     body    = _req.get_json(silent=True) or {}
     name    = body.get("name", "").strip()
-    seconds = min(int(body.get("seconds", 10)), 30)
+    seconds = min(int(body.get("seconds", 15)), 30)
     if not name or not name.replace("_", "").replace("-", "").replace(" ", "").isalnum():
         return json.dumps({"ok": False, "error": "Invalid name (letters/numbers/_ only)"}), 400
     _enrolling = True
@@ -511,18 +518,41 @@ def enroll_record():
         from resemblyzer import VoiceEncoder, preprocess_wav
         enc       = VoiceEncoder()
         wav_proc  = preprocess_wav(audio, source_sr=RATE)
-        embedding = enc.embed_utterance(wav_proc)
-        embedding = embedding / np.linalg.norm(embedding)
-        safe_name = name.replace(" ", "_")
+        new_emb   = enc.embed_utterance(wav_proc)
+        new_emb   = new_emb / np.linalg.norm(new_emb)
+
+        safe_name  = name.replace(" ", "_")
         os.makedirs(SPEAKER_PROFILES_DIR, exist_ok=True)
-        np.save(os.path.join(SPEAKER_PROFILES_DIR, f"{safe_name}.npy"), embedding)
+        profile_path = os.path.join(SPEAKER_PROFILES_DIR, f"{safe_name}.npy")
+        count_path   = os.path.join(SPEAKER_PROFILES_DIR, f"{safe_name}.clips")
+
+        # If a profile already exists, blend new clip into it (EWA, weight 30% new).
+        # Each additional recording shifts the embedding toward the new sample,
+        # building a more representative average without needing to store all clips.
+        clip_count = 1
+        if os.path.exists(profile_path):
+            try:
+                old_emb    = np.load(profile_path).astype(np.float32)
+                old_count  = int(open(count_path).read().strip()) if os.path.exists(count_path) else 1
+                blended    = 0.7 * old_emb + 0.3 * new_emb
+                new_emb    = blended / np.linalg.norm(blended)
+                clip_count = old_count + 1
+            except Exception:
+                clip_count = 1   # corrupt old profile — overwrite
+
+        np.save(profile_path, new_emb)
+        with open(count_path, "w") as _f:
+            _f.write(str(clip_count))
+
         try:
             import speaker_id as _sid
             _sid.load()
         except Exception:
             pass
-        log_message("info", f"SpeakerID: enrolled '{safe_name}' via Pinku mic")
-        return json.dumps({"ok": True, "name": safe_name})
+        msg = (f"SpeakerID: enrolled '{safe_name}' — clip {clip_count} blended in"
+               if clip_count > 1 else f"SpeakerID: enrolled '{safe_name}' (clip 1)")
+        log_message("info", msg)
+        return json.dumps({"ok": True, "name": safe_name, "clips": clip_count})
     except Exception as e:
         log_message("error", f"Enroll record error: {e}")
         return json.dumps({"ok": False, "error": str(e)}), 500
@@ -537,6 +567,9 @@ def enroll_delete(name):
         if not os.path.exists(path):
             return json.dumps({"ok": False, "error": "Profile not found"}), 404
         os.remove(path)
+        clips_path = os.path.join(SPEAKER_PROFILES_DIR, f"{name}.clips")
+        if os.path.exists(clips_path):
+            os.remove(clips_path)
         try:
             import speaker_id as _sid
             _sid.load()
@@ -2152,6 +2185,8 @@ function LogTab({ logs, onClear }) {
 
 // ── EnrollTab ──────────────────────────────────────────────────────────────────
 // Records via Pinku's own mic on the server — no browser mic needed.
+// Recording the same name multiple times averages the clips together for
+// a more robust profile that better distinguishes family members.
 function EnrollTab() {
   var [profiles, setProfiles] = React.useState([]);
   var [name, setName] = React.useState('');
@@ -2169,8 +2204,12 @@ function EnrollTab() {
   function startRecording() {
     var trimmedName = name.trim();
     if (!trimmedName) { setMsg('Enter a name first'); return; }
-    var SEC = 10;
-    setRecState('recording'); setMsg('Speak naturally for ' + SEC + ' seconds…');
+    var SEC = 15;
+    var existing = profiles.find(function(p){ return p.name === trimmedName; });
+    var hint = existing
+      ? 'Adding clip ' + (existing.clips + 1) + ' to "' + trimmedName + '" — speak for ' + SEC + 's…'
+      : 'Speak naturally for ' + SEC + ' seconds…';
+    setRecState('recording'); setMsg(hint);
     setCountdown(SEC);
     var cdVal = SEC;
     clearInterval(cdTimerRef.current);
@@ -2189,9 +2228,13 @@ function EnrollTab() {
     .then(function(d){
       clearInterval(cdTimerRef.current);
       if (d.ok) {
-        setRecState('done'); setMsg('Enrolled as "' + d.name + '"!');
-        setName(''); loadProfiles();
-        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 3500);
+        var clips = d.clips || 1;
+        var doneMsg = clips > 1
+          ? '"' + d.name + '" updated (' + clips + ' clips blended)'
+          : 'Enrolled "' + d.name + '"! Record again to improve accuracy.';
+        setRecState('done'); setMsg(doneMsg);
+        loadProfiles();
+        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 4000);
       } else {
         setRecState('error'); setMsg(d.error || 'Failed');
         setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
@@ -2211,8 +2254,12 @@ function EnrollTab() {
   }
 
   var isRecording = recState === 'recording';
-  var btnLabel = isRecording ? ('🔴 Recording… ' + countdown + 's') :
-    recState === 'done'  ? '✅ Done!' : '🎙️ Record via Pinku mic (10s)';
+  var existingProfile = profiles.find(function(p){ return p.name === name.trim(); });
+  var btnLabel = isRecording
+    ? ('🔴 Recording… ' + countdown + 's')
+    : recState === 'done' ? '✅ Done!'
+    : existingProfile ? '🎙️ Add clip (' + (existingProfile.clips + 1) + ')'
+    : '🎙️ Record (15s)';
 
   return React.createElement('div', { className: 'enroll-area open' },
     React.createElement('div', { className: 'enroll-card' },
@@ -2220,21 +2267,23 @@ function EnrollTab() {
       profiles.length === 0
         ? React.createElement('div', { className: 'enroll-empty' }, 'No voices enrolled yet')
         : profiles.map(function(p){
-            return React.createElement('div', { key: p, className: 'enroll-profile-row' },
-              React.createElement('span', { className: 'enroll-profile-name' }, '👤 ' + p),
-              React.createElement('button', { className: 'enroll-del-btn', onClick: function(){ deleteProfile(p); } }, '✕')
+            var clipsLabel = p.clips > 1 ? (' · ' + p.clips + ' clips') : ' · 1 clip';
+            return React.createElement('div', { key: p.name, className: 'enroll-profile-row' },
+              React.createElement('span', { className: 'enroll-profile-name' }, '👤 ' + p.name),
+              React.createElement('span', { className: 'enroll-profile-clips' }, clipsLabel),
+              React.createElement('button', { className: 'enroll-del-btn', onClick: function(){ deleteProfile(p.name); } }, '✕')
             );
           })
     ),
     React.createElement('div', { className: 'enroll-card' },
-      React.createElement('div', { className: 'enroll-title' }, 'Add Voice'),
+      React.createElement('div', { className: 'enroll-title' }, 'Add / Improve Voice'),
       React.createElement('div', { className: 'enroll-hint' },
-        'Pinku records 10 seconds from its own mic — same microphone it listens on. ' +
-        'Speak naturally: say your name and a few sentences.'
+        'Pinku records from its own mic (15s). Recording the same name again blends ' +
+        'the new clip in — 3+ clips gives the best accuracy for distinguishing family members.'
       ),
       React.createElement('input', {
         className: 'enroll-input',
-        type: 'text', placeholder: 'Your name  (e.g. vlad)',
+        type: 'text', placeholder: 'Name  (e.g. Vivek, Daughter)',
         value: name,
         onChange: function(e){ setName(e.target.value); },
         disabled: isRecording
