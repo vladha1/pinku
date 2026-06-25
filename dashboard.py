@@ -152,8 +152,9 @@ def laser_enabled() -> bool:
     """Returns True only while the darts tab is open in the browser."""
     return _laser_active
 
-# ── Enrollment flag (set while browser mic is recording a voice sample) ───────
-_enrolling = False
+# ── Enrollment flag + live mic level during recording ─────────────────────────
+_enrolling   = False
+_enroll_rms  = 0.0   # smoothed RMS updated during enroll_record(), read by /api/enroll/level
 
 def is_enrolling() -> bool:
     """Returns True while the Voices tab is actively recording for enrollment."""
@@ -469,6 +470,10 @@ def enroll_resume():
     _enrolling = False
     return json.dumps({"ok": True})
 
+@_app.route("/api/enroll/level")
+def enroll_level():
+    return json.dumps({"level": round(_enroll_rms * 20.0, 3), "active": _enrolling})
+
 @_app.route("/api/enroll/profiles")
 def enroll_profiles():
     try:
@@ -511,8 +516,15 @@ def enroll_record():
         if MIC_DEVICE_INDEX >= 0:
             kw["input_device_index"] = MIC_DEVICE_INDEX
         stream = p.open(**kw)
-        frames = [stream.read(CHUNK, exception_on_overflow=False)
-                  for _ in range(int(RATE / CHUNK * seconds))]
+        global _enroll_rms
+        frames = []
+        for _ in range(int(RATE / CHUNK * seconds)):
+            chunk = stream.read(CHUNK, exception_on_overflow=False)
+            frames.append(chunk)
+            arr  = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+            rms  = float(np.sqrt(np.mean(arr ** 2)))
+            _enroll_rms = _enroll_rms * 0.6 + rms * 0.4   # smoothed EWA
+        _enroll_rms = 0.0
         stream.stop_stream(); stream.close(); p.terminate()
         audio = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32) / 32768.0
         from resemblyzer import VoiceEncoder, preprocess_wav
@@ -1597,6 +1609,14 @@ body {
 }
 .enroll-msg { font-size: 0.82rem; color: #4ade80; padding: 4px 0; text-align: center; }
 .enroll-msg.error { color: #f87171; }
+.enroll-level-wrap { margin-top: 10px; }
+.enroll-level-bar {
+  height: 10px; border-radius: 5px; min-width: 4px;
+  background: rgba(248,113,113,0.5);
+  transition: width 0.1s ease, background 0.2s;
+}
+.enroll-level-bar.active { background: #4ade80; }
+.enroll-level-hint { font-size: 0.75rem; color: #f87171; margin-top: 4px; text-align: center; }
 </style>
 </head>
 <body>
@@ -2193,7 +2213,9 @@ function EnrollTab() {
   var [recState, setRecState] = React.useState('idle'); // idle|recording|done|error
   var [msg, setMsg] = React.useState('');
   var [countdown, setCountdown] = React.useState(0);
-  var cdTimerRef = React.useRef(null);
+  var [micLevel, setMicLevel] = React.useState(0);
+  var cdTimerRef  = React.useRef(null);
+  var levelTimerRef = React.useRef(null);
 
   function loadProfiles() {
     fetch('/api/enroll/profiles').then(function(r){ return r.json(); })
@@ -2219,6 +2241,14 @@ function EnrollTab() {
       if (cdVal <= 0) clearInterval(cdTimerRef.current);
     }, 1000);
 
+    // Poll mic level from server every 150ms while recording
+    clearInterval(levelTimerRef.current);
+    levelTimerRef.current = setInterval(function(){
+      fetch('/api/enroll/level').then(function(r){ return r.json(); })
+        .then(function(d){ setMicLevel(d.active ? Math.min(d.level, 1.0) : 0); })
+        .catch(function(){ setMicLevel(0); });
+    }, 150);
+
     fetch('/api/enroll/record', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2227,6 +2257,7 @@ function EnrollTab() {
     .then(function(r){ return r.json(); })
     .then(function(d){
       clearInterval(cdTimerRef.current);
+      clearInterval(levelTimerRef.current); setMicLevel(0);
       if (d.ok) {
         var clips = d.clips || 1;
         var doneMsg = clips > 1
@@ -2241,6 +2272,7 @@ function EnrollTab() {
       }
     }).catch(function(e){
       clearInterval(cdTimerRef.current);
+      clearInterval(levelTimerRef.current); setMicLevel(0);
       setRecState('error'); setMsg('Error: ' + e.message);
       setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
     });
@@ -2293,6 +2325,15 @@ function EnrollTab() {
         onClick: startRecording,
         disabled: isRecording || !name.trim()
       }, btnLabel),
+      isRecording && React.createElement('div', { className: 'enroll-level-wrap' },
+        React.createElement('div', {
+          className: 'enroll-level-bar' + (micLevel > 0.15 ? ' active' : ''),
+          style: { width: Math.round(micLevel * 100) + '%' }
+        }),
+        micLevel < 0.04 && React.createElement('div', { className: 'enroll-level-hint' },
+          'No audio detected — speak louder or check mic'
+        )
+      ),
       msg && React.createElement('div', { className: 'enroll-msg' + (recState === 'error' ? ' error' : '') }, msg)
     )
   );
