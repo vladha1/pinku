@@ -190,6 +190,8 @@ A microphone is always on.
 You will receive a short audio clip from the mic. Do all three steps:
 
 STEP 1 — TRANSCRIBE
+CONFIDENCE GATE (apply before transcribing): Only proceed if you are at least 90% confident the audio contains a real human speaking directly in the room. If audio is faint, unclear, mostly silence, ambient noise, or you are not sure — set transcript:"" and action:"ignore". A missed command is better than an invented one.
+
 Write the exact spoken words if the audio is a PERSON DIRECTLY SPEAKING (not a TV, radio, or other playback device).
 The speaker may use:
 - Indian English accent
@@ -253,11 +255,13 @@ RULES:
 
 # Wake rule injected into STEP 2 depending on session state
 _WAKE_RULE_IDLE = """\
-Is the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in this clip?
-- Wake word not clearly audible → "ignore". When in doubt, ignore.
-- Do NOT infer the wake word. It must be audibly present.
+MANDATORY: Check your transcript for the wake word (Pinky / Pinku / Pink / Pingu).
+- Wake word NOT present in transcript → action MUST be "ignore". No exceptions.
+- Wake word present but not clearly audible → "ignore". When in doubt, ignore.
+- Do NOT infer or assume the wake word. It must be explicitly in what was said.
 - Background noise, room echo, TV, side-conversations, or silence → "ignore".
-- Wake word alone (nothing actionable after it) → "ignore"."""
+- Wake word alone with nothing actionable after it → "ignore".
+REMINDER: if your transcript does not contain one of Pinky/Pinku/Pink/Pingu, you must return action:"ignore"."""
 
 _WAKE_RULE_SESSION = """\
 You are in an ACTIVE CONVERSATION SESSION — the person is talking TO YOU.

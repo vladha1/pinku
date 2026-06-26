@@ -958,6 +958,25 @@ def _handle_gemini_result(result: dict):
     transcript = result.get("transcript", "").strip()
     action     = result.get("action", "ignore")
     lang       = result.get("lang", "en")
+
+    # ── Idle-mode wake-word guard ─────────────────────────────────────────────
+    # When called with session_active=False (idle / known-speaker path), Gemini
+    # must have heard the wake word.  If the transcript contains no wake-word
+    # variant, Gemini hallucinated a command from background audio — force ignore.
+    # This catches cases like Gemini returning "chat" for garbled ambient audio
+    # even though the idle prompt explicitly requires the wake word.
+    _session_was_active = result.get("_session_active", True)   # injected below
+    if not _session_was_active and not _awake.is_set():
+        _WAKE_RE = _re.compile(
+            r'\b(pinku|pinky|pinko|pink|pingu|pinkoo|penku|penko'
+            r'|पिंकू|पिंकु|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)\b',
+            _re.IGNORECASE)
+        if action != "ignore" and not _WAKE_RE.search(transcript):
+            _log("info",
+                 f'Idle hallucination suppressed — no wake word in: "{transcript[:60]}"')
+            _brief_mute(1.5)
+            return
+
     # Correct Gemini language misclassification: if transcript has no Devanagari
     # characters, it can't be Hindi — force English.
     if lang == "hi" and not _re.search(r'[ऀ-ॿ]', transcript):
@@ -1286,6 +1305,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
                 if result is not None:
+                    result["_session_active"] = True
                     _handle_gemini_result(result)
                 else:
                     # Gemini unavailable or rate-guard skipped — fall back to Whisper + Ollama.
@@ -1309,6 +1329,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     pcm, history=_session_hist, session_active=False,
                     speaker=_current_speaker)
                 if result is not None:
+                    result["_session_active"] = False
                     _handle_gemini_result(result)
                 else:
                     _fallback_process(pcm)
