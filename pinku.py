@@ -853,11 +853,17 @@ _WAKE_PHRASES = [
     "hello pinku", "yo pinku", "pinku",
     "hey pinky", "hi pinky", "ok pinky", "okay pinky",
     "hello pinky", "yo pinky", "pinky",
+    "hey pinkie", "hi pinkie", "pinkie",          # alternate spelling
+    "hey pinki", "hi pinki", "pinki",             # Indian English spelling
     # Common Whisper mishearings of "Pinku"/"Pinky":
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
-    "hey pinkku", "hi pinkku", "pinkku",
+    "hey pinkku", "hi pinkku", "pinkku",          # doubled k (Pinku)
+    "hey pinkky", "hi pinkky", "pinkky",          # doubled k (Pinky)
+    "hey pinkhu", "hi pinkhu", "pinkhu",          # inserted h (Pinku)
+    "hey pinkhy", "hi pinkhy", "pinkhy",          # inserted h (Pinky)
     "hey pink", "hi pink", "ok pink", "pink",
-    "hey piku", "hi piku", "ok piku", "piku",   # "Pinku" with dropped 'n'
+    "hey piku", "hi piku", "ok piku", "piku",     # Pinku with dropped n
+    "hey piky", "hi piky", "piky",                # Pinky with dropped n
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
 ]
@@ -879,14 +885,14 @@ import re as _re
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink|piku'
+    r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
-    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink|piku'
+    r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
     _re.IGNORECASE,
