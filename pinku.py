@@ -211,9 +211,15 @@ def _speak_reply(reply: str, is_hi: bool, _t_utterance: float = 0.0,
     # early would only allow a second queued clip to slip in BEFORE the settle
     # window is enforced — causing double-processing.  The finally block in
     # _voice_loop releases the lock after _speak_reply returns.
-    tts.speak(reply, prefer_hi=is_hi, block=True)
+    actual_duration = tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
+
+    # Recalculate settle from actual measured duration (edge-tts returns exact
+    # duration via afinfo; much more accurate than the 95 WPM pre-estimate).
+    if actual_duration > 0:
+        settle = max(config.TTS_SETTLE_MIN, min(actual_duration * 0.25, 6.0))
+        print(f"[TTS] actual={actual_duration:.1f}s  settle={settle:.1f}s")
 
     # TTS is done. Re-anchor settle window to actual end of speech.
     # _muted stays set during settle; the voice loop won't call wait_for_utterance
