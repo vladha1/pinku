@@ -2,164 +2,134 @@
 Apple on-device speech recognition via SFSpeechRecognizer.
 ~0.1-0.2s per utterance, fully on-device on M4, no network required.
 
-Install: pip install pyobjc-framework-Speech
-First run: macOS will prompt for Speech Recognition permission — grant it.
-Falls back gracefully (returns "") if unavailable or permission denied.
+Architecture: the CLI python3 binary that runs pinku.py lacks the
+NSSpeechRecognitionUsageDescription entitlement needed to trigger the
+macOS permission dialog.  The Python.app binary (same Homebrew install,
+different executable) has it.  So we spawn stt_worker.py under the
+Python.app binary as a persistent subprocess.
+
+Protocol (stdin→worker, stdout←worker):
+  in:  4-byte LE uint32 (PCM length) + raw 16-bit mono PCM bytes
+  out: transcript line + "\\n"  (empty line = no speech)
+  First line:  "READY\\n" if authorized, "ERROR: ...\\n" if not
 """
 from __future__ import annotations
 import os
+import struct
+import subprocess
+import sys
 import threading
-import tempfile
-import time as _time
-import wave
 
-_AVAILABLE  = False
-_auth_ok    = None   # None = unchecked, True = granted, False = denied
-_rec_en     = None
-_rec_lock   = threading.Lock()
+_worker_proc: subprocess.Popen | None = None
+_worker_lock  = threading.Lock()
+_worker_ready = False
 
 
-def _try_import() -> bool:
-    global _AVAILABLE
-    try:
-        import Speech   # noqa
-        import AppKit   # noqa
-        _AVAILABLE = True
-    except ImportError:
-        print("[AppleSTT] pyobjc-framework-Speech not installed — "
-              "run: pip install pyobjc-framework-Speech")
-        _AVAILABLE = False
-    return _AVAILABLE
-
-
-_try_import()
-
-
-def _get_recognizer():
-    global _rec_en
-    if not _AVAILABLE:
+def _find_python_app() -> str | None:
+    """Locate Python.app/Contents/MacOS/Python relative to sys.executable."""
+    real = os.path.realpath(sys.executable)
+    # real: .../Cellar/python@3.14/x.y.z/bin/python3.14  (or similar)
+    base = os.path.dirname(os.path.dirname(real))
+    fw_root = os.path.join(base, "Frameworks", "Python.framework", "Versions")
+    if not os.path.isdir(fw_root):
         return None
-    with _rec_lock:
-        if _rec_en is None:
-            import Speech, AppKit
-            locale = AppKit.NSLocale.localeWithLocaleIdentifier_("en-US")
-            _rec_en = Speech.SFSpeechRecognizer.alloc().initWithLocale_(locale)
-    return _rec_en
+    for ver in sorted(os.listdir(fw_root), reverse=True):
+        if ver == "Current":
+            continue
+        candidate = os.path.join(fw_root, ver,
+                                 "Resources", "Python.app",
+                                 "Contents", "MacOS", "Python")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _venv_site() -> str:
+    """Return the active venv's site-packages directory."""
+    return os.path.join(
+        sys.prefix, "lib",
+        f"python{sys.version_info.major}.{sys.version_info.minor}",
+        "site-packages",
+    )
+
+
+def _start_worker() -> bool:
+    """Spawn stt_worker.py under Python.app binary. Returns True on success."""
+    global _worker_proc, _worker_ready
+
+    app_python = _find_python_app()
+    if not app_python:
+        print("[AppleSTT] Python.app binary not found — Apple STT unavailable")
+        return False
+
+    worker_script = os.path.join(os.path.dirname(__file__), "stt_worker.py")
+    env = {**os.environ, "STT_VENV_SITE": _venv_site()}
+
+    try:
+        _worker_proc = subprocess.Popen(
+            [app_python, worker_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+        # Block until worker signals ready (or error)
+        line = _worker_proc.stdout.readline().decode().strip()
+        if line == "READY":
+            _worker_ready = True
+            print(f"[AppleSTT] Worker ready — {app_python}")
+            return True
+        print(f"[AppleSTT] Worker error: {line}")
+        _worker_proc = None
+        _worker_ready = False
+        return False
+    except Exception as e:
+        print(f"[AppleSTT] Could not start worker: {e}")
+        _worker_proc = None
+        _worker_ready = False
+        return False
 
 
 def request_authorization() -> bool:
-    """Request permission at startup. Returns True if granted."""
-    global _auth_ok
-    if not _AVAILABLE:
-        return False
-    import Speech, Foundation
-    status = Speech.SFSpeechRecognizer.authorizationStatus()
-    Authorized = 3   # SFSpeechRecognizerAuthorizationStatusAuthorized
-
-    if status == Authorized:
-        _auth_ok = True
-        print("[AppleSTT] Speech recognition authorized")
-        return True
-
-    if status == 0:  # NotDetermined — ask
-        done = threading.Event()
-
-        def _handler(new_status):
-            global _auth_ok
-            _auth_ok = (new_status == Authorized)
-            done.set()
-
-        Speech.SFSpeechRecognizer.requestAuthorization_(_handler)
-
-        # Pump NSRunLoop — the authorization callback fires on the run loop
-        # of the calling thread; without this done.wait() times out every time.
-        rl       = Foundation.NSRunLoop.currentRunLoop()
-        deadline = _time.time() + 20.0   # 20s for user to see and click dialog
-        while not done.is_set() and _time.time() < deadline:
-            rl.runUntilDate_(Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.05))
-
-        if _auth_ok:
-            print("[AppleSTT] Speech recognition authorized")
-        else:
-            print("[AppleSTT] Speech recognition permission denied or timed out — "
-                  "grant in System Settings → Privacy & Security → Speech Recognition")
-        return bool(_auth_ok)
-
-    _auth_ok = False
-    print("[AppleSTT] Speech recognition not available (status=%d)" % status)
-    return False
+    """
+    Start the stt_worker subprocess.  The worker runs under Python.app which
+    has the NSSpeechRecognitionUsageDescription entitlement, so macOS will
+    show the permission dialog when the worker first starts.
+    Returns True if the worker is ready (i.e., authorization succeeded).
+    """
+    with _worker_lock:
+        if _worker_ready and _worker_proc and _worker_proc.poll() is None:
+            return True
+        return _start_worker()
 
 
 def is_available() -> bool:
-    if not _AVAILABLE:
-        return False
-    import Speech
-    # Check TCC status directly — don't rely on _auth_ok which may not have
-    # been set if the NSRunLoop callback fired after our wait timed out.
-    if Speech.SFSpeechRecognizer.authorizationStatus() != 3:  # 3 = Authorized
-        return False
-    r = _get_recognizer()
-    return r is not None and r.isAvailable()
+    """True if the worker subprocess is alive and ready."""
+    return (
+        _worker_ready
+        and _worker_proc is not None
+        and _worker_proc.poll() is None
+    )
 
 
 def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     """
     Transcribe raw 16-bit mono PCM. Returns transcript string, "" on failure.
     Caller should fall back to Gemini audio if this returns "".
+    sample_rate is ignored (worker always uses the rate embedded in the WAV).
     """
-    if not is_available():
-        return ""
-
-    import Speech, AppKit
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp.close()
-    try:
-        with wave.open(tmp.name, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(pcm)
-
-        url     = AppKit.NSURL.fileURLWithPath_(tmp.name)
-        request = Speech.SFSpeechURLRecognitionRequest.alloc().initWithURL_(url)
-        request.setShouldReportPartialResults_(False)
-
-        rec = _get_recognizer()
-        if not rec or not rec.isAvailable():
+    with _worker_lock:
+        if not _worker_ready or _worker_proc is None or _worker_proc.poll() is not None:
             return ""
-
-        result_box: list[str] = []
-        done = threading.Event()
-
-        def _handler(result, error):
-            if result is not None:
-                text = str(result.bestTranscription().formattedString())
-                if text:
-                    result_box.append(text)
-            done.set()
-
-        rec.recognitionTaskWithRequest_resultHandler_(request, _handler)
-
-        # Pump the NSRunLoop while waiting — the SFSpeechRecognizer callback
-        # fires on the run loop of the calling thread. Without pumping it here
-        # the callback never arrives and done.wait() times out every time.
-        import Foundation
-        rl      = Foundation.NSRunLoop.currentRunLoop()
-        deadline = _time.time() + 5.0
-        while not done.is_set() and _time.time() < deadline:
-            rl.runUntilDate_(Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.05))
-        if not done.is_set():
-            print("[AppleSTT] recognition timed out")
-            return ""
-
-        return result_box[0] if result_box else ""
-
-    except Exception as e:
-        print(f"[AppleSTT] error: {e}")
-        return ""
-    finally:
         try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+            hdr = struct.pack("<I", len(pcm))
+            _worker_proc.stdin.write(hdr + pcm)
+            _worker_proc.stdin.flush()
+            line = _worker_proc.stdout.readline()
+            return line.decode().strip()
+        except Exception as e:
+            print(f"[AppleSTT] Worker comm error: {e} — restarting")
+            global _worker_proc, _worker_ready
+            _worker_proc  = None
+            _worker_ready = False
+            return ""
