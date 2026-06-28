@@ -1327,14 +1327,25 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _human_is_present() or _awake.is_set():
                 dashboard.update_status(state="processing")
 
-                # ── Fast path: Apple STT + local math + Gemini text ──────────
-                # Apple on-device STT is ~0.2s; Gemini text routing is ~1.0s.
-                # Total ~1.2s vs ~3.5s for the full Gemini audio path.
-                # Falls back to Gemini audio if Apple STT returns empty.
+                # ── Fast path: local STT + local math + Gemini text ──────────
+                # Priority: Apple on-device STT (~0.2s) → local Whisper (~0.7s)
+                # Then: math handler (instant) or Gemini text (~1.0s).
+                # Total ~1.2–1.7s vs ~3.5s for the full Gemini audio path.
+                # Only falls back to Gemini audio if all local STT fails.
                 _fast_transcript = apple_stt.transcribe(pcm)
+                _stt_label = "AppleSTT"
+                if not _fast_transcript:
+                    # Apple STT unavailable/failed — try local Whisper
+                    try:
+                        _fast_transcript = stt.transcribe(pcm)
+                        _stt_label = "Whisper"
+                    except Exception as _e:
+                        print(f"[STT] Whisper error in active session: {_e}")
+                        _fast_transcript = ""
+
                 if _fast_transcript:
-                    _t_apple = time.time()
-                    print(f"[AppleSTT] {_fast_transcript!r}  ({_t_apple-_t_spk:.2f}s)")
+                    _t_stt = time.time()
+                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
 
                     # Math shortcut — no LLM call at all
                     _math_answer = math_handler.detect_and_compute(_fast_transcript)
@@ -1367,7 +1378,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         _handle_gemini_result(result)
                         continue
 
-                # Apple STT failed or text routing failed — fall back to Gemini audio
+                # All local STT failed — fall back to Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
