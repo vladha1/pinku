@@ -313,10 +313,6 @@ class AudioRecorder:
                                 speech_buf = []
                                 ring.clear()
 
-        # Timed out — log diagnostics
-        if total_frames > 0:
-            _stt_log(f"[STT] no-speech: peak={peak_rms_det:.4f} floor={noise_floor:.4f} "
-                     f"thr={noise_floor*speech_mult:.4f} frames={total_frames}")
         return None
 
 
