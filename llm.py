@@ -459,9 +459,17 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
+        candidate = data["candidates"][0]
+        finish    = candidate.get("finishReason", "STOP")
+        if finish not in ("STOP", "MAX_TOKENS"):
+            print(f"[LLM] Gemini finishReason={finish} — response may be incomplete")
         # Extract text — grounded responses may have multiple parts; join them
-        parts = data["candidates"][0]["content"]["parts"]
+        parts = candidate["content"]["parts"]
         text = " ".join(p.get("text", "") for p in parts).strip()
+        # If finish reason caused a sentence fragment, make it at least complete
+        # enough to speak — don't return a dangling clause.
+        if finish not in ("STOP", "MAX_TOKENS") and text and not text[-1] in ".!?।":
+            text = text.rstrip(",;:— ") + "."
         return text
     except urllib.error.HTTPError as e:
         if e.code == 429:
@@ -560,9 +568,9 @@ def chat(transcript: str,
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        reply = _gemini_call(contents, temperature=0.9, max_tokens=300,
+        reply = _gemini_call(contents, temperature=0.9, max_tokens=500,
                              system=system, use_search=True)
-        reply = _trim_reply(reply, max_words=55)
+        reply = _trim_reply(reply, max_words=70)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
         return reply
     except Exception as e:
