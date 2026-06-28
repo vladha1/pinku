@@ -857,6 +857,7 @@ _WAKE_PHRASES = [
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
     "hey pinkku", "hi pinkku", "pinkku",
     "hey pink", "hi pink", "ok pink", "pink",
+    "hey piku", "hi piku", "ok piku", "piku",   # "Pinku" with dropped 'n'
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
 ]
@@ -878,14 +879,14 @@ import re as _re
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink'
+    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink|piku'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
-    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
+    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink|piku'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
     _re.IGNORECASE,
