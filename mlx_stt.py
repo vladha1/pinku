@@ -53,9 +53,9 @@ def _worker() -> None:
         task = _q.get()
         if task is None:
             break
-        audio, lang, result_box, done = task
+        audio, lang, temperature, result_box, done = task
         try:
-            result_box.append(_transcribe_once(mlx_whisper, audio, lang))
+            result_box.append(_transcribe_once(mlx_whisper, audio, lang, temperature))
         except Exception as e:
             print(f"[MLXWhisper] worker error: {e}")
             result_box.append({"text": "", "language": ""})
@@ -63,13 +63,14 @@ def _worker() -> None:
             done.set()
 
 
-def _transcribe_once(mlx_whisper, audio: np.ndarray, lang: str | None) -> dict:
+def _transcribe_once(mlx_whisper, audio: np.ndarray, lang: str | None,
+                     temperature: float = 0.0) -> dict:
     """Single transcription call — must run on the worker thread."""
     return mlx_whisper.transcribe(
         audio,
         path_or_hf_repo=MODEL,
         language=lang,
-        temperature=0.0,
+        temperature=temperature,
         verbose=False,
     )
 
@@ -113,8 +114,8 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         #   Urdu script wake-word matching fails; re-run as "hi" to get Devanagari
         detected = result.get("language", "")
         if detected in ("es", "ur"):
-            result = _send(audio, "hi")
-            print(f"[MLXWhisper] re-ran as Hindi (was {detected})")
+            result = _send(audio, "hi", temperature=0.3)
+            print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
 
         return result.get("text", "").strip()
     except Exception as e:
@@ -122,10 +123,11 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         return ""
 
 
-def _send(audio: np.ndarray, lang: str | None, timeout: float = 15.0) -> dict:
+def _send(audio: np.ndarray, lang: str | None, timeout: float = 15.0,
+          temperature: float = 0.0) -> dict:
     """Queue a transcription task to the worker and wait for the result."""
     result_box: list[dict] = []
     done = threading.Event()
-    _q.put((audio, lang, result_box, done))
+    _q.put((audio, lang, temperature, result_box, done))
     done.wait(timeout=timeout)
     return result_box[0] if result_box else {"text": "", "language": ""}
