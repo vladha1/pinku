@@ -52,7 +52,7 @@ def request_authorization() -> bool:
     global _auth_ok
     if not _AVAILABLE:
         return False
-    import Speech
+    import Speech, Foundation
     status = Speech.SFSpeechRecognizer.authorizationStatus()
     Authorized = 3   # SFSpeechRecognizerAuthorizationStatusAuthorized
 
@@ -70,12 +70,19 @@ def request_authorization() -> bool:
             done.set()
 
         Speech.SFSpeechRecognizer.requestAuthorization_(_handler)
-        done.wait(timeout=15.0)
+
+        # Pump NSRunLoop — the authorization callback fires on the run loop
+        # of the calling thread; without this done.wait() times out every time.
+        rl       = Foundation.NSRunLoop.currentRunLoop()
+        deadline = _time.time() + 20.0   # 20s for user to see and click dialog
+        while not done.is_set() and _time.time() < deadline:
+            rl.runUntilDate_(Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.05))
+
         if _auth_ok:
             print("[AppleSTT] Speech recognition authorized")
         else:
-            print("[AppleSTT] Speech recognition permission denied — "
-                  "grant in System Settings → Privacy → Speech Recognition")
+            print("[AppleSTT] Speech recognition permission denied or timed out — "
+                  "grant in System Settings → Privacy & Security → Speech Recognition")
         return bool(_auth_ok)
 
     _auth_ok = False
@@ -84,7 +91,12 @@ def request_authorization() -> bool:
 
 
 def is_available() -> bool:
-    if not _AVAILABLE or _auth_ok is False:
+    if not _AVAILABLE:
+        return False
+    import Speech
+    # Check TCC status directly — don't rely on _auth_ok which may not have
+    # been set if the NSRunLoop callback fired after our wait timed out.
+    if Speech.SFSpeechRecognizer.authorizationStatus() != 3:  # 3 = Authorized
         return False
     r = _get_recognizer()
     return r is not None and r.isAvailable()
