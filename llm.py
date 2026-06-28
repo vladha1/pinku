@@ -442,8 +442,12 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     body: dict = {
         "contents": contents,
         "generationConfig": {
-            "temperature":    temperature,
+            "temperature":     temperature,
             "maxOutputTokens": max_tokens,
+            # Disable thinking for real-time voice: saves ~1-2s per call.
+            # Pinky answers short home-assistant queries — extended reasoning
+            # adds latency with no benefit for this use case.
+            "thinkingConfig":  {"thinkingBudget": 0},
         },
     }
     if system:
