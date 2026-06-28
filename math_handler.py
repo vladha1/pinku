@@ -149,4 +149,44 @@ def detect_and_compute(transcript: str) -> str | None:
         a, b = int(m.group(1)), int(m.group(2))
         return f"The GCF of {a} and {b} is {math.gcd(a, b)}."
 
+    # ── Calendar facts (Python knows these exactly — never ask an LLM) ────────
+    import calendar as _cal
+    from datetime import date as _date
+    _today = _date.today()
+
+    # Days in this/current year
+    if re.search(r'(?:how\s+many\s+days\s+(?:are\s+there\s+)?in\s+(?:this|the\s+current)\s+year'
+                 r'|days\s+in\s+(?:this|the\s+current)\s+year)', t):
+        yr   = _today.year
+        days = 366 if _cal.isleap(yr) else 365
+        leap = " It's a leap year." if _cal.isleap(yr) else ""
+        return f"{yr} has {days} days.{leap}"
+
+    # Days in a specific year
+    m = re.search(r'(?:how\s+many\s+days\s+(?:are\s+there\s+)?in\s+(?:the\s+year\s+)?|days\s+in\s+(?:year\s+)?)(\d{4})', t)
+    if m:
+        yr   = int(m.group(1))
+        days = 366 if _cal.isleap(yr) else 365
+        leap = " It's a leap year." if _cal.isleap(yr) else ""
+        return f"{yr} has {days} days.{leap}"
+
+    # Leap year check
+    m = re.search(r'is\s+(\d{4})\s+a\s+leap\s+year', t)
+    if m:
+        yr = int(m.group(1))
+        return (f"Yes, {yr} is a leap year." if _cal.isleap(yr)
+                else f"No, {yr} is not a leap year.")
+
+    # Days in a month
+    m = re.search(
+        r'(?:how\s+many\s+days\s+(?:are\s+there\s+)?in\s+)'
+        r'(january|february|march|april|may|june|july|august|september|october|november|december)',
+        t,
+    )
+    if m:
+        month_name = m.group(1).capitalize()
+        month_num  = list(_cal.month_name).index(month_name)
+        _, days    = _cal.monthrange(_today.year, month_num)
+        return f"{month_name} {_today.year} has {days} days."
+
     return None

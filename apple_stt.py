@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import threading
 import tempfile
+import time as _time
 import wave
 
 _AVAILABLE  = False
@@ -127,7 +128,16 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
             done.set()
 
         rec.recognitionTaskWithRequest_resultHandler_(request, _handler)
-        if not done.wait(timeout=5.0):
+
+        # Pump the NSRunLoop while waiting — the SFSpeechRecognizer callback
+        # fires on the run loop of the calling thread. Without pumping it here
+        # the callback never arrives and done.wait() times out every time.
+        import Foundation
+        rl      = Foundation.NSRunLoop.currentRunLoop()
+        deadline = _time.time() + 5.0
+        while not done.is_set() and _time.time() < deadline:
+            rl.runUntilDate_(Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        if not done.is_set():
             print("[AppleSTT] recognition timed out")
             return ""
 
