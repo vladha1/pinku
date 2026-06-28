@@ -19,14 +19,18 @@ def main() -> None:
     real = os.path.realpath(sys.executable)
     print(f"Python binary: {real}")
 
-    if "Python.app/Contents/MacOS" not in real:
-        sys.exit(
-            "ERROR: not running from Python.app binary.\n"
-            f"Run with: ~/pinku/.venv/bin/python3 {os.path.basename(__file__)}"
-        )
+    # Two possible layouts:
+    #  a) Running via Python.app:  .../Versions/3.14/Resources/Python.app/Contents/MacOS/Python
+    #  b) Running via CLI binary:  .../Versions/3.14/bin/python3.14
+    # In both cases the Info.plist is at:
+    #     .../Versions/3.14/Resources/Python.app/Contents/Info.plist
+    if "Python.app/Contents/MacOS" in real:
+        contents_dir = os.path.dirname(os.path.dirname(real))   # .../Python.app/Contents
+    else:
+        version_dir  = os.path.dirname(os.path.dirname(real))   # .../Versions/3.14
+        contents_dir = os.path.join(version_dir, "Resources", "Python.app", "Contents")
 
-    # .../Python.app/Contents/MacOS/Python  →  .../Python.app/Contents/Info.plist
-    plist = os.path.join(os.path.dirname(os.path.dirname(real)), "Info.plist")
+    plist = os.path.join(contents_dir, "Info.plist")
     print(f"Plist:         {plist}")
 
     if not os.path.exists(plist):
