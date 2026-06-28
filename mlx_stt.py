@@ -13,7 +13,7 @@ import time
 import numpy as np
 
 MODEL    = "mlx-community/whisper-large-v3-turbo"
-LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "en")   # "en" avoids Hindi→Spanish mis-detection
+LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "auto")  # auto-detect; retries as Hindi if Spanish
 
 _AVAILABLE = False
 _loaded    = threading.Event()
@@ -65,20 +65,33 @@ def is_ready() -> bool:
 def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     """
     Transcribe raw 16-bit mono PCM. Returns transcript string, '' on failure.
-    Auto-detects language — handles Hindi, English, and code-switching.
+    Auto-detects language. If detected as Spanish (common Hindi mis-detection),
+    retries as Hindi.
     """
     if not _AVAILABLE:
         return ""
     try:
         import mlx_whisper
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        lang = None if LANGUAGE == "auto" else LANGUAGE
         result = mlx_whisper.transcribe(
             audio,
             path_or_hf_repo=MODEL,
-            language=LANGUAGE,  # default "en"; set MLX_STT_LANGUAGE=hi for Hindi-first
-            temperature=0.0,    # greedy decoding — fastest and most deterministic
+            language=lang,
+            temperature=0.0,
             verbose=False,
         )
+        # Whisper often mis-detects Hindi/Indian-English as Spanish.
+        # Re-run as Hindi when that happens.
+        if result.get("language") == "es":
+            result = mlx_whisper.transcribe(
+                audio,
+                path_or_hf_repo=MODEL,
+                language="hi",
+                temperature=0.0,
+                verbose=False,
+            )
+            print("[MLXWhisper] re-ran as Hindi (auto-detect said Spanish)")
         return result.get("text", "").strip()
     except Exception as e:
         print(f"[MLXWhisper] error: {e}")
