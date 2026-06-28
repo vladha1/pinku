@@ -884,7 +884,7 @@ import re as _re
 # and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
-    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु = Whisper mishearings
