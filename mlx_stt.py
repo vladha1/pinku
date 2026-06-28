@@ -6,12 +6,14 @@ Install: pip install mlx-whisper
 First run downloads the model (~800 MB) from HuggingFace automatically.
 """
 from __future__ import annotations
+import os
 import threading
 import time
 
 import numpy as np
 
-MODEL = "mlx-community/whisper-large-v3-turbo"
+MODEL    = "mlx-community/whisper-large-v3-turbo"
+LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "en")   # "en" avoids Hindi→Spanish mis-detection
 
 _AVAILABLE = False
 _loaded    = threading.Event()
@@ -47,7 +49,7 @@ def preload() -> None:
         # Transcribe 0.1 s of silence to trigger model load + JIT compile
         silence = np.zeros(1600, dtype=np.float32)
         mlx_whisper.transcribe(silence, path_or_hf_repo=MODEL,
-                               language="en", temperature=0.0,
+                               language=LANGUAGE, temperature=0.0,
                                verbose=False)
         _loaded.set()
         print(f"[MLXWhisper] Ready ({time.time() - t0:.1f}s)")
@@ -73,8 +75,8 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         result = mlx_whisper.transcribe(
             audio,
             path_or_hf_repo=MODEL,
-            language=None,    # auto-detect (Hindi / English / mixed)
-            temperature=0.0,  # greedy decoding — fastest and most deterministic
+            language=LANGUAGE,  # default "en"; set MLX_STT_LANGUAGE=hi for Hindi-first
+            temperature=0.0,    # greedy decoding — fastest and most deterministic
             verbose=False,
         )
         return result.get("text", "").strip()
