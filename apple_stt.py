@@ -28,19 +28,26 @@ _worker_ready = False
 def _find_python_app() -> str | None:
     """Locate Python.app/Contents/MacOS/Python relative to sys.executable."""
     real = os.path.realpath(sys.executable)
-    # real: .../Cellar/python@3.14/x.y.z/bin/python3.14  (or similar)
-    base = os.path.dirname(os.path.dirname(real))
-    fw_root = os.path.join(base, "Frameworks", "Python.framework", "Versions")
-    if not os.path.isdir(fw_root):
-        return None
-    for ver in sorted(os.listdir(fw_root), reverse=True):
-        if ver == "Current":
-            continue
-        candidate = os.path.join(fw_root, ver,
-                                 "Resources", "Python.app",
-                                 "Contents", "MacOS", "Python")
-        if os.path.isfile(candidate):
-            return candidate
+    # On Homebrew, real resolves to something like:
+    #   .../Python.framework/Versions/3.14/bin/python3.14
+    # Going up 2 levels lands in the framework version dir (.../Versions/3.14)
+    # and Python.app lives right there under Resources/.
+    version_dir = os.path.dirname(os.path.dirname(real))
+    candidate = os.path.join(version_dir, "Resources", "Python.app",
+                             "Contents", "MacOS", "Python")
+    if os.path.isfile(candidate):
+        return candidate
+
+    # Fallback: real may be in a plain Cellar bin/ — search under Frameworks/
+    fw_root = os.path.join(version_dir, "Frameworks", "Python.framework", "Versions")
+    if os.path.isdir(fw_root):
+        for ver in sorted(os.listdir(fw_root), reverse=True):
+            if ver == "Current":
+                continue
+            c = os.path.join(fw_root, ver, "Resources", "Python.app",
+                             "Contents", "MacOS", "Python")
+            if os.path.isfile(c):
+                return c
     return None
 
 
