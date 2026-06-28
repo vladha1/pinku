@@ -54,6 +54,8 @@ import knowledge
 import logger as log_module
 import dashboard
 import speaker_id
+import apple_stt
+import math_handler
 
 
 # ── SIGTERM handler — clean exit when pkill/kill sends SIGTERM ────────────────
@@ -1318,11 +1320,51 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue   # silently discard — previous response still in flight
 
         try:
-            # ── Gate: Gemini path (face visible or session open) ──────────────
+            # ── Gate: active session (face visible or session open) ───────────
             if _human_is_present() or _awake.is_set():
-                # session_active=True → no wake word required; person is already
-                # in conversation (face detected or awake session open).
                 dashboard.update_status(state="processing")
+
+                # ── Fast path: Apple STT + local math + Gemini text ──────────
+                # Apple on-device STT is ~0.2s; Gemini text routing is ~1.0s.
+                # Total ~1.2s vs ~3.5s for the full Gemini audio path.
+                # Falls back to Gemini audio if Apple STT returns empty.
+                _fast_transcript = apple_stt.transcribe(pcm)
+                if _fast_transcript:
+                    _t_apple = time.time()
+                    print(f"[AppleSTT] {_fast_transcript!r}  ({_t_apple-_t_spk:.2f}s)")
+
+                    # Math shortcut — no LLM call at all
+                    _math_answer = math_handler.detect_and_compute(_fast_transcript)
+                    if _math_answer:
+                        _t_llm = time.time()
+                        result = {
+                            "transcript": _fast_transcript,
+                            "lang": "en",
+                            "action": "chat",
+                            "reply": _math_answer,
+                            "_session_active": True,
+                            "_t_utterance": _t_utterance,
+                            "_t_spk": _t_spk,
+                            "_t_llm": _t_llm,
+                        }
+                        print(f"[MATH] {_math_answer}")
+                        _handle_gemini_result(result)
+                        continue
+
+                    # Gemini text routing (no audio upload)
+                    result = llm.text_route_and_respond(
+                        _fast_transcript, history=_session_hist,
+                        session_active=True, speaker=_current_speaker)
+                    _t_llm = time.time()
+                    if result is not None:
+                        result["_session_active"] = True
+                        result["_t_utterance"]    = _t_utterance
+                        result["_t_spk"]          = _t_spk
+                        result["_t_llm"]          = _t_llm
+                        _handle_gemini_result(result)
+                        continue
+
+                # Apple STT failed or text routing failed — fall back to Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
@@ -1334,8 +1376,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
                 else:
-                    # Gemini unavailable or rate-guard skipped — fall back to Whisper + Ollama.
-                    # Real errors are already logged in llm.py; don't double-log here.
                     _fallback_process(pcm)
                 continue
 
@@ -1489,6 +1529,9 @@ def main():
     stt.set_log_callback(_log)   # route STT diagnostics → dashboard log
     recorder = stt.AudioRecorder()
     recorder.start()
+
+    # ── Apple on-device STT (fast path for active sessions) ──────────────────
+    apple_stt.request_authorization()
 
     # ── Speaker identification ────────────────────────────────────────────────
     if config.SPEAKER_ID_ENABLED:

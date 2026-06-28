@@ -403,6 +403,113 @@ def transcribe_and_respond(
     return result
 
 
+# ── Gemini text routing (fast path for active sessions) ───────────────────────
+
+_TEXT_ROUTE_BASE = """\
+You are Pinky (lovingly called Pinku), a home AI assistant in an Indian household in Gurugram, India.
+GENDER: Pinky is FEMALE. Always use feminine grammar — in Hindi: "मैं करती हूँ", "मुझे पसंद है",
+"बता सकती हूँ" — NEVER masculine forms like "करता हूँ" or "सकता हूँ".
+If asked your name: answer in ≤8 words, warm, vary phrasing naturally each time.
+  EN: "Pinky! Everyone here calls me Pinku." / "Pinku — Vivek named me." / "Pinky, but Pinku works."
+  HI: "Pinky! घर में Pinku बुलाते हैं।" / "Pinku — Vivek ने नाम रखा।"
+Default location for weather, local info, or any place-based question: Gurugram, Haryana, India.
+
+""" + _PERSONALITY + """
+
+You receive a TEXT TRANSCRIPT of what a person in the room just said (already transcribed).
+Route it to the correct action and generate a reply if needed.
+
+{WAKE_RULE}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "transcript": "<exact words from input>",
+  "lang": "en" or "hi",
+  "action": "<see list>",
+  "reply": "<spoken response, or empty string>"
+}
+
+ACTION LIST (pick exactly one):
+"ignore"     → background noise, TV, unintelligible, not addressed to Pinky → reply: ""
+"chat"       → general conversation, questions → reply REQUIRED (≤60 words, plain sentences)
+"scripture"  → Gita, Ramayana, Vedas, yoga, Indian mythology, Sanskrit → reply REQUIRED
+"time"       → asked for current time or date → reply: ""
+"weather"    → weather, मौसम, barish, temperature → reply: ""
+"mute"       → told Pinky to stop / sleep / be quiet → reply: ""
+"unmute"     → told Pinky to wake / start / listen → reply: ""
+"describe"   → asked Pinky to look / describe what it sees → reply: ""
+"lights_on"  → lights on → reply: ""
+"lights_off" → lights off → reply: ""
+
+RULES:
+- Reply in EXACTLY the language the person spoke. English dominant → English only. Hindi dominant → Hindi (Devanagari).
+- Pure English question = English answer, always. Even if the speaker is Indian.
+- Keep replies ≤40 words (scripture: ≤70 words). Plain conversational sentences, no markdown.
+- For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS → reply: ""
+- Be precise with facts and numbers.
+"""
+
+_WAKE_RULE_TEXT_SESSION = """\
+You are in an ACTIVE CONVERSATION — the person is talking directly to you. No wake word required.
+Respond to anything clearly spoken by the person. Ignore obvious TV/background audio descriptions."""
+
+_WAKE_RULE_TEXT_IDLE = """\
+MANDATORY: The transcript must contain the wake word (Pinky / Pinku / Pink / Pingu).
+If wake word is NOT present → action MUST be "ignore". No exceptions."""
+
+
+def text_route_and_respond(
+    transcript: str,
+    history: list[dict] | None = None,
+    session_active: bool = True,
+    speaker: str | None = None,
+) -> dict | None:
+    """
+    Route and reply from an already-transcribed text string.
+    Skips audio upload — ~3× faster than transcribe_and_respond for active sessions.
+
+    Returns the same dict format as transcribe_and_respond:
+      {transcript, lang, action, reply}
+    """
+    if not GEMINI_API_KEY or not transcript.strip():
+        return None
+
+    rule = _WAKE_RULE_TEXT_SESSION if session_active else _WAKE_RULE_TEXT_IDLE
+    system = _TEXT_ROUTE_BASE.replace("{WAKE_RULE}", rule)
+    if speaker:
+        system += f"\n\nThe person speaking is {speaker}. Address them by name naturally in your reply."
+
+    contents: list[dict] = []
+    for turn in (history or [])[-6:]:
+        role = "model" if turn["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": transcript}]})
+
+    try:
+        raw = _gemini_call(contents, temperature=0.0, max_tokens=300,
+                           system=system, use_search=False)
+        print(f"[LLM] text-route raw: {raw[:140]!r}")
+    except Exception as e:
+        print(f"[LLM] text_route_and_respond error: {e}")
+        return None
+
+    m = re.search(r'\{.*\}', raw, re.DOTALL)
+    if not m:
+        print(f"[LLM] text_route_and_respond: no JSON in: {raw[:80]!r}")
+        return None
+    try:
+        result = json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
+
+    result["transcript"] = transcript   # trust our transcript, not Gemini's rewrite
+    result.setdefault("lang",   "en")
+    result.setdefault("action", "ignore")
+    result.setdefault("reply",  "")
+    print(f"[LLM] text-routed: {transcript!r} → {result['action']}")
+    return result
+
+
 # ── Ollama (routing only — fallback) ──────────────────────────────────────────
 
 def _ollama_call(messages: list[dict], temperature: float = 0.1,
