@@ -148,12 +148,10 @@ def known_duration(text: str) -> float:
     """
     words = max(1, len(text.split()))
     if _EDGE_AVAILABLE:
-        # Hindi neural voices ~100 wpm; English neural voices ~150 wpm.
-        # This is only an upper-bound estimate used before speaking starts;
-        # _speak_reply recalculates from the actual afinfo duration afterwards.
-        import re as _re
-        wpm = 100 if _re.search(r'[ऀ-ॿ]', text) else 150
-        return (words / wpm) * 60.0
+        # Edge-tts neural voices speak ~95 wpm for both English and Hindi.
+        # This is only an initial upper-bound estimate; _speak_reply recalculates
+        # settle from the exact afinfo-measured duration after TTS completes.
+        return (words / 95.0) * 60.0
     return _estimate_say_duration(text)
 
 
