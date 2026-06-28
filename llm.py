@@ -61,7 +61,7 @@ _load_env(Path(__file__).parent / ".env")
 
 # ── Gemini config ─────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
 
 if not GEMINI_API_KEY:
     print("[LLM] WARNING: GEMINI_API_KEY not set — chat will fall back to Ollama")
@@ -439,17 +439,14 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
 
-    body: dict = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature":     temperature,
-            "maxOutputTokens": max_tokens,
-            # Disable thinking for real-time voice: saves ~1-2s per call.
-            # Pinky answers short home-assistant queries — extended reasoning
-            # adds latency with no benefit for this use case.
-            "thinkingConfig":  {"thinkingBudget": 0},
-        },
+    gen_config: dict = {
+        "temperature":     temperature,
+        "maxOutputTokens": max_tokens,
     }
+    # thinkingBudget:0 is only supported on 2.5-series models.
+    if "2.5" in GEMINI_MODEL:
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+    body: dict = {"contents": contents, "generationConfig": gen_config}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
     if use_search:
