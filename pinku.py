@@ -1121,6 +1121,9 @@ def _handle_gemini_result(result: dict):
             return
 
     _last_speech_at = time.time()
+    # Open an active session so follow-up queries use the fast Apple STT path
+    # instead of going back through Gemini audio every time.
+    _awake.set()
 
     # Session-end check (short utterances only)
     if _check_end(transcript) and _awake.is_set():
