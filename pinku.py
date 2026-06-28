@@ -904,11 +904,24 @@ def _check_wake(text: str) -> tuple[bool, str]:
     Matches wake word at start OR end of utterance.
     e.g. "Pinky what's the time" and "what's the time Pinky" both work.
     """
-    t = text.strip()
+    import unicodedata
+    t = unicodedata.normalize("NFC", text.strip())
     # Strip leading filler
     for filler in ("um ", "uh ", "so ", "like ", "well ", "okay so "):
         if t.lower().startswith(filler):
             t = t[len(filler):]
+
+    # Hindi word-based check — handles Devanagari wake words robustly
+    # without relying on regex Unicode byte matching
+    _HINDI_WAKE = {"पिंकू", "पिंकु", "पिंकी", "पिंको", "पिंक्व",
+                   "पिकू", "पिकु", "पिखु", "पिखू", "पिंगू", "पिंगु"}
+    _HINDI_PRE  = {"हाई", "हे", "अरे", "ओए", "नमस्ते"}
+    _t_words = [w.strip(",.!?।॥ ") for w in t.split()]
+    for i, w in enumerate(_t_words):
+        if unicodedata.normalize("NFC", w) in _HINDI_WAKE:
+            if i == 0 or _t_words[i - 1] in _HINDI_PRE:
+                command = " ".join(_t_words[i + 1:]).strip()
+                return True, command
 
     # Wake word at START — "Pinky, what's the time?"
     m = _PINKU_RE_START.match(t)
