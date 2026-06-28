@@ -855,6 +855,7 @@ _WAKE_PHRASES = [
     "hello pinky", "yo pinky", "pinky",
     # Common Whisper mishearings of "Pinku"/"Pinky":
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
+    "hey pinkku", "hi pinkku", "pinkku",
     "hey pink", "hi pink", "ok pink", "pink",
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
@@ -877,7 +878,7 @@ import re as _re
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
+    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|pinkku|penku|penko|pintu|pink'
     r'|पिंकू|पिंकु|पिंको|पिंकी'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु = Whisper mishearings
     _re.IGNORECASE,
@@ -908,11 +909,15 @@ def _check_wake(text: str) -> tuple[bool, str]:
         rest = t[m.end():].strip(" ,.")
         return True, rest
 
-    # Exact phrase fallback (start)
+    # Exact phrase fallback (start) — require word boundary after phrase
+    # so "hi pink" doesn't match "hi pinkku" (Whisper doubled-letter mishearing)
     tl = t.lower()
     for phrase in _WAKE_PHRASES:
         if tl.startswith(phrase):
-            rest = t[len(phrase):].strip(" ,.")
+            after_idx = len(phrase)
+            if after_idx < len(tl) and tl[after_idx].isalnum():
+                continue  # partial match, e.g. "pink" inside "pinkku"
+            rest = t[after_idx:].strip(" ,.")
             return True, rest
 
     # Wake word at END — "what's the time Pinky?"
