@@ -189,4 +189,33 @@ def detect_and_compute(transcript: str) -> str | None:
         _, days    = _cal.monthrange(_today.year, month_num)
         return f"{month_name} {_today.year} has {days} days."
 
+    # ── Day of week ───────────────────────────────────────────────────────────
+    from datetime import timedelta as _td
+
+    if re.search(r'\b(what\s+day\s+is\s+(today|it)|today[\'s]*\s+day)\b', t):
+        return f"Today is {_today.strftime('%A')}, {_today.strftime('%-d %B %Y')}."
+
+    if re.search(r'\bwhat\s+(day\s+is\s+)?tomorrow\b', t):
+        tom = _today + _td(days=1)
+        return f"Tomorrow is {tom.strftime('%A')}, {tom.strftime('%-d %B %Y')}."
+
+    if re.search(r'\bwhat\s+(day\s+is\s+)?yesterday\b', t):
+        yest = _today - _td(days=1)
+        return f"Yesterday was {yest.strftime('%A')}, {yest.strftime('%-d %B %Y')}."
+
+    # "is today Sunday?" / "is today a weekday?"
+    m = re.search(r'\bis\s+today\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|a\s+weekday|a\s+weekend)\b', t)
+    if m:
+        asked = m.group(1)
+        actual = _today.strftime('%A').lower()
+        if 'weekday' in asked:
+            is_wd = _today.weekday() < 5
+            return f"Yes, today is a weekday — it's {_today.strftime('%A')}." if is_wd else f"No, today is {_today.strftime('%A')}, a weekend."
+        if 'weekend' in asked:
+            is_we = _today.weekday() >= 5
+            return f"Yes, today is {_today.strftime('%A')}, a weekend." if is_we else f"No, today is {_today.strftime('%A')}, a weekday."
+        return (f"Yes, today is {_today.strftime('%A')}."
+                if actual == asked else
+                f"No, today is {_today.strftime('%A')}.")
+
     return None
