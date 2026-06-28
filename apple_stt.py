@@ -118,6 +118,7 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     Caller should fall back to Gemini audio if this returns "".
     sample_rate is ignored (worker always uses the rate embedded in the WAV).
     """
+    global _worker_proc, _worker_ready
     with _worker_lock:
         if not _worker_ready or _worker_proc is None or _worker_proc.poll() is not None:
             return ""
@@ -129,7 +130,6 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
             return line.decode().strip()
         except Exception as e:
             print(f"[AppleSTT] Worker comm error: {e} — restarting")
-            global _worker_proc, _worker_ready
             _worker_proc  = None
             _worker_ready = False
             return ""
