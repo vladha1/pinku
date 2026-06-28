@@ -457,8 +457,10 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
         headers={"Content-Type": "application/json"},
     )
     try:
+        _t0 = _time.time()
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
+        print(f"[LLM] Gemini HTTP: {_time.time()-_t0:.2f}s")
         candidate = data["candidates"][0]
         finish    = candidate.get("finishReason", "STOP")
         if finish not in ("STOP", "MAX_TOKENS"):

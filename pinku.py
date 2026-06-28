@@ -155,7 +155,8 @@ def _brief_mute(seconds: float = 1.5):
     threading.Thread(target=_clear, daemon=True, name="brief-mute").start()
 
 
-def _speak_reply(reply: str, is_hi: bool):
+def _speak_reply(reply: str, is_hi: bool, _t_utterance: float = 0.0,
+                 _t_spk: float = 0.0, _t_llm: float = 0.0):
     global _last_speech_at, _settle_until, _last_reply_text, _last_reply_at
     # If user explicitly muted, discard reply entirely — don't speak even if
     # Gemini finished processing after the button was pressed.
@@ -196,6 +197,14 @@ def _speak_reply(reply: str, is_hi: bool):
     _settle_until   = time.time() + known_duration + settle        # upper bound
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
+    if _t_utterance:
+        _t_tts = time.time()
+        print(
+            f"[LATENCY] spk={_t_spk-_t_utterance:.2f}s"
+            f"  gemini={_t_llm-_t_spk:.2f}s"
+            f"  dispatch={_t_tts-_t_llm:.2f}s"
+            f"  → total={_t_tts-_t_utterance:.2f}s  (utterance→first word)"
+        )
 
     # NOTE: _processing is intentionally NOT released here.
     # tts.speak(block=True) blocks the voice loop thread anyway, so releasing
@@ -953,6 +962,9 @@ def _handle_gemini_result(result: dict):
     Gemini has already transcribed + classified + (optionally) generated the reply.
     """
     global _last_speech_at
+    _t_utterance = result.get("_t_utterance", 0.0)
+    _t_spk       = result.get("_t_spk",       0.0)
+    _t_llm       = result.get("_t_llm",       0.0)
 
     transcript = result.get("transcript", "").strip()
     action     = result.get("action", "ignore")
@@ -1130,7 +1142,8 @@ def _handle_gemini_result(result: dict):
             _session_hist[:] = _session_hist[-12:]
         dashboard.update_status(last_transcript=transcript, last_reply=reply)
         dashboard.record_conversation(transcript, reply, lang=lang, source=src)
-        _speak_reply(reply, is_hi)
+        _speak_reply(reply, is_hi,
+                     _t_utterance=_t_utterance, _t_spk=_t_spk, _t_llm=_t_llm)
     else:
         # Action needs Python handler (time, mute, describe, etc.)
         # Put explicit overrides AFTER **result so they win over Gemini's original values.
@@ -1267,6 +1280,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if time.time() < _settle_until:
             continue
 
+        _t_utterance = time.time()   # ← latency clock starts when PCM is ready
+
         # ── Speaker gate ──────────────────────────────────────────────────────────
         # Drop audio from unrecognised voices (TV, Pinky's TTS echo, guests) before
         # any expensive Whisper / Gemini call.  Falls back to open gate when no
@@ -1290,6 +1305,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
         else:
             _current_speaker = None
 
+        _t_spk = time.time()   # after speaker ID (or skipped)
+
         # ── Processing lock: drop audio if already handling a previous utterance ─
         if not _processing.acquire(blocking=False):
             continue   # silently discard — previous response still in flight
@@ -1303,8 +1320,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
+                _t_llm = time.time()
                 if result is not None:
                     result["_session_active"] = True
+                    result["_t_utterance"]    = _t_utterance
+                    result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
                 else:
                     # Gemini unavailable or rate-guard skipped — fall back to Whisper + Ollama.
@@ -1327,8 +1348,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=False,
                     speaker=_current_speaker)
+                _t_llm = time.time()
                 if result is not None:
                     result["_session_active"] = False
+                    result["_t_utterance"]    = _t_utterance
+                    result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
                 else:
                     _fallback_process(pcm)
