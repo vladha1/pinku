@@ -1158,7 +1158,9 @@ def _handle_gemini_result(result: dict):
 
     if reply:
         # Gemini already generated the reply (chat / scripture)
-        src = f"Gemini audio ({llm.GEMINI_MODEL})"
+        _stt = result.get("_stt_label")
+        src = (f"{_stt} + Gemini text ({llm.GEMINI_MODEL})" if _stt
+               else f"Gemini audio ({llm.GEMINI_MODEL})")
         _log("source", src)
         _session_hist.append({"role": "user",      "content": transcript})
         _session_hist.append({"role": "assistant", "content": reply})
@@ -1338,6 +1340,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: active session (face visible or session open) ───────────
             if _human_is_present() or _awake.is_set():
+                # Drop uncertain speakers when session is open via wake word only
+                # (prevents YouTube/TV audio from being processed as commands).
+                # When face is visible, allow uncertain — person is clearly there.
+                if _awake.is_set() and not _human_is_present() and _current_speaker is None:
+                    continue
+
                 dashboard.update_status(state="processing")
 
                 # ── Fast path: local STT + local math + Gemini text ──────────
@@ -1381,6 +1389,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         result["_t_utterance"]    = _t_utterance
                         result["_t_spk"]          = _t_spk
                         result["_t_llm"]          = _t_llm
+                        result["_stt_label"]      = _stt_label
                         _handle_gemini_result(result)
                         continue
 
@@ -1432,6 +1441,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                                     result["_t_utterance"]    = _t_utterance
                                     result["_t_spk"]          = _t_spk
                                     result["_t_llm"]          = _t_llm
+                                    result["_stt_label"]      = "MLXWhisper"
                                     _handle_gemini_result(result)
                                 else:
                                     _fallback_process(pcm)
