@@ -1393,12 +1393,49 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
 
-            # Known speaker in idle mode → Gemini directly.
-            # Gemini is far better at recognising "Pinku" in Hindi/noisy speech
-            # than Whisper's local wake-word check.  Whisper is only used for the
-            # uncertain/anonymous path where we can't trust the audio is intentional.
+            # Known speaker in idle mode.
             if _current_speaker is not None:
                 dashboard.update_status(state="processing")
+
+                if mlx_stt.is_ready():
+                    # Fast path: mlx-whisper (~0.5s) + local wake-word check
+                    # + Gemini text (~1.0s) = ~1.5s total vs ~3.5s Gemini audio.
+                    _idle_transcript = mlx_stt.transcribe(pcm)
+                    _t_mlx = time.time()
+                    if _idle_transcript:
+                        print(f"[MLXWhisper] {_idle_transcript!r}  ({_t_mlx-_t_spk:.2f}s)")
+                        triggered, command = _check_wake(_idle_transcript)
+                        if triggered:
+                            _awake.set()
+                            _last_speech_at = time.time()
+                            if command:
+                                dashboard.update_status(last_transcript=command)
+                                # Wake word confirmed + command: send to Gemini text
+                                result = llm.text_route_and_respond(
+                                    command, history=_session_hist,
+                                    session_active=True, speaker=_current_speaker)
+                                _t_llm = time.time()
+                                if result is not None:
+                                    result["_session_active"] = False
+                                    result["_t_utterance"]    = _t_utterance
+                                    result["_t_spk"]          = _t_spk
+                                    result["_t_llm"]          = _t_llm
+                                    _handle_gemini_result(result)
+                                else:
+                                    _fallback_process(pcm)
+                            else:
+                                # Wake word only — beep and open session
+                                tts.play_beep()
+                                dashboard.update_status(state="awake")
+                                _brief_mute(1.5)
+                        else:
+                            print(f'[STT] Idle — no wake word: "{_idle_transcript}"')
+                            dashboard.update_status(state="idle")
+                    else:
+                        dashboard.update_status(state="idle")
+                    continue
+
+                # mlx-whisper not ready yet — fall back to Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=False,
                     speaker=_current_speaker)

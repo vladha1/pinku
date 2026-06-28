@@ -55,6 +55,11 @@ def preload() -> None:
     threading.Thread(target=_do, daemon=True, name="mlx-whisper-preload").start()
 
 
+def is_ready() -> bool:
+    """True once the model has been loaded and warmed up."""
+    return _AVAILABLE and _loaded.is_set()
+
+
 def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     """
     Transcribe raw 16-bit mono PCM. Returns transcript string, '' on failure.
