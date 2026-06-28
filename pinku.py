@@ -55,6 +55,7 @@ import logger as log_module
 import dashboard
 import speaker_id
 import apple_stt
+import mlx_stt
 import math_handler
 
 
@@ -1327,15 +1328,18 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _human_is_present() or _awake.is_set():
                 dashboard.update_status(state="processing")
 
-                # ── Fast path: Apple STT + local math + Gemini text ──────────
-                # Apple on-device STT is ~0.2s; Gemini text routing is ~1.0s.
-                # Total ~1.2s vs ~3.5s for the full Gemini audio path.
-                # Falls back to Gemini audio if Apple STT returns empty.
+                # ── Fast path: local STT + local math + Gemini text ──────────
+                # Apple STT ~0.2s (when authorized) → mlx-whisper ~0.5s →
+                # Gemini text routing ~1.0s.  Total ~1.0–1.5s vs ~3.5s audio.
                 _fast_transcript = apple_stt.transcribe(pcm)
+                _stt_label = "AppleSTT"
+                if not _fast_transcript:
+                    _fast_transcript = mlx_stt.transcribe(pcm)
+                    _stt_label = "MLXWhisper"
 
                 if _fast_transcript:
                     _t_stt = time.time()
-                    print(f"[AppleSTT] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
+                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
 
                     # Math shortcut — no LLM call at all
                     _math_answer = math_handler.detect_and_compute(_fast_transcript)
@@ -1534,8 +1538,9 @@ def main():
     recorder = stt.AudioRecorder()
     recorder.start()
 
-    # ── Apple on-device STT (fast path for active sessions) ──────────────────
-    apple_stt.request_authorization()
+    # ── Fast STT for active sessions ─────────────────────────────────────────
+    apple_stt.request_authorization()   # no-op if permission not yet granted
+    mlx_stt.preload()                   # background download + warm-up
 
     # ── Speaker identification ────────────────────────────────────────────────
     if config.SPEAKER_ID_ENABLED:
