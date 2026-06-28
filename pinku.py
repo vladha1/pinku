@@ -189,11 +189,10 @@ def _speak_reply(reply: str, is_hi: bool):
     # Edge-tts can speak noticeably faster than the 95 WPM word-count estimate,
     # so without re-anchoring the mic would be dead for several extra seconds.
     known_duration = tts.known_duration(reply)
-    # Minimum 4.0 s settle — gives room echo time to die down before the mic
-    # reopens.  3 s was not enough for longer responses: a 10-second reply at
-    # 0.15 coefficient only gave 3 s, but the reverb tail persisted longer.
-    # 0.25 coefficient + 4-6 s range adds ~2 s of safety margin on long replies.
-    settle          = max(4.0, min(known_duration * 0.25, 6.0))   # 4.0 – 6.0 s
+    # Echo-settle: short replies use TTS_SETTLE_MIN (default 1.5 s); longer
+    # replies scale at 0.25× duration so a 10 s reply gets ~2.5 s settle.
+    # Cap at 6 s — more than enough for any room echo tail.
+    settle          = max(config.TTS_SETTLE_MIN, min(known_duration * 0.25, 6.0))
     _settle_until   = time.time() + known_duration + settle        # upper bound
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
