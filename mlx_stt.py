@@ -107,10 +107,14 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
 
         result = _send(audio, lang)
 
-        # Whisper often mis-detects Hindi/Indian-English as Spanish — retry as Hindi.
-        if result.get("language") == "es":
+        # Retry as Hindi for two mis-detection cases:
+        # - "es" (Spanish): Whisper confuses Hindi/Indian-English phonemes with Spanish
+        # - "ur" (Urdu): same spoken language as Hindi but wrong script for this assistant;
+        #   Urdu script wake-word matching fails; re-run as "hi" to get Devanagari
+        detected = result.get("language", "")
+        if detected in ("es", "ur"):
             result = _send(audio, "hi")
-            print("[MLXWhisper] re-ran as Hindi (auto-detect said Spanish)")
+            print(f"[MLXWhisper] re-ran as Hindi (was {detected})")
 
         return result.get("text", "").strip()
     except Exception as e:
