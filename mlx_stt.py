@@ -96,14 +96,19 @@ def is_ready() -> bool:
 
 def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     """
-    Transcribe in English (fast path). Returns transcript string, '' on failure.
-    For the idle path where Hindi fallback is needed, use transcribe_with_fallback().
+    Transcribe with auto language detection. Used in active sessions where
+    the wake word is already confirmed — accuracy matters more than speed.
+    Spanish/Urdu mis-detections are retried as Hindi.
     """
     if not _AVAILABLE or not _ready.is_set():
         return ""
     try:
-        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        result = _send(audio, "en")
+        audio  = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        result = _send(audio, None)   # auto-detect
+        detected = result.get("language", "")
+        if detected in ("es", "ur"):
+            result = _send(audio, "hi", temperature=0.3)
+            print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
         return result.get("text", "").strip()
     except Exception as e:
         print(f"[MLXWhisper] error: {e}")
