@@ -863,6 +863,7 @@ _WAKE_PHRASES = [
     "hey pinkhy", "hi pinkhy", "pinkhy",          # inserted h (Pinky)
     "hey pink", "hi pink", "ok pink", "pink",
     "hey piku", "hi piku", "ok piku", "piku",     # Pinku with dropped n
+    "hey pico", "hi pico", "pico",               # Whisper English mishearing
     "hey piky", "hi piky", "piky",                # Pinky with dropped n
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
