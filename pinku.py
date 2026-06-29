@@ -884,7 +884,7 @@ import re as _re
 # and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
-    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु/पिंक्व = Whisper mishearings
@@ -914,8 +914,11 @@ def _check_wake(text: str) -> tuple[bool, str]:
     # Hindi word-based check — handles Devanagari wake words robustly
     # without relying on regex Unicode byte matching
     _HINDI_WAKE = {"पिंकू", "पिंकु", "पिंकी", "पिंको", "पिंक्व",
-                   "पिकू", "पिकु", "पिको", "पिखु", "पिखू", "पिंगू", "पिंगु"}
-    _HINDI_PRE  = {"हाई", "हे", "अरे", "ओए", "नमस्ते"}
+                   "पिकू", "पिकु", "पिको", "पिखु", "पिखू",
+                   "पिर्कू", "पिर्कु",           # r inserted
+                   "पीनको", "पीनकू", "पीनकु",    # long I variant
+                   "पिंगू", "पिंगु"}
+    _HINDI_PRE  = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}  # है = Whisper hearing "Hi" as hai
     _t_words = [w.strip(",.!?।॥ ") for w in t.split()]
     for i, w in enumerate(_t_words):
         if unicodedata.normalize("NFC", w) in _HINDI_WAKE:
