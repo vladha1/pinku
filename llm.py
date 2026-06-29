@@ -497,7 +497,18 @@ def text_route_and_respond(
 
     m = re.search(r'\{.*\}', raw, re.DOTALL)
     if not m:
-        print(f"[LLM] text_route_and_respond: no JSON in: {raw[:80]!r}")
+        # Gemini returned plain prose instead of JSON (common for Hindi replies).
+        # Use it directly as a chat reply rather than falling back to Gemini audio.
+        stripped = raw.strip()
+        if stripped:
+            print(f"[LLM] text_route_and_respond: no JSON — using raw prose as reply")
+            has_devanagari = bool(re.search(r'[ऀ-ॿ]', stripped))
+            return {
+                "transcript": transcript,
+                "lang":       "hi" if has_devanagari else "en",
+                "action":     "chat",
+                "reply":      stripped,
+            }
         return None
     try:
         result = json.loads(m.group())

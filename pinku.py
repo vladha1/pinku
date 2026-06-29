@@ -914,7 +914,7 @@ def _check_wake(text: str) -> tuple[bool, str]:
     # Hindi word-based check — handles Devanagari wake words robustly
     # without relying on regex Unicode byte matching
     _HINDI_WAKE = {"पिंकू", "पिंकु", "पिंकी", "पिंको", "पिंक्व",
-                   "पिकू", "पिकु", "पिखु", "पिखू", "पिंगू", "पिंगु"}
+                   "पिकू", "पिकु", "पिको", "पिखु", "पिखू", "पिंगू", "पिंगु"}
     _HINDI_PRE  = {"हाई", "हे", "अरे", "ओए", "नमस्ते"}
     _t_words = [w.strip(",.!?।॥ ") for w in t.split()]
     for i, w in enumerate(_t_words):
