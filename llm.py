@@ -89,6 +89,7 @@ Actions:
 - "unmute"      → user wants you to start listening again / wake up
 - "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
+                  (NOT panchang/calendar queries like Ekadashi/tithi/nakshatra → those are "chat")
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
 - "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
@@ -229,6 +230,8 @@ ACTION LIST (pick exactly one):
 "chat"       → clear question/conversation → reply REQUIRED (≤60 words, plain sentences)
 "scripture"  → Gita, Ramayana, Mahabharata, Vedas, Upanishads, yoga, meditation, Ayurveda,
                Indian mythology, history, classical music, poetry, Sanskrit → reply REQUIRED
+               NOTE: Panchang calendar queries (Ekadashi kab hai, aaj ki tithi, nakshatra, vrat, tyohar)
+               → use "chat" action with a direct factual reply, NOT "scripture"
 "time"       → asked for current time or date → reply: "" (system inserts actual time)
 "weather"    → weather question, मौसम, मोसम, मोसन, barish, baarish, temperature, forecast → reply: ""
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
@@ -289,10 +292,19 @@ RESPOND when:
 If you cannot clearly tell whether audio is from a real person or background media → "ignore"."""
 
 def _make_transcribe_system(session_active: bool, speaker: str | None = None) -> str:
+    from datetime import datetime as _dt
+    import calendar as _cal
+    _now = _dt.now()
+    date_ctx = (
+        f"Current date and time: {_now.strftime('%A, %d %B %Y, %I:%M %p')} IST. "
+        f"Days in current month ({_now.strftime('%B')}): "
+        f"{_cal.monthrange(_now.year, _now.month)[1]}."
+    )
     rule = _WAKE_RULE_SESSION if session_active else _WAKE_RULE_IDLE
     base = _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+    base += f"\n\nDATE/TIME CONTEXT: {date_ctx}"
     if speaker:
-        base += f"\n\nThe person speaking is {speaker}. Do not address them by name in your reply."
+        base += f"\nThe person speaking is {speaker}. Do not address them by name in your reply."
     return base
 
 
