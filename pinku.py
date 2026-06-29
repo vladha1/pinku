@@ -1425,40 +1425,38 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 dashboard.update_status(state="processing")
 
                 if mlx_stt.is_ready():
-                    # Fast path: mlx-whisper (~0.5s) + local wake-word check
-                    # + Gemini text (~1.0s) = ~1.5s total vs ~3.5s Gemini audio.
-                    _idle_transcript = mlx_stt.transcribe(pcm)
+                    # English first (~0.85s), Hindi retry only if wake word not found.
+                    # English gives reliable Roman wake words; Hindi retry handles
+                    # pure Hindi speech where English transliteration misses the name.
+                    _idle_transcript, triggered, command = \
+                        mlx_stt.transcribe_with_fallback(pcm, _check_wake)
                     _t_mlx = time.time()
-                    if _idle_transcript:
-                        print(f"[MLXWhisper] {_idle_transcript!r}  ({_t_mlx-_t_spk:.2f}s)")
-                        triggered, command = _check_wake(_idle_transcript)
-                        if triggered:
-                            _awake.set()
-                            _last_speech_at = time.time()
-                            if command:
-                                dashboard.update_status(last_transcript=command)
-                                # Wake word confirmed + command: send to Gemini text
-                                result = llm.text_route_and_respond(
-                                    command, history=_session_hist,
-                                    session_active=True, speaker=_current_speaker)
-                                _t_llm = time.time()
-                                if result is not None:
-                                    result["_session_active"] = False
-                                    result["_t_utterance"]    = _t_utterance
-                                    result["_t_spk"]          = _t_spk
-                                    result["_t_llm"]          = _t_llm
-                                    result["_stt_label"]      = "MLXWhisper"
-                                    _handle_gemini_result(result)
-                                else:
-                                    _fallback_process(pcm)
+                    print(f"[MLXWhisper] ({_t_mlx-_t_spk:.2f}s)")
+                    if triggered:
+                        _awake.set()
+                        _last_speech_at = time.time()
+                        if command:
+                            dashboard.update_status(last_transcript=command)
+                            result = llm.text_route_and_respond(
+                                command, history=_session_hist,
+                                session_active=True, speaker=_current_speaker)
+                            _t_llm = time.time()
+                            if result is not None:
+                                result["_session_active"] = False
+                                result["_t_utterance"]    = _t_utterance
+                                result["_t_spk"]          = _t_spk
+                                result["_t_llm"]          = _t_llm
+                                result["_stt_label"]      = "MLXWhisper"
+                                _handle_gemini_result(result)
                             else:
-                                # Wake word only — beep and open session
-                                tts.play_beep()
-                                dashboard.update_status(state="awake")
-                                _brief_mute(1.5)
+                                _fallback_process(pcm)
                         else:
-                            print(f'[STT] Idle — no wake word: "{_idle_transcript}"')
-                            dashboard.update_status(state="idle")
+                            tts.play_beep()
+                            dashboard.update_status(state="awake")
+                            _brief_mute(1.5)
+                    elif _idle_transcript:
+                        print(f'[STT] Idle — no wake word: "{_idle_transcript}"')
+                        dashboard.update_status(state="idle")
                     else:
                         dashboard.update_status(state="idle")
                     continue

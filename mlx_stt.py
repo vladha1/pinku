@@ -96,31 +96,62 @@ def is_ready() -> bool:
 
 def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     """
-    Transcribe raw 16-bit mono PCM. Returns transcript string, '' on failure.
-    Auto-detects language. If detected as Spanish (common Hindi mis-detection),
-    retries as Hindi.
+    Transcribe in English (fast path). Returns transcript string, '' on failure.
+    For the idle path where Hindi fallback is needed, use transcribe_with_fallback().
     """
     if not _AVAILABLE or not _ready.is_set():
         return ""
     try:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        lang  = None if LANGUAGE == "auto" else LANGUAGE
-
-        result = _send(audio, lang)
-
-        # Retry as Hindi for two mis-detection cases:
-        # - "es" (Spanish): Whisper confuses Hindi/Indian-English phonemes with Spanish
-        # - "ur" (Urdu): same spoken language as Hindi but wrong script for this assistant;
-        #   Urdu script wake-word matching fails; re-run as "hi" to get Devanagari
-        detected = result.get("language", "")
-        if detected in ("es", "ur"):
-            result = _send(audio, "hi", temperature=0.3)
-            print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
-
+        result = _send(audio, "en")
         return result.get("text", "").strip()
     except Exception as e:
         print(f"[MLXWhisper] error: {e}")
         return ""
+
+
+def transcribe_with_fallback(
+    pcm: bytes,
+    wake_check_fn,
+    sample_rate: int = 16000,
+) -> tuple[str, bool, str]:
+    """
+    Two-pass STT for the idle wake-word path:
+      1. English pass (~0.85s) — fast, reliable Roman wake words
+      2. Hindi pass (~0.85s more) — only if wake word not found in English
+
+    Returns (transcript, triggered, command).
+    wake_check_fn: callable(text) -> (triggered: bool, command: str)
+    """
+    if not _AVAILABLE or not _ready.is_set():
+        return "", False, ""
+    try:
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+
+        # Pass 1: English
+        en_result = _send(audio, "en")
+        en_text   = en_result.get("text", "").strip()
+        if en_text:
+            triggered, command = wake_check_fn(en_text)
+            if triggered:
+                print(f"[MLXWhisper/en] {en_text!r}")
+                return en_text, True, command
+
+        # Pass 2: Hindi (only if English wake word missed)
+        hi_result = _send(audio, "hi", temperature=0.3)
+        hi_text   = hi_result.get("text", "").strip()
+        if hi_text:
+            triggered, command = wake_check_fn(hi_text)
+            if en_text:
+                print(f"[MLXWhisper/en] {en_text!r}  →  [MLXWhisper/hi] {hi_text!r}")
+            else:
+                print(f"[MLXWhisper/hi] {hi_text!r}")
+            return hi_text, triggered, command
+
+        return en_text or hi_text, False, ""
+    except Exception as e:
+        print(f"[MLXWhisper] error: {e}")
+        return "", False, ""
 
 
 def _send(audio: np.ndarray, lang: str | None, timeout: float = 15.0,
