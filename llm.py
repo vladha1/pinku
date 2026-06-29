@@ -499,8 +499,9 @@ def text_route_and_respond(
     if not m:
         # Gemini returned plain prose instead of JSON (common for Hindi replies).
         # Use it directly as a chat reply rather than falling back to Gemini audio.
+        # Guard: if it starts with '{' it's truncated JSON, not prose — don't speak it.
         stripped = raw.strip()
-        if stripped:
+        if stripped and not stripped.startswith('{'):
             print(f"[LLM] text_route_and_respond: no JSON — using raw prose as reply")
             has_devanagari = bool(re.search(r'[ऀ-ॿ]', stripped))
             return {

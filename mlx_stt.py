@@ -19,6 +19,18 @@ import numpy as np
 MODEL    = "mlx-community/whisper-large-v3-turbo"
 LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "auto")  # auto-detect; retries as Hindi if Spanish
 
+
+def _is_hallucination(text: str) -> bool:
+    """Detect Whisper looping hallucinations (e.g. 'of the episode' repeated 50×)."""
+    words = text.split()
+    if len(words) > 80:
+        return True
+    if len(words) >= 8:
+        grams = [" ".join(words[i:i+4]) for i in range(len(words) - 3)]
+        if max(grams.count(g) for g in set(grams)) > 2:
+            return True
+    return False
+
 _AVAILABLE = False
 _ready     = threading.Event()   # set once the worker has warmed up
 
@@ -109,7 +121,11 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         if detected in ("es", "ur"):
             result = _send(audio, "hi", temperature=0.3)
             print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
-        return result.get("text", "").strip()
+        text = result.get("text", "").strip()
+        if _is_hallucination(text):
+            print(f"[MLXWhisper] hallucination detected ({len(text.split())} words) — dropping")
+            return ""
+        return text
     except Exception as e:
         print(f"[MLXWhisper] error: {e}")
         return ""
@@ -136,6 +152,9 @@ def transcribe_with_fallback(
         # Pass 1: English
         en_result = _send(audio, "en")
         en_text   = en_result.get("text", "").strip()
+        if _is_hallucination(en_text):
+            print(f"[MLXWhisper/en] hallucination ({len(en_text.split())} words) — dropping")
+            en_text = ""
         if en_text:
             triggered, command = wake_check_fn(en_text)
             if triggered:
@@ -145,6 +164,9 @@ def transcribe_with_fallback(
         # Pass 2: Hindi (only if English wake word missed)
         hi_result = _send(audio, "hi", temperature=0.3)
         hi_text   = hi_result.get("text", "").strip()
+        if _is_hallucination(hi_text):
+            print(f"[MLXWhisper/hi] hallucination ({len(hi_text.split())} words) — dropping")
+            hi_text = ""
         if hi_text:
             triggered, command = wake_check_fn(hi_text)
             if en_text:
