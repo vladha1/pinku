@@ -999,7 +999,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
                             _fast_transcript, history=_session_hist,
                             session_active=True, speaker=_current_speaker)
                         _t_llm = time.time()
-                        if result is not None:
+                        # Only accept if Gemini understood the transcript.
+                        # "ignore" in active session usually means MLX mangled Hindi
+                        # into English gibberish — fall through to Gemini audio which
+                        # re-transcribes from raw PCM and handles Hindi natively.
+                        if result is not None and result.get("action") != "ignore":
                             result["_session_active"] = True
                             result["_t_utterance"]    = _t_utterance
                             result["_t_spk"]          = _t_spk
@@ -1007,8 +1011,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
                             result["_stt_label"]      = _stt_label
                             _handle_gemini_result(result)
                             continue
+                        if result is not None:
+                            print(f"[STT] Text-route ignored active-session speech — retrying via Gemini audio")
 
-                # Devanagari Hindi, STT failed, or text routing failed — Gemini audio
+                # Devanagari Hindi, text-route ignored, STT failed, or routing failed — Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
@@ -1064,13 +1070,15 @@ def _voice_loop(recorder: stt.AudioRecorder):
                             dashboard.update_status(state="awake")
                             _brief_mute(1.5)
                     elif _idle_transcript:
-                        print(f'[STT] Idle — no wake word: "{_idle_transcript}"')
-                        dashboard.update_status(state="idle")
+                        # MLX produced text but missed the wake word — likely Hindi mangled
+                        # into English. Fall through to Gemini audio, which handles Hindi
+                        # natively and applies its own wake-word check (session_active=False).
+                        print(f'[STT] Idle — MLX no wake word ("{_idle_transcript}") — Gemini audio retry')
                     else:
                         dashboard.update_status(state="idle")
-                    continue
+                        continue
 
-                # mlx-whisper not ready yet — fall back to Gemini audio
+                # mlx-whisper not ready, OR MLX found text but no wake word — Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=False,
                     speaker=_current_speaker)
