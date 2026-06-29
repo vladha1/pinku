@@ -864,6 +864,9 @@ _WAKE_PHRASES = [
     "hey pink", "hi pink", "ok pink", "pink",
     "hey piku", "hi piku", "ok piku", "piku",     # Pinku with dropped n
     "hey pico", "hi pico", "pico",               # Whisper English mishearing
+    "hey minkoo", "hi minkoo", "minkoo",         # m instead of p mishearing
+    "hey minku", "hi minku", "minku",
+    "hey minky", "hi minky", "minky",
     "hey piky", "hi piky", "piky",                # Pinky with dropped n
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
