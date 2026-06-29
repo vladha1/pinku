@@ -49,40 +49,6 @@ def record_conversation(transcript: str, reply: str,
             print(f"[Dashboard] history write error: {e}")
     _broadcast({"type": "history", **entry})
 
-# ── Dart hit state ───────────────────────────────────────────────────────────
-_dart_hits: list = []   # [{x, y, score, callout}] — last 20 throws (mirrored from pinku.py)
-_dart_lock = threading.Lock()
-
-def push_dart_hit(hit: dict):
-    """Record a dart hit and broadcast it to all dashboard clients."""
-    with _dart_lock:
-        _dart_hits.append(hit)
-        if len(_dart_hits) > 20:
-            _dart_hits[:] = _dart_hits[-20:]
-    _broadcast({"type": "dart_hit", **hit})
-
-def dart_reset():
-    """Clear all dart hits and notify clients."""
-    with _dart_lock:
-        _dart_hits.clear()
-    _broadcast({"type": "dart_reset"})
-
-# ── Dart game state ───────────────────────────────────────────────────────────
-_game_state: dict = {
-    "player": 1, "shots_done": 0, "shots_total": 5,
-    "turn_total": 0, "awaiting": False, "rounds": [],
-}
-_game_lock = threading.Lock()
-
-def push_game_update(state: dict):
-    with _game_lock:
-        _game_state.update(state)
-    _broadcast({"type": "dart_game", **dict(_game_state)})
-
-def push_dart_hits_clear():
-    """Clear hit-dot overlay only (not scoreboard) — used on Next Player."""
-    _broadcast({"type": "dart_hits_clear"})
-
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _broadcast(data: dict):
@@ -100,18 +66,6 @@ def _broadcast(data: dict):
 def update_status(**kwargs):
     _status.update(kwargs)
     _broadcast({"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str})
-
-def push_camera_status(camera: str, detection: str):
-    """Called by camera.py whenever its status changes (ok / error / starting)."""
-    _status["cam_status"]   = camera
-    _status["det_status"]   = detection
-    _broadcast({"type": "status", **_status})
-
-def push_detection(event: dict):
-    _status["detections"].append(event)
-    if len(_status["detections"]) > 50:
-        _status["detections"] = _status["detections"][-50:]
-    _broadcast({"type": "detection", **event})
 
 _log_file_lock = threading.Lock()
 _log_file_path: str = ""
@@ -145,13 +99,6 @@ def log_message(level: str, msg: str):
         except Exception:
             pass
 
-# ── Laser-active flag (set by browser when darts tab is open) ────────────────
-_laser_active = False
-
-def laser_enabled() -> bool:
-    """Returns True only while the darts tab is open in the browser."""
-    return _laser_active
-
 # ── Enrollment flag + live mic level during recording ─────────────────────────
 _enrolling   = False
 _enroll_rms  = 0.0   # smoothed RMS updated during enroll_record(), read by /api/enroll/level
@@ -181,15 +128,7 @@ def stream():
         _clients.append(q)
     def gen():
         try:
-            # Merge live camera status into initial push so reconnecting clients
-            # immediately see the real camera state without waiting for a tab switch.
-            try:
-                from camera import get_status as _cam_get_status
-                cs = _cam_get_status()
-                init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str,
-                        "cam_status": cs["camera"], "det_status": cs["detection"]}
-            except Exception:
-                init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
+            init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
             yield f"data: {json.dumps(init)}\n\n"
             last_heartbeat = time.time()
             last_client_activity = time.time()
@@ -258,27 +197,6 @@ def api_action():
         return jsonify({"ok": True, "action": name})
     return jsonify({"ok": False, "error": f"Unknown action: {name!r}"}), 404
 
-@_app.route("/api/camera.jpg")
-def camera_snapshot():
-    """Current camera frame as JPEG. Returns 503 if camera not active.
-    Pass ?annotated=1 to get dart rings + laser dot overlay (darts tab only)."""
-    try:
-        from camera import get_frame
-        from flask import request as _req
-        import cv2
-        annotated = _req.args.get("annotated", "0") == "1"
-        frame = get_frame(annotated=annotated)
-        if frame is None:
-            return ("No camera frame — camera may still be starting up", 503)
-        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        from flask import make_response
-        r = make_response(buf.tobytes())
-        r.headers["Content-Type"]  = "image/jpeg"
-        r.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-        return r
-    except Exception as e:
-        return (str(e), 503)
-
 @_app.route("/api/mic_level")
 def mic_level_api():
     """Fast-poll endpoint for the dashboard mic meter (~12 fps)."""
@@ -288,19 +206,6 @@ def mic_level_api():
     except Exception:
         level = 0.0
     return json.dumps({"level": round(level, 3)})
-
-@_app.route("/api/dart/hits")
-def dart_hits():
-    from flask import jsonify
-    with _dart_lock:
-        return jsonify(list(_dart_hits))
-
-@_app.route("/api/dart/game")
-def dart_game():
-    from flask import jsonify
-    with _game_lock:
-        return jsonify(dict(_game_state))
-
 
 @_app.route("/restart")
 def restart_page():
@@ -373,89 +278,6 @@ def api_restart():
 
     threading.Thread(target=_do_restart, daemon=True).start()
     return jsonify({"ok": True, "msg": "Pulling & restarting in ~1 s…"})
-
-
-@_app.route("/api/camera/status")
-def camera_status():
-    from flask import jsonify
-    try:
-        from camera import get_status
-        return jsonify(get_status())
-    except Exception as e:
-        return jsonify({"camera": f"error: {e}", "detection": "unknown"})
-
-@_app.route("/api/laser/debug")
-def laser_debug():
-    """
-    Capture a frame, run laser detection with verbose logging, and return
-    a JPEG showing the HSV mask so you can see exactly what colours are matched.
-    Visit http://mac-ip:5100/api/laser/debug in a browser.
-    """
-    try:
-        from camera import get_frame, _detect_laser_dots
-        import cv2, numpy as np
-        frame = get_frame()
-        if frame is None:
-            return ("No frame", 503)
-
-        # Run with debug output
-        dots = _detect_laser_dots(frame, debug=True)
-
-        # Build HSV mask image for visual inspection
-        import config as _cfg
-        hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(
-            hsv,
-            np.array([_cfg.LASER_HUE_LO, _cfg.LASER_SAT_MIN, _cfg.LASER_VAL_MIN]),
-            np.array([_cfg.LASER_HUE_HI, 255, 255]),
-        )
-        # Stack: original | mask (green channel brightened)
-        mask_bgr  = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        # Mark detected dots on original
-        for d in dots:
-            cv2.circle(frame, (d["px"], d["py"]), max(8, int(d["r"]*2)), (0,255,0), 2)
-        combined = np.hstack([frame, mask_bgr])
-        _, buf = cv2.imencode(".jpg", combined, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        from flask import make_response
-        r = make_response(buf.tobytes())
-        r.headers["Content-Type"]  = "image/jpeg"
-        r.headers["Cache-Control"] = "no-store"
-        # Also log summary
-        print(f"[Laser debug] dots found: {len(dots)} — {dots}")
-        return r
-    except Exception as e:
-        import traceback
-        return (traceback.format_exc(), 500)
-
-
-@_app.route("/api/laser/calibrate", methods=["POST"])
-def laser_calibrate():
-    """
-    Set bullseye = current laser dot position.
-    Body: {} (empty) — reads current dot from camera overlay.
-    Returns {"ok": bool, "bull_x"?, "bull_y"?, "error"?}
-    """
-    from flask import jsonify
-    fn = _actions.get("laser_calibrate")
-    if fn is None:
-        return jsonify({"ok": False, "error": "Calibrate action not registered"}), 503
-    result = fn()
-    if result is None:
-        result = {"ok": True}
-    code = 200 if result.get("ok") else 400
-    return jsonify(result), code
-
-
-@_app.route("/api/laser/active", methods=["POST"])
-def laser_active_set():
-    """Browser calls this when entering/leaving the darts tab.
-    Body: {"active": true|false}
-    """
-    from flask import jsonify, request as _req
-    global _laser_active
-    data = _req.get_json(silent=True) or {}
-    _laser_active = bool(data.get("active", False))
-    return jsonify({"ok": True, "laser_active": _laser_active})
 
 
 @_app.route("/api/enroll/pause", methods=["POST"])
@@ -592,47 +414,64 @@ def enroll_delete(name):
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)}), 500
 
-@_app.route("/api/camera/request-permission")
-def camera_request_permission():
-    """
-    Trigger macOS camera permission dialog by running camera access
-    inside the user's GUI login session (via launchctl asuser),
-    so the permission popup appears on screen / VNC.
-    """
-    from flask import jsonify
-    import subprocess, sys, os, tempfile
+# ── Market + Weather data (cached, fetched from Yahoo Finance / wttr.in) ─────
 
-    script = (
-        "import cv2, time\n"
-        "cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)\n"
-        "ok = False\n"
-        "for _ in range(30):\n"
-        "    ret, _ = cap.read()\n"
-        "    if ret: ok = True; break\n"
-        "    time.sleep(0.2)\n"
-        "cap.release()\n"
-        "print('OK' if ok else 'DENIED')\n"
-    )
-    # Write to temp file (launchctl asuser needs a real path)
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-    tmp.write(script); tmp.flush(); tmp.close()
+_market_cache: dict = {"data": None, "ts": 0.0}
+_market_lock  = threading.Lock()
 
-    try:
-        uid = str(os.getuid())
-        result = subprocess.run(
-            ["launchctl", "asuser", uid, sys.executable, tmp.name],
-            capture_output=True, text=True, timeout=15,
-        )
-        out = (result.stdout + result.stderr).strip()
-        ok  = "OK" in out
-        return jsonify({"ok": ok, "output": out or "(no output — check VNC for popup)"})
-    except Exception as e:
-        return jsonify({"ok": False, "output": str(e)})
-    finally:
+@_app.route("/api/market")
+def api_market():
+    with _market_lock:
+        if time.time() - _market_cache["ts"] < 30 and _market_cache["data"]:
+            return json.dumps(_market_cache["data"]), 200, {"Content-Type": "application/json"}
+    import urllib.request as _ur
+
+    def _yf(symbol):
         try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+                   f"?interval=1m&range=1d")
+            req = _ur.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                "Accept": "application/json",
+            })
+            with _ur.urlopen(req, timeout=8) as r:
+                d = json.loads(r.read())
+            meta  = d["chart"]["result"][0]["meta"]
+            price = float(meta.get("regularMarketPrice") or 0)
+            prev  = float(meta.get("previousClose") or meta.get("chartPreviousClose") or price)
+            chg   = price - prev
+            pct   = (chg / prev * 100) if prev else 0
+            return {"price": round(price, 2), "change": round(chg, 2), "pct": round(pct, 2)}
+        except Exception as e:
+            return {"price": None, "change": 0, "pct": 0, "err": str(e)}
+
+    data = {"nifty": _yf("%5ENSEI"), "btc": _yf("BTC-USD"), "ts": time.time()}
+    with _market_lock:
+        _market_cache["data"] = data
+        _market_cache["ts"]   = time.time()
+    return json.dumps(data), 200, {"Content-Type": "application/json", "Cache-Control": "no-cache"}
+
+
+_weather_cache: dict = {"data": None, "ts": 0.0}
+
+@_app.route("/api/weather")
+def api_weather():
+    if time.time() - _weather_cache["ts"] < 300 and _weather_cache["data"]:
+        return json.dumps(_weather_cache["data"]), 200, {"Content-Type": "application/json"}
+    import urllib.request as _ur
+    try:
+        req = _ur.Request("https://wttr.in/Gurugram?format=%t+%C&m",
+                          headers={"User-Agent": "curl/7.79"})
+        with _ur.urlopen(req, timeout=6) as r:
+            text = r.read().decode().strip()
+        parts = text.split(" ", 1)
+        data = {"temp": parts[0], "cond": parts[1] if len(parts) > 1 else "", "ok": True}
+    except Exception as e:
+        data = {"temp": "—", "cond": "", "ok": False}
+    _weather_cache["data"] = data
+    _weather_cache["ts"]   = time.time()
+    return json.dumps(data), 200, {"Content-Type": "application/json", "Cache-Control": "no-cache"}
+
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
@@ -640,7 +479,7 @@ def start(logger=None, port=DASHBOARD_PORT):
     global _logger
     _logger = logger
 
-    # Silence Flask/werkzeug per-request logs (camera.jpg polls at 5 fps = noise)
+    # Silence Flask/werkzeug per-request logs
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
@@ -658,1866 +497,510 @@ HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Pinku</title>
-<!-- React 17 + Babel for iOS 9 Safari compatibility -->
-<script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-/* ── Reset & Base ── */
-*, *:before, *:after { -webkit-box-sizing: border-box; box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
+:root {
+  --bg:       #06060f;
+  --bg2:      #0d0d1c;
+  --surface:  rgba(255,255,255,0.028);
+  --surface2: rgba(255,255,255,0.052);
+  --border:   rgba(255,255,255,0.065);
+  --text:     #dde2f0;
+  --muted:    rgba(221,226,240,0.38);
+  --accent:   #f59e0b;
+  --adim:     rgba(245,158,11,0.14);
+  --green:    #34d399;
+  --red:      #f87171;
+  --blue:     #60a5fa;
+  --purple:   #a78bfa;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
 body {
-  background: #0a0a14;
-  color: #e8e8f4;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-  display: -webkit-flex; display: flex;
-  -webkit-flex-direction: column; flex-direction: column;
-  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Inter, sans-serif;
   -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+}
+
+/* ──── TOP BAR ──── */
+#topbar {
+  height: 60px; flex-shrink: 0;
+  display: flex; align-items: center;
+  padding: 0 28px; gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(6,6,15,0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.status-cluster {
+  display: flex; align-items: center; gap: 9px; min-width: 130px;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0; transition: background 0.5s, box-shadow 0.5s;
+}
+.dot.idle      { background: rgba(255,255,255,0.18); }
+.dot.awake     { background: var(--green); box-shadow: 0 0 10px var(--green); animation: throb 2s ease-in-out infinite; }
+.dot.thinking  { background: var(--purple); box-shadow: 0 0 10px var(--purple); animation: throb 0.7s ease-in-out infinite; }
+.dot.speaking  { background: var(--blue);   box-shadow: 0 0 10px var(--blue);   animation: throb 1.1s ease-in-out infinite; }
+.dot.muted     { background: var(--red); }
+@keyframes throb { 0%,100%{opacity:1} 50%{opacity:0.35} }
+#state-lbl {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.brand {
+  flex: 1; text-align: center;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.28em;
+  text-transform: uppercase; color: var(--accent);
+}
+.ctrls { display: flex; align-items: center; gap: 7px; min-width: 130px; justify-content: flex-end; }
+.btn {
+  height: 32px; padding: 0 13px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.14s; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
   -webkit-user-select: none; user-select: none;
 }
-#root {
-  display: -webkit-flex; display: flex;
-  -webkit-flex-direction: column; flex-direction: column;
-  overflow: hidden;
+.btn:hover  { background: var(--surface2); border-color: rgba(255,255,255,0.12); }
+.btn:active { transform: scale(0.95); }
+.btn.g { border-color: rgba(52,211,153,0.32); color: var(--green); }
+.btn.g:hover { background: rgba(52,211,153,0.09); }
+.btn.b { border-color: rgba(96,165,250,0.32); color: var(--blue); }
+.btn.b:hover { background: rgba(96,165,250,0.09); }
+.btn.r { border-color: rgba(248,113,113,0.32); color: var(--red); }
+.btn.r:hover { background: rgba(248,113,113,0.09); }
+.btn.a { border-color: rgba(245,158,11,0.32); color: var(--accent); }
+.btn.a:hover { background: var(--adim); }
+
+/* ──── MAIN ──── */
+main {
+  flex: 1; overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  padding: 28px 40px 20px;
+  gap: 22px;
 }
 
-/* ── Header ── */
-.header {
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center;
-  -webkit-justify-content: space-between; justify-content: space-between;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid #24243a;
-  -webkit-flex-shrink: 0; flex-shrink: 0;
-  background: -webkit-linear-gradient(top, rgba(124,92,191,0.07) 0%, transparent 100%);
-  background: linear-gradient(180deg, rgba(124,92,191,0.07) 0%, transparent 100%);
-}
-.header-left { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px; }
-.dot-wrap { position: relative; }
-.avatar-ring {
-  width: 36px; height: 36px; border-radius: 50%;
-  background: -webkit-linear-gradient(135deg, #7c3aed, #4c1d95);
-  background: linear-gradient(135deg, #7c3aed, #4c1d95);
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center;
-  -webkit-justify-content: center; justify-content: center;
-  font-weight: 700; font-size: 0.95rem; color: #fff;
-  -webkit-box-shadow: 0 0 12px rgba(124,58,237,0.45); box-shadow: 0 0 12px rgba(124,58,237,0.45);
-}
-.status-dot {
-  position: absolute; bottom: -1px; right: -1px;
-  width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid #0a0a14;
-  background: #4ade80;
-  -webkit-transition: background 0.5s ease; transition: background 0.5s ease;
-}
-.status-dot.sleeping  { background: #2a2a42; }
-.status-dot.paused    { background: #f87171; }
-.status-dot.thinking,
-.status-dot.triggered { background: #c084fc; }
-.status-dot.speaking  { background: #f472b6; }
-.app-name {
-  font-size: 1.05rem; font-weight: 700;
-  background: -webkit-linear-gradient(left, #c9b1ff, #f472b6);
-  background: linear-gradient(90deg, #c9b1ff, #f472b6);
+/* ──── CLOCK ──── */
+#hero { text-align: center; }
+#clock {
+  font-size: 88px; font-weight: 200; letter-spacing: -4px;
+  font-variant-numeric: tabular-nums; line-height: 1;
+  background: linear-gradient(135deg, #f0f2ff 60%, rgba(240,242,255,0.55));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-.status-pills { display: -webkit-flex; display: flex; gap: 5px; margin-top: 2px; }
-.spill {
-  font-size: 0.72rem; padding: 1px 6px; border-radius: 8px;
-  background: rgba(255,255,255,0.05); border: 1px solid #24243a;
-  color: #666683; -webkit-transition: background 0.3s, color 0.3s; transition: background 0.3s, color 0.3s;
-}
-.spill.on { background: rgba(74,222,128,0.12); color: #4ade80; border-color: rgba(74,222,128,0.3); }
-.header-btns { display: -webkit-flex; display: flex; gap: 8px; }
-.hdr-btn {
-  padding: 6px 12px; border-radius: 10px; font-size: 0.85rem;
-  border: 1px solid #24243a; background: rgba(255,255,255,0.05);
-  color: #e8e8f4; cursor: pointer; -webkit-transition: background 0.18s; transition: background 0.18s;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center;
-  -webkit-justify-content: center; justify-content: center;
-  min-width: 44px; min-height: 44px;
-}
-.hdr-btn:hover { background: rgba(255,255,255,0.1); }
-.hdr-btn.stop-btn  { border-color: rgba(248,113,113,0.4); color: #f87171; }
-.hdr-btn.mute-btn  { border-color: rgba(248,113,113,0.35); }
-.hdr-btn.mute-btn.active { background: rgba(192,132,252,0.18); border-color: rgba(192,132,252,0.5); }
-.hdr-btn.resume-btn{ border-color: rgba(74,222,128,0.4); color: #4ade80; }
-.hdr-btn.restart-btn { border-color: rgba(251,191,36,0.4); color: #fbbf24; font-size: 0.8rem; }
-.uptime-badge {
-  font-family: 'SF Mono', ui-monospace, monospace;
-  font-size: 0.66rem; letter-spacing: 0.04em;
-  color: #4ade80; background: rgba(74,222,128,0.07);
-  border: 1px solid rgba(74,222,128,0.18);
-  border-radius: 6px; padding: 2px 6px;
-  min-width: 38px; text-align: center; -webkit-user-select: none; user-select: none;
+#datestr {
+  margin-top: 8px; font-size: 12px; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
 }
 
-/* ── Main area ── */
-.main-area {
-  -webkit-flex: 1; flex: 1; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  overflow: hidden; gap: 0;
-  padding: 8px 0 4px;
+/* ──── MARKET CARDS ──── */
+#cards {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 18px 22px;
+  transition: background 0.2s, border-color 0.2s;
+  cursor: default;
+}
+.card:hover { background: var(--surface2); border-color: rgba(255,255,255,0.1); }
+.card-lbl {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+}
+.card-val {
+  font-size: 30px; font-weight: 300; letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums; color: #f0f2ff; line-height: 1.1;
+}
+.card-sub {
+  margin-top: 6px; font-size: 11px; font-weight: 500;
+  color: var(--muted); display: flex; align-items: center; gap: 4px;
+}
+.card-sub.up   { color: var(--green); }
+.card-sub.dn   { color: var(--red); }
+
+/* ──── FEED ──── */
+#feed {
+  display: flex; flex-direction: column; min-height: 0;
+}
+.feed-hdr {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted);
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; margin-bottom: 2px;
+}
+#feed-list {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+}
+#feed-list::-webkit-scrollbar { width: 3px; }
+#feed-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+.exchange {
+  display: grid; grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 16px; padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.035);
+}
+.exchange:last-child { border-bottom: none; }
+.ex-user {
+  grid-column: 1; grid-row: 1;
+  font-size: 12px; color: var(--muted); margin-bottom: 3px;
+}
+.ex-pinku {
+  grid-column: 1; grid-row: 2;
+  font-size: 13px; color: var(--text);
+  display: flex; align-items: baseline; gap: 7px;
+}
+.ex-pinku::before {
+  content: '◆'; color: var(--accent); font-size: 6px;
+  flex-shrink: 0; position: relative; top: -1px;
+}
+.ex-ts {
+  grid-column: 2; grid-row: 1 / 3;
+  font-size: 10px; color: var(--muted);
+  align-self: center; white-space: nowrap;
+}
+.feed-empty {
+  padding: 20px 0; text-align: center;
+  font-size: 13px; color: var(--muted);
 }
 
-/* ── Thought bubble ── */
-.face-bubble {
-  position: absolute; top: 0%; right: -4%;
-  background: rgba(14, 12, 28, 0.92);
-  border: 1.5px solid #c084fc;
-  border-radius: 999px;
-  padding: 5px 11px;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center; gap: 4px;
-  z-index: 8; pointer-events: none;
-  -webkit-box-shadow: 0 4px 16px rgba(0,0,0,0.5); box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-  opacity: 0;
-  -webkit-transform: translateY(8px) scale(0.86); transform: translateY(8px) scale(0.86);
-  -webkit-transition: opacity 0.32s, -webkit-transform 0.34s; transition: opacity 0.32s, transform 0.34s;
-}
-.face-bubble.triggered { border-color: #fb923c; }
-.face-bubble.visible { opacity: 1; -webkit-transform: translateY(0) scale(1); transform: translateY(0) scale(1); }
-.bubble-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #c084fc; display: inline-block;
-  -webkit-animation: dot-bounce 1.22s ease-in-out infinite; animation: dot-bounce 1.22s ease-in-out infinite;
-}
-.face-bubble.triggered .bubble-dot { background: #fb923c; }
-.bubble-dot.d2 { -webkit-animation-delay: 0.16s; animation-delay: 0.16s; }
-.bubble-dot.d3 { -webkit-animation-delay: 0.32s; animation-delay: 0.32s; }
-@-webkit-keyframes dot-bounce {
-  0%,100% { -webkit-transform: translateY(0) scale(1); opacity: 0.82; }
-  22%     { -webkit-transform: translateY(0) scale(1.05); opacity: 1; }
-  48%     { -webkit-transform: translateY(-6px) scale(1.1); opacity: 1; }
-  72%     { -webkit-transform: translateY(-1px) scale(1); opacity: 0.9; }
-}
-@keyframes dot-bounce {
-  0%,100% { transform: translateY(0) scale(1); opacity: 0.82; }
-  22%     { transform: translateY(0) scale(1.05); opacity: 1; }
-  48%     { transform: translateY(-6px) scale(1.1); opacity: 1; }
-  72%     { transform: translateY(-1px) scale(1); opacity: 0.9; }
-}
-
-/* ── Stage & layout ── */
-.pinky-stage {
-  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  width: 100%; max-width: 720px; margin: 0 auto;
-}
-.face-with-actions {
-  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  width: 100%; max-width: 94vw;
-  padding: 2px 4px 10px;
-}
-.face-with-actions .face-wrap {
-  -webkit-flex: 0 1 auto; flex: 0 1 auto; width: 100%;
-  max-width: 440px;
-  margin-left: auto; margin-right: auto;
-}
-@media (min-width: 500px) {
-  .face-with-actions .face-wrap { max-width: 460px; }
-}
-@media (min-width: 900px) {
-  .face-with-actions .face-wrap { max-width: 520px; }
-}
-.wake-btn-top {
-  -webkit-flex: 0 0 auto; flex: 0 0 auto; width: 56px; height: 56px;
-  border-radius: 50%;
-  border: 2px solid rgba(216,180,254,0.9);
-  background: -webkit-linear-gradient(top, #7c3aed 0%, #5b21b6 52%, #4c1d95 100%);
-  background: linear-gradient(180deg, #7c3aed 0%, #5b21b6 52%, #4c1d95 100%);
-  color: #fff; cursor: pointer;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  -webkit-box-shadow: 0 4px 0 rgba(49,10,90,0.75), 0 8px 18px rgba(91,33,182,0.38);
-  box-shadow: 0 4px 0 rgba(49,10,90,0.75), 0 8px 18px rgba(91,33,182,0.38);
-  -webkit-transition: -webkit-transform 0.08s ease; transition: transform 0.08s ease;
-  font-size: 1.55rem; line-height: 1; margin-bottom: 12px;
-}
-.wake-btn-top:active { -webkit-transform: translateY(2px); transform: translateY(2px); }
-
-/* ── Question & reply clouds ── */
-.question-cloud {
-  margin-bottom: 10px; width: 100%; max-width: 450px;
-  padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
-  color: #0c1e2e; text-align: left;
-  background: -webkit-linear-gradient(top, #f8fcff 0%, #e8f4fc 45%, #dff0fb 100%);
-  background: linear-gradient(165deg,#f8fcff 0%,#e8f4fc 45%,#dff0fb 100%);
-  border: 2px solid rgba(56,189,248,0.55);
-  border-radius: 26px; border-bottom-right-radius: 8px;
-  -webkit-box-shadow: 0 8px 22px rgba(0,0,0,0.18); box-shadow: 0 8px 22px rgba(0,0,0,0.18);
-  display: none;
-}
-.question-cloud.has-text { display: block; }
-.question-cloud-label {
-  display: block; font-size: 0.58rem; font-weight: 700;
-  letter-spacing: 0.1em; text-transform: uppercase;
-  color: #0369a1; margin-bottom: 6px;
-}
-.reply-cloud {
-  margin-top: 10px; width: 100%; max-width: 450px;
-  padding: 10px 14px 12px; font-size: 1.05rem; line-height: 1.5;
-  color: #241830; text-align: left;
-  background: -webkit-linear-gradient(top, #fdfcff 0%, #f3e8ff 45%, #ede9fe 100%);
-  background: linear-gradient(165deg,#fdfcff 0%,#f3e8ff 45%,#ede9fe 100%);
-  border: 2px solid rgba(167,139,250,0.55);
-  border-radius: 26px; border-bottom-left-radius: 8px;
-  -webkit-box-shadow: 0 10px 28px rgba(0,0,0,0.22); box-shadow: 0 10px 28px rgba(0,0,0,0.22);
-  cursor: pointer; display: none;
-}
-.reply-cloud.has-text { display: block; }
-.reply-cloud-label {
-  display: block; font-size: 0.58rem; font-weight: 700;
-  letter-spacing: 0.1em; text-transform: uppercase;
-  color: #7c3aed; margin-bottom: 6px;
-}
-.reply-cloud-body { display: block; word-break: break-word; }
-
-/* ── Person badge ── */
-.person-badge {
-  margin-top: 6px;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center; gap: 6px;
-  background: rgba(74,222,128,0.10);
-  border: 1px solid rgba(74,222,128,0.28);
-  border-radius: 20px; padding: 4px 12px;
-  font-size: 0.72rem; color: #4ade80;
-  opacity: 0; -webkit-transition: opacity 0.4s; transition: opacity 0.4s; pointer-events: none;
-}
-.person-badge.visible { opacity: 1; }
-.person-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #4ade80;
-  -webkit-animation: live-blink 1.6s ease-in-out infinite; animation: live-blink 1.6s ease-in-out infinite;
-}
-@-webkit-keyframes live-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-@keyframes live-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-/* ── Status bar ── */
-.status-bar {
-  -webkit-flex-shrink: 0; flex-shrink: 0; margin-top: 10px;
-  padding: 9px 14px 9px 12px; border-radius: 999px;
-  background: -webkit-linear-gradient(top, rgba(22,24,40,0.94), rgba(14,16,28,0.96));
-  background: linear-gradient(180deg, rgba(22,24,40,0.94), rgba(14,16,28,0.96));
-  border: 1px solid rgba(100,116,139,0.4);
-  -webkit-box-shadow: 0 8px 24px rgba(0,0,0,0.4); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-  max-width: 460px; width: 96vw;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center; gap: 10px;
-  -webkit-transition: border-color 0.6s ease; transition: border-color 0.6s ease;
-}
-.status-bar.sleeping  { border-color: rgba(100,116,139,0.4); }
-.status-bar.awake     { border-color: rgba(192,132,252,0.5); }
-.status-bar.thinking,
-.status-bar.triggered { border-color: rgba(232,121,249,0.48); }
-.status-bar.speaking  { border-color: rgba(192,132,252,0.42); }
-.status-bar.paused    { border-color: rgba(248,113,113,0.42); }
-.status-bar-icon { font-size: 1.65rem; line-height: 1; -webkit-flex-shrink: 0; flex-shrink: 0; }
-.status-bar-icon.thinking,
-.status-bar-icon.triggered { -webkit-animation: notify-pulse 1.12s ease-in-out infinite; animation: notify-pulse 1.12s ease-in-out infinite; }
-@-webkit-keyframes notify-pulse { 0%,100%{opacity:1;-webkit-transform:scale(1)} 50%{opacity:0.7;-webkit-transform:scale(0.9)} }
-@keyframes notify-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(0.9)} }
-.status-bar-text { -webkit-flex: 1; flex: 1; min-width: 0; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; }
-.status-bar-label { font-size: 1.15rem; font-weight: 700; color: #e8e8f4; white-space: nowrap; }
-.status-bar-sub   { font-size: 0.98rem; color: #8a8aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-.status-bar-right { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 8px; -webkit-flex-shrink: 0; flex-shrink: 0; }
-.ws-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.ws-dot.on  { background: #4ade80; -webkit-box-shadow: 0 0 5px rgba(74,222,128,0.6); box-shadow: 0 0 5px rgba(74,222,128,0.6); }
-.ws-dot.off { background: #64748b; }
-/* ── Mic level meter ── */
-.mic-meter { display: -webkit-flex; display: flex; -webkit-align-items: flex-end; align-items: flex-end; gap: 2px; height: 18px; }
-.mic-bar { width: 3px; min-height: 2px; border-radius: 2px; background: rgba(147,197,253,0.7); -webkit-will-change: height,opacity; will-change: height,opacity; }
-
-/* ── Face wrap ── */
-.face-wrap {
-  position: relative; width: 100%; max-width: 440px;
-  margin: 0 auto; -webkit-flex-shrink: 0; flex-shrink: 0;
-  border-radius: 48% 48% 46% 46% / 44% 44% 56% 56%;
-  border: 1px solid rgba(255,182,220,0.22);
-  background:
-    -webkit-radial-gradient(50% 36% ellipse, rgba(255,210,232,0.22) 0%, transparent 58%),
-    -webkit-radial-gradient(32% 20%, #4a4478 0%, #322d58 38%, #1c1a34 100%);
-  background:
-    radial-gradient(ellipse 72% 58% at 50% 36%, rgba(255,210,232,0.22) 0%, transparent 58%),
-    radial-gradient(circle at 32% 20%, #4a4478 0%, #322d58 38%, #1c1a34 100%);
-  -webkit-box-shadow: 0 24px 48px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08) inset;
-  box-shadow: 0 24px 48px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08) inset;
-  overflow: visible;
-}
-.face-wrap:before { content:''; display:block; padding-top:100%; }
-.face-wrap:after {
-  content:''; position:absolute; left:-8%; right:-8%; top:-8%; bottom:-8%;
-  border-radius:50%;
-  border: 1px solid rgba(96,165,250,0.36);
-  -webkit-box-shadow: 0 0 24px rgba(59,130,246,0.28), inset 0 0 12px rgba(147,51,234,0.25);
-  box-shadow: 0 0 24px rgba(59,130,246,0.28), inset 0 0 12px rgba(147,51,234,0.25);
-  pointer-events:none; opacity:0.52;
-  -webkit-transition: opacity 0.5s ease; transition: opacity 0.5s ease;
-}
-@-webkit-keyframes face-ambient-ring { 0%,100%{opacity:0.38} 50%{opacity:0.72} }
-@keyframes face-ambient-ring { 0%,100%{opacity:0.38} 50%{opacity:0.72} }
-.face-wrap.awake:after, .face-wrap.listening:after { -webkit-animation: face-ambient-ring 3.5s ease-in-out infinite; animation: face-ambient-ring 3.5s ease-in-out infinite; }
-.face-wrap.thinking:after, .face-wrap.triggered:after { -webkit-animation: face-ambient-ring 2.35s ease-in-out infinite; animation: face-ambient-ring 2.35s ease-in-out infinite; }
-.face-wrap.paused:after, .face-wrap.sleeping:after { -webkit-animation: none; animation: none; opacity: 0.1; }
-
-.face-wrap .face {
-  position: absolute; left:0; right:0; top:0; bottom:0;
-  width:71%; height:86%; margin:auto; -webkit-transform:none; transform:none;
-  display:-webkit-flex; display:flex; -webkit-flex-direction:column; flex-direction:column;
-  -webkit-align-items:center; align-items:center; -webkit-justify-content:flex-start; justify-content:flex-start;
-}
-
-/* ── Head & features ── */
-.head {
-  position: relative; width: 100%; height: 88%;
-  border-radius: 49% 49% 47% 47% / 47% 47% 55% 55%;
-  background:
-    -webkit-radial-gradient(50% 22% ellipse, #fffefb 0%, #fff5f0 18%, #ffe8dc 38%, #ffd0c0 62%, #f5c4b0 92%);
-  background:
-    radial-gradient(ellipse 120% 88% at 50% 22%,
-      #fffefb 0%, #fff5f0 18%, #ffe8dc 38%, #ffd0c0 62%, #f5c4b0 92%);
-  border: 1px solid rgba(240,180,165,0.35);
-  -webkit-box-shadow: inset 0 -10px 22px rgba(200,120,110,0.1), inset 12px 18px 32px rgba(255,255,255,0.55);
-  box-shadow: inset 0 -10px 22px rgba(200,120,110,0.1), inset 12px 18px 32px rgba(255,255,255,0.55);
-  -webkit-transition: filter 0.45s ease, -webkit-box-shadow 0.45s ease; transition: filter 0.45s ease, box-shadow 0.45s ease;
-}
-.hair-side {
-  position: absolute; top: 16%; width: 26%; height: 86%;
-  z-index: 1; pointer-events: none;
-  background: -webkit-linear-gradient(left, rgba(255,255,255,0.12) 0%, #ffc8dd 22%, #f9a8d4 50%, #f472b6 78%, #ec4899 100%);
-  background: linear-gradient(90deg, rgba(255,255,255,0.12) 0%, #ffc8dd 22%, #f9a8d4 50%, #f472b6 78%, #ec4899 100%);
-  border-radius: 58% 42% 55% 45% / 22% 30% 88% 72%;
-  -webkit-box-shadow: inset -3px 0 8px rgba(255,255,255,0.25); box-shadow: inset -3px 0 8px rgba(255,255,255,0.25);
-}
-.hair-side.left  { left: -14%; -webkit-transform: rotate(-5deg); transform: rotate(-5deg); }
-.hair-side.right { right: -14%; -webkit-transform: rotate(5deg) scaleX(-1); transform: rotate(5deg) scaleX(-1); }
-.hair-fringe {
-  position: absolute; top: -4%; left: 10%; width: 80%; height: 18%;
-  z-index: 2; pointer-events: none;
-  background: -webkit-linear-gradient(top, #ffe4f0 0%, #fda4d0 45%, #f472b6 100%);
-  background: linear-gradient(180deg, #ffe4f0 0%, #fda4d0 45%, #f472b6 100%);
-  border-radius: 50% 50% 45% 45% / 85% 85% 28% 28%;
-  -webkit-clip-path: ellipse(92% 100% at 50% 0%); clip-path: ellipse(92% 100% at 50% 0%);
-  -webkit-box-shadow: 0 2px 6px rgba(236,72,153,0.2); box-shadow: 0 2px 6px rgba(236,72,153,0.2);
-}
-.brows {
-  position: absolute; top: 30.5%; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
-  width: 58%; display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; z-index: 4;
-}
-.brow {
-  width: 32%; height: 3px; border-radius: 999px;
-  background: -webkit-linear-gradient(left, #b0887a, #8a5f52); background: linear-gradient(90deg, #b0887a, #8a5f52);
-  opacity: 0.9; -webkit-transform-origin: 50% 50%; transform-origin: 50% 50%;
-}
-.brow.left  { -webkit-transform: rotate(-5deg) translateY(1px); transform: rotate(-5deg) translateY(1px); border-radius: 55% 45% 50% 50%; }
-.brow.right { -webkit-transform: rotate(5deg) translateY(1px); transform: rotate(5deg) translateY(1px); border-radius: 45% 55% 50% 50%; }
-.eyes {
-  position: absolute; top: 39.5%; left: 18%; width: 64%;
-  display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; -webkit-align-items: center; align-items: center;
-  z-index: 4; -webkit-transform-origin: 50% 45%; transform-origin: 50% 45%;
-}
-.eye {
-  width: 40px; height: 40px;
-  border-radius: 50%;
-  border: 2px solid rgba(55,65,81,0.22);
-  background: -webkit-radial-gradient(40% 28%, #ffffff 0%, #f5f9ff 62%, #dbeafe 100%);
-  background: radial-gradient(circle at 40% 28%, #ffffff 0%, #f5f9ff 62%, #dbeafe 100%);
-  -webkit-box-shadow: 0 0 16px rgba(255,255,255,0.5), 0 5px 16px rgba(59,130,246,0.2), inset 0 -4px 7px rgba(15,23,42,0.12);
-  box-shadow: 0 0 16px rgba(255,255,255,0.5), 0 5px 16px rgba(59,130,246,0.2), inset 0 -4px 7px rgba(15,23,42,0.12);
-  position: relative; -webkit-transform-origin: center center; transform-origin: center center;
-}
-@media (min-width: 400px) { .eye { width: 46px; height: 46px; } }
-@media (min-width: 600px) { .eye { width: 54px; height: 54px; } }
-.eye-lashes {
-  position: absolute; left:-6%; right:-6%; top:-16%; height:42%;
-  display: -webkit-flex; display: flex; -webkit-justify-content: center; justify-content: center; -webkit-align-items: flex-end; align-items: flex-end;
-  padding-bottom: 2px; z-index: 6; pointer-events: none;
-}
-.eye-lashes .lash {
-  -webkit-flex: 0 0 auto; flex: 0 0 auto; width: 2px;
-  height: 8px;
-  margin: 0 1px; border-radius: 2px;
-  background: -webkit-linear-gradient(top, rgba(28,24,36,0.95) 0%, rgba(28,24,36,0.2) 100%);
-  background: linear-gradient(180deg, rgba(28,24,36,0.95) 0%, rgba(28,24,36,0.2) 100%);
-  -webkit-transform-origin: 50% 100%; transform-origin: 50% 100%; opacity: 0.9;
-  -webkit-box-shadow: 0 0 1px rgba(0,0,0,0.25); box-shadow: 0 0 1px rgba(0,0,0,0.25);
-}
-.eye .lash:nth-child(1) { -webkit-transform: rotate(-22deg); transform: rotate(-22deg); height: 6px; }
-.eye .lash:nth-child(2) { -webkit-transform: rotate(-10deg); transform: rotate(-10deg); }
-.eye .lash:nth-child(3) { -webkit-transform: rotate(0deg); height: 9px; }
-.eye .lash:nth-child(4) { -webkit-transform: rotate(10deg); transform: rotate(10deg); }
-.eye .lash:nth-child(5) { -webkit-transform: rotate(22deg); transform: rotate(22deg); height: 6px; }
-.eye:after {
-  content: ""; position: absolute;
-  left: 50%; top: 56%; -webkit-transform: translate(-50%,-50%); transform: translate(-50%,-50%);
-  width: 42%; height: 48%; border-radius: 50%;
-  background: -webkit-radial-gradient(40% 34%, #7c3aed 0%, #4338ca 45%, #0f172a 84%, #020617 100%);
-  background: radial-gradient(circle at 40% 34%, #7c3aed 0%, #4338ca 45%, #0f172a 84%, #020617 100%);
-  -webkit-box-shadow: 0 2px 10px rgba(76,29,149,0.45), inset 0 -3px 7px rgba(0,0,0,0.45);
-  box-shadow: 0 2px 10px rgba(76,29,149,0.45), inset 0 -3px 7px rgba(0,0,0,0.45);
-}
-.eye:before {
-  content: ""; position: absolute;
-  left: 58%; top: 30%; width: 17%; height: 19%;
-  border-radius: 50%; background: rgba(255,255,255,0.98);
-  z-index: 1; -webkit-box-shadow: 0 0 6px rgba(255,255,255,0.9); box-shadow: 0 0 6px rgba(255,255,255,0.9);
-}
-.nose-bridge {
-  position: absolute; top: 54%; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
-  width: 12%; height: 14%;
-  background: -webkit-linear-gradient(left, transparent 0%, rgba(240,160,150,0.14) 35%, rgba(240,160,150,0.2) 50%, rgba(240,160,150,0.14) 65%, transparent 100%);
-  background: linear-gradient(90deg, transparent 0%, rgba(240,160,150,0.14) 35%, rgba(240,160,150,0.2) 50%, rgba(240,160,150,0.14) 65%, transparent 100%);
-  border-radius: 40%; pointer-events: none; z-index: 2;
-}
-.mouth {
-  position: absolute; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
-  -webkit-transform-origin: 50% 0%; transform-origin: 50% 0%;
-  top: 70.5%; width: 38%; max-width: 200px; height: 22px;
-  border-radius: 0 0 52% 52%; border: none;
-  background:
-    -webkit-radial-gradient(50% 0% ellipse, rgba(255,255,255,0.62) 0%, transparent 58%),
-    -webkit-linear-gradient(top, rgba(255,245,250,0.65) 0%, rgba(251,146,170,0.45) 38%, rgba(236,72,120,0.62) 100%);
-  background:
-    radial-gradient(ellipse 95% 90% at 50% 0%, rgba(255,255,255,0.62) 0%, transparent 58%),
-    linear-gradient(180deg, rgba(255,245,250,0.65) 0%, rgba(251,146,170,0.45) 38%, rgba(236,72,120,0.62) 100%);
-  -webkit-box-shadow: 0 3px 0 0 #db2777, 0 8px 14px rgba(219,39,119,0.32), inset 0 2px 8px rgba(255,255,255,0.45);
-  box-shadow: 0 3px 0 0 #db2777, 0 8px 14px rgba(219,39,119,0.32), inset 0 2px 8px rgba(255,255,255,0.45);
-  z-index: 3;
-}
-.cheek {
-  position: absolute; top: 56%; width: 21%; height: 11%;
-  border-radius: 50%;
-  background: -webkit-radial-gradient(circle, rgba(255,170,190,0.55) 0%, rgba(255,200,210,0.22) 42%, transparent 70%);
-  background: radial-gradient(circle, rgba(255,170,190,0.55) 0%, rgba(255,200,210,0.22) 42%, transparent 70%);
-  z-index: 2;
-}
-.cheek.left { left: 6%; }
-.cheek.right { right: 6%; }
-
-/* ── Voice wave ── */
-.voice-wave {
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: flex-end; align-items: flex-end; -webkit-justify-content: center; justify-content: center;
-  width: 56%; height: 12%; margin-top: auto; padding-bottom: 2%;
-  opacity: 0.18; position: relative; -webkit-flex-shrink: 0; flex-shrink: 0;
-}
-.voice-wave span {
-  width: 10%; margin: 0 1.2%; min-height: 16%; border-radius: 999px;
-  background: #8fd5ff; -webkit-box-shadow: 0 0 8px rgba(125,211,252,0.45); box-shadow: 0 0 8px rgba(125,211,252,0.45);
-  -webkit-transform-origin: center bottom; transform-origin: center bottom;
-  -webkit-animation: wave 1.2s ease-in-out infinite; animation: wave 1.2s ease-in-out infinite;
-  -webkit-animation-play-state: paused; animation-play-state: paused;
-}
-.voice-wave span:nth-child(1) { -webkit-animation-delay: 0s; animation-delay: 0s; }
-.voice-wave span:nth-child(2) { -webkit-animation-delay: 0.1s; animation-delay: 0.1s; }
-.voice-wave span:nth-child(3) { -webkit-animation-delay: 0.2s; animation-delay: 0.2s; }
-.voice-wave span:nth-child(4) { -webkit-animation-delay: 0.32s; animation-delay: 0.32s; }
-.voice-wave span:nth-child(5) { -webkit-animation-delay: 0.44s; animation-delay: 0.44s; }
-@-webkit-keyframes wave {
-  0%,100% { -webkit-transform: scaleY(0.28); }
-  18%     { -webkit-transform: scaleY(0.55); }
-  38%     { -webkit-transform: scaleY(1.58); }
-  58%     { -webkit-transform: scaleY(0.72); }
-  78%     { -webkit-transform: scaleY(1.12); }
-}
-@keyframes wave {
-  0%,100% { transform: scaleY(0.28); }
-  18%     { transform: scaleY(0.55); }
-  38%     { transform: scaleY(1.58); }
-  58%     { transform: scaleY(0.72); }
-  78%     { transform: scaleY(1.12); }
-}
-.face.awake .voice-wave,
-.face.listening .voice-wave,
-.face.thinking .voice-wave,
-.face.triggered .voice-wave { opacity: 1; }
-.face.awake .voice-wave span,
-.face.listening .voice-wave span,
-.face.thinking .voice-wave span,
-.face.triggered .voice-wave span { -webkit-animation-play-state: running; animation-play-state: running; }
-.face.thinking .voice-wave span { -webkit-animation-duration: 1.45s; animation-duration: 1.45s; }
-.face.speaking .voice-wave span { -webkit-animation-play-state: running; animation-play-state: running; -webkit-animation-duration: 0.55s; animation-duration: 0.55s; }
-.face.speaking .voice-wave { opacity: 1; }
-.face.paused .voice-wave span { background: #fca5a5; -webkit-box-shadow: none; box-shadow: none; }
-
-/* ── Sparkles ── */
-.face-sparkles { position:absolute; top:0;left:0;right:0;bottom:0; pointer-events:none; z-index:10; overflow:visible; }
-.sp {
-  position: absolute; font-size: 0.6rem; line-height: 1;
-  color: #f5d0fe; opacity: 0;
-  text-shadow: 0 0 8px #c084fc, 0 0 18px rgba(192,132,252,0.45);
-  -webkit-animation: sparkle-float 4.2s ease-in-out infinite; animation: sparkle-float 4.2s ease-in-out infinite;
-}
-.sp1 { top:3%;  left:9%;  -webkit-animation-delay:0s; animation-delay:0s; }
-.sp2 { top:7%;  right:11%; font-size:0.45rem; -webkit-animation-delay:1.05s; animation-delay:1.05s; }
-.sp3 { top:1%;  left:52%; -webkit-animation-delay:2.1s; animation-delay:2.1s; }
-.sp4 { top:11%; right:5%; font-size:0.42rem; -webkit-animation-delay:0.62s; animation-delay:0.62s; }
-@-webkit-keyframes sparkle-float {
-  0%,100% { opacity:0;    -webkit-transform: translateY(0)    rotate(0deg)  scale(0.5); }
-  25%,75% { opacity:0.92; -webkit-transform: translateY(-9px)  rotate(22deg) scale(1); }
-  50%     { opacity:0.6;  -webkit-transform: translateY(-16px) rotate(44deg) scale(0.82); }
-}
-@keyframes sparkle-float {
-  0%,100% { opacity:0;    transform: translateY(0)    rotate(0deg)  scale(0.5); }
-  25%,75% { opacity:0.92; transform: translateY(-9px)  rotate(22deg) scale(1); }
-  50%     { opacity:0.6;  transform: translateY(-16px) rotate(44deg) scale(0.82); }
-}
-.face.awake    ~ .face-sparkles .sp { color:#fde68a; text-shadow:0 0 8px #fb923c,0 0 18px rgba(251,146,60,0.4); -webkit-animation-duration:2.2s; animation-duration:2.2s; }
-.face.thinking ~ .face-sparkles .sp { color:#e879f9; text-shadow:0 0 8px #c084fc,0 0 18px rgba(232,121,249,0.45); -webkit-animation-duration:3s; animation-duration:3s; }
-.face.triggered ~ .face-sparkles .sp { color:#fb923c; text-shadow:0 0 8px #f97316,0 0 18px rgba(249,115,22,0.4); -webkit-animation-duration:1.6s; animation-duration:1.6s; }
-.face.paused ~ .face-sparkles .sp,
-.face.sleeping ~ .face-sparkles .sp { -webkit-animation:none!important; animation:none!important; opacity:0!important; }
-
-/* ── State expressions ── */
-@-webkit-keyframes lip-soft {
-  0%,100% { -webkit-transform: translateX(-50%) scale(1,1); }
-  28%     { -webkit-transform: translateX(-50%) scale(1.03,1.05); }
-  48%     { -webkit-transform: translateX(-50%) scale(1.08,1.14); }
-  72%     { -webkit-transform: translateX(-50%) scale(1.02,1.04); }
-}
-@keyframes lip-soft {
-  0%,100% { transform: translateX(-50%) scale(1,1); }
-  28%     { transform: translateX(-50%) scale(1.03,1.05); }
-  48%     { transform: translateX(-50%) scale(1.08,1.14); }
-  72%     { transform: translateX(-50%) scale(1.02,1.04); }
-}
-@-webkit-keyframes lip-think {
-  0%,100% { -webkit-transform: translateX(-50%) scale(1,1); opacity:0.9; }
-  45%     { -webkit-transform: translateX(-50%) scale(0.9,0.93); opacity:1; }
-  70%     { -webkit-transform: translateX(-50%) scale(0.95,0.98); opacity:0.94; }
-}
-@keyframes lip-think {
-  0%,100% { transform: translateX(-50%) scale(1,1); opacity:0.9; }
-  45%     { transform: translateX(-50%) scale(0.9,0.93); opacity:1; }
-  70%     { transform: translateX(-50%) scale(0.95,0.98); opacity:0.94; }
-}
-@-webkit-keyframes eye-glow {
-  0%,100% { opacity:1;    -webkit-transform:translate(-50%,-50%) scale(1); }
-  32%     { opacity:0.78; -webkit-transform:translate(-50%,-50%) scale(0.91); }
-  55%     { opacity:0.68; -webkit-transform:translate(-50%,-50%) scale(0.85); }
-  82%     { opacity:0.92; -webkit-transform:translate(-50%,-50%) scale(0.96); }
-}
-@keyframes eye-glow {
-  0%,100% { opacity:1;    transform:translate(-50%,-50%) scale(1); }
-  32%     { opacity:0.78; transform:translate(-50%,-50%) scale(0.91); }
-  55%     { opacity:0.68; transform:translate(-50%,-50%) scale(0.85); }
-  82%     { opacity:0.92; transform:translate(-50%,-50%) scale(0.96); }
-}
-@-webkit-keyframes eye-glow-think {
-  0%,100% { opacity:1;    -webkit-transform:translate(-46%,-50%) scale(1); }
-  35%     { opacity:0.8;  -webkit-transform:translate(-46%,-50%) scale(0.9); }
-  60%     { opacity:0.72; -webkit-transform:translate(-46%,-50%) scale(0.84); }
-  85%     { opacity:0.88; -webkit-transform:translate(-46%,-50%) scale(0.94); }
-}
-@keyframes eye-glow-think {
-  0%,100% { opacity:1;    transform:translate(-46%,-50%) scale(1); }
-  35%     { opacity:0.8;  transform:translate(-46%,-50%) scale(0.9); }
-  60%     { opacity:0.72; transform:translate(-46%,-50%) scale(0.84); }
-  85%     { opacity:0.88; transform:translate(-46%,-50%) scale(0.94); }
-}
-@-webkit-keyframes eye-sparkle {
-  0%,100% { -webkit-transform:scale(1); opacity:1; }
-  38%     { -webkit-transform:scale(1.12); opacity:0.88; }
-  62%     { -webkit-transform:scale(1.04); opacity:0.95; }
-}
-@keyframes eye-sparkle {
-  0%,100% { transform:scale(1); opacity:1; }
-  38%     { transform:scale(1.12); opacity:0.88; }
-  62%     { transform:scale(1.04); opacity:0.95; }
-}
-@-webkit-keyframes eye-scan {
-  0%,100% { -webkit-transform:translate(-50%,-50%); }
-  22%     { -webkit-transform:translate(-55%,-51%); }
-  48%     { -webkit-transform:translate(-42%,-49%); }
-  72%     { -webkit-transform:translate(-56%,-50%); }
-}
-@keyframes eye-scan {
-  0%,100% { transform:translate(-50%,-50%); }
-  22%     { transform:translate(-55%,-51%); }
-  48%     { transform:translate(-42%,-49%); }
-  72%     { transform:translate(-56%,-50%); }
-}
-@-webkit-keyframes cheek-pulse { 0%,100%{opacity:0.65} 50%{opacity:1} }
-@keyframes cheek-pulse { 0%,100%{opacity:0.65} 50%{opacity:1} }
-
-.face.listening .mouth, .face.awake .mouth {
-  width: 36%; top: 70.5%; height: 21px;
-  /* no lip animation when listening — lips only move when actually speaking */
-}
-.face.listening .eye:after { -webkit-animation: eye-glow 1.4s ease-in-out infinite; animation: eye-glow 1.4s ease-in-out infinite; }
-.face.listening .eye:before { -webkit-animation: eye-sparkle 2.4s ease-in-out infinite; animation: eye-sparkle 2.4s ease-in-out infinite; }
-.face.listening .cheek { -webkit-animation: cheek-pulse 3.8s ease-in-out infinite; animation: cheek-pulse 3.8s ease-in-out infinite; }
-.face.awake .brow.left  { -webkit-transform: rotate(-8deg) translateY(0); transform: rotate(-8deg) translateY(0); }
-.face.awake .brow.right { -webkit-transform: rotate(8deg) translateY(0); transform: rotate(8deg) translateY(0); }
-.face.awake .eye:after { -webkit-animation: eye-glow 1.05s ease-in-out infinite; animation: eye-glow 1.05s ease-in-out infinite; }
-.face.awake .eye:before { -webkit-animation: eye-sparkle 1.6s ease-in-out infinite; animation: eye-sparkle 1.6s ease-in-out infinite; }
-.face.awake .cheek { -webkit-animation: cheek-pulse 1.5s ease-in-out infinite; animation: cheek-pulse 1.5s ease-in-out infinite; }
-/* .face.awake .mouth — no lip animation; overridden above */
-.face.thinking .eye:after { top:46%; left:52%; -webkit-animation: eye-glow-think 2.2s ease-in-out infinite; animation: eye-glow-think 2.2s ease-in-out infinite; }
-.face.thinking .brow.left  { -webkit-transform: rotate(-5deg) translateY(0); transform: rotate(-5deg) translateY(0); }
-.face.thinking .brow.right { -webkit-transform: rotate(5deg) translateY(0); transform: rotate(5deg) translateY(0); }
-.face.thinking .mouth {
-  width: 32%; height: 13px; top: 71.5%; border-radius: 999px;
-  background: -webkit-linear-gradient(top, rgba(253,242,248,0.5), rgba(236,72,153,0.48));
-  background: linear-gradient(180deg, rgba(253,242,248,0.5), rgba(236,72,153,0.48));
-  -webkit-box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
-  box-shadow: 0 3px 0 0 #9d174d, inset 0 1px 4px rgba(255,255,255,0.35);
-  /* no lip animation while thinking */
-}
-.face.thinking .eye:before { -webkit-animation: eye-sparkle 3.4s ease-in-out infinite; animation: eye-sparkle 3.4s ease-in-out infinite; }
-.face.thinking .cheek { -webkit-animation: cheek-pulse 3s ease-in-out infinite; animation: cheek-pulse 3s ease-in-out infinite; }
-.face.triggered .mouth {
-  width: 20%; height: 18%; border-radius: 50%; top: 69%;
-  border: 3px solid #f472b6;
-  background: -webkit-radial-gradient(40% 35%, rgba(255,255,255,0.35), rgba(251,113,133,0.45));
-  background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.35), rgba(251,113,133,0.45));
-  -webkit-box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
-  box-shadow: 0 4px 0 0 #be185d, inset 0 2px 8px rgba(255,255,255,0.25);
-  /* no lip animation for triggered */
-}
-.face.triggered .eye:after { -webkit-animation: eye-glow 0.6s ease-in-out infinite; animation: eye-glow 0.6s ease-in-out infinite; }
-.face.triggered .eye:before { -webkit-animation: eye-sparkle 1.1s ease-in-out infinite; animation: eye-sparkle 1.1s ease-in-out infinite; }
-.face.speaking .mouth { -webkit-animation: lip-soft 0.32s ease-in-out infinite; animation: lip-soft 0.32s ease-in-out infinite; }
-.face.speaking .eye { -webkit-animation: none; animation: none; -webkit-transform: scaleY(1); transform: scaleY(1); }
-.face.speaking .eye:after { -webkit-animation: eye-glow 1.8s ease-in-out infinite; animation: eye-glow 1.8s ease-in-out infinite; }
-.face.paused .eye { -webkit-transform: none; transform: none; -webkit-animation: none; animation: none; }
-.face.paused .eye:before, .face.paused .eye:after { -webkit-animation: none !important; animation: none !important; }
-.face.paused .eye-lashes { opacity: 0.38; -webkit-filter: saturate(0.85); filter: saturate(0.85); }
-.face.paused .head { -webkit-filter: saturate(0.82) brightness(0.96); filter: saturate(0.82) brightness(0.96); }
-.face.paused .eye:after { background: #5a3a40; }
-.face.paused .mouth {
-  width: 30%; height: 12px; border-radius: 999px; top: 74%;
-  background: -webkit-linear-gradient(top, rgba(80,50,58,0.5), rgba(120,60,72,0.65));
-  background: linear-gradient(180deg, rgba(80,50,58,0.5), rgba(120,60,72,0.65));
-  -webkit-box-shadow: 0 -3px 0 0 rgba(120,60,72,0.95), inset 0 2px 4px rgba(0,0,0,0.15);
-  box-shadow: 0 -3px 0 0 rgba(120,60,72,0.95), inset 0 2px 4px rgba(0,0,0,0.15);
-  -webkit-animation: none !important; animation: none !important;
-}
-.face.paused .cheek { opacity: 0.3; }
-@-webkit-keyframes sleep-breathe { 0%,100%{opacity:1} 50%{opacity:0.7} }
-@keyframes sleep-breathe { 0%,100%{opacity:1} 50%{opacity:0.7} }
-.face.sleeping {
-  -webkit-filter: saturate(0.2) brightness(0.55); filter: saturate(0.2) brightness(0.55);
-  -webkit-transition: filter 0.8s ease; transition: filter 0.8s ease;
-}
-.face.sleeping .eye {
-  -webkit-transform: scaleY(0.18); transform: scaleY(0.18);
-  -webkit-transition: transform 0.6s ease; transition: transform 0.6s ease;
-  -webkit-animation: none !important; animation: none !important;
-}
-.face.sleeping .eye:before, .face.sleeping .eye:after { -webkit-animation: none !important; animation: none !important; opacity: 0 !important; }
-.face.sleeping .mouth { width:16%; height:7px; border-radius:2px; top:69.5%; opacity:0.35; -webkit-animation:none!important; animation:none!important; }
-.face.sleeping .cheek { opacity:0.15; -webkit-animation:none!important; animation:none!important; }
-.face.sleeping .voice-wave { opacity:0!important; }
-.face.awake, .face.thinking, .face.triggered, .face.listening { -webkit-transition: filter 0.6s ease; transition: filter 0.6s ease; }
-.face.awake .eye, .face.thinking .eye, .face.triggered .eye { -webkit-transition: transform 0.5s ease; transition: transform 0.5s ease; }
-
-/* ── Bottom nav ── */
-.pinky-nav {
-  display: -webkit-flex; display: flex; border-top: 1px solid #24243a;
-  -webkit-flex-shrink: 0; flex-shrink: 0; background: rgba(0,0,0,0.35);
-}
-.pinky-nav-item {
-  -webkit-flex: 1; flex: 1; padding: 10px 0 14px;
-  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; gap: 3px;
-  cursor: pointer; opacity: 0.45; -webkit-transition: opacity 0.2s; transition: opacity 0.2s;
-  border: none; background: none; color: #e8e8f4;
-  font-size: 0.62rem; letter-spacing: 0.3px;
-  min-height: 56px; -webkit-justify-content: center; justify-content: center;
-}
-.pinky-nav-item:hover { opacity: 0.75; }
-.pinky-nav-item.active { opacity: 1; color: #c084fc; }
-.pinky-nav-ic { font-size: 1.2rem; line-height: 1; }
-
-/* ── Camera panel ── */
-.camera-area {
-  display: none; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; overflow: hidden; gap: 0;
-}
-.camera-area.open {
-  display: -webkit-flex; display: flex;
-  -webkit-flex: 1; flex: 1;
-}
-.cam-feed-wrap {
-  position: relative; width: 100%; max-width: 640px; -webkit-flex-shrink: 0; flex-shrink: 0;
-  background: #000; overflow: hidden;
-}
-.cam-feed-wrap img { width: 100%; height: auto; display: none; }
-.cam-feed-wrap img.visible { display: block; }
-.cam-offline {
-  min-height: 180px;
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  font-size: 0.88rem; color: #666683; background: rgba(0,0,0,0.6);
-}
-.cam-toolbar {
-  width: 100%; max-width: 640px; padding: 5px 10px;
-  display: -webkit-flex; display: flex;
-  -webkit-justify-content: space-between; justify-content: space-between;
-  -webkit-align-items: center; align-items: center;
-  border-bottom: 1px solid #24243a; background: rgba(0,0,0,0.2);
-}
-.cam-detect-feed {
-  -webkit-flex: 1; flex: 1; overflow-y: auto; width: 100%; max-width: 640px; padding: 8px 12px;
-}
-.cam-detect-feed::-webkit-scrollbar { width: 3px; }
-.cam-detect-feed::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
-.det-row {
-  display: -webkit-flex; display: flex; -webkit-align-items: baseline; align-items: baseline; gap: 8px;
-  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
-  font-size: 0.78rem; color: #666683;
-}
-.det-row .det-time { -webkit-flex-shrink: 0; flex-shrink: 0; font-size: 0.68rem; color: #444466; }
-.det-row .det-body { -webkit-flex: 1; flex: 1; color: #e8e8f4; }
-.det-chip {
-  display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 0.7rem; margin: 0 2px;
-}
-.det-chip.person  { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
-.det-chip.gesture { background: rgba(192,132,252,0.15); color: #c084fc; border: 1px solid rgba(192,132,252,0.3); }
-.det-chip.object  { background: rgba(251,191,36,0.13); color: #fbbf24; border: 1px solid rgba(251,191,36,0.28); }
-
-/* ── Darts panel ── */
-.darts-area {
-  display: none; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center; overflow: hidden; gap: 0;
-}
-.darts-area.open {
-  display: -webkit-flex; display: flex;
-  -webkit-flex: 1; flex: 1;
-}
-.darts-toolbar {
-  width: 100%; max-width: 640px; padding: 6px 10px;
-  display: -webkit-flex; display: flex;
-  -webkit-justify-content: center; justify-content: center; -webkit-align-items: center; align-items: center; gap: 8px;
-  border-bottom: 1px solid #24243a; background: rgba(0,0,0,0.2); -webkit-flex-shrink: 0; flex-shrink: 0;
-}
-.darts-btn {
-  padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;
-  border: 1px solid #24243a; background: rgba(255,255,255,0.05); color: #e8e8f4;
-  -webkit-transition: background 0.15s; transition: background 0.15s;
-  min-height: 44px;
-}
-.darts-btn:hover  { background: rgba(255,255,255,0.1); }
-.darts-btn:disabled { opacity: 0.5; cursor: default; }
-.darts-btn.speak-btn { border-color: rgba(192,132,252,0.45); color: #c084fc; }
-.darts-btn.cal-btn   { border-color: rgba(251,191,36,0.45); color: #fbbf24; }
-.darts-btn.next-btn  { border-color: rgba(74,222,128,0.45); color: #4ade80; }
-.darts-btn.new-btn   { border-color: rgba(248,113,113,0.4); color: #f87171; }
-.darts-btn.next-btn.awaiting {
-  background: rgba(74,222,128,0.18); font-weight: 700;
-  -webkit-animation: pulse-green 1.1s ease-in-out infinite; animation: pulse-green 1.1s ease-in-out infinite;
-}
-@-webkit-keyframes pulse-green {
-  0%,100% { -webkit-box-shadow: 0 0 6px rgba(74,222,128,0.25); }
-  50%     { -webkit-box-shadow: 0 0 18px rgba(74,222,128,0.55); }
-}
-@keyframes pulse-green {
-  0%,100% { box-shadow: 0 0 6px rgba(74,222,128,0.25); }
-  50%     { box-shadow: 0 0 18px rgba(74,222,128,0.55); }
-}
-.darts-gamebar {
-  width: 100%; max-width: 640px; -webkit-flex-shrink: 0; flex-shrink: 0;
-  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px;
-  padding: 7px 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #24243a;
-}
-.dgb-player { font-size: 1rem; font-weight: 800; color: #c084fc; min-width: 26px; }
-.dgb-dots   { -webkit-flex: 1; flex: 1; font-size: 1.15rem; letter-spacing: 3px; }
-.dgb-score  { font-size: 1rem; font-weight: 700; color: #fbbf24; }
-.darts-top-row {
-  display: -webkit-flex; display: flex; -webkit-flex-direction: row; flex-direction: row; -webkit-align-items: flex-start; align-items: flex-start;
-  width: 100%; max-width: 860px; gap: 0; -webkit-flex-shrink: 0; flex-shrink: 0;
-}
-.darts-leaderboard {
-  -webkit-flex: 1; flex: 1; min-width: 130px; max-width: 190px; -webkit-flex-shrink: 0; flex-shrink: 0;
-  padding: 6px 8px; -webkit-align-self: stretch; align-self: stretch;
-  background: rgba(255,255,255,0.03);
-  border-left: 1px solid rgba(255,255,255,0.07);
-  border-radius: 0 8px 8px 0; overflow-y: auto;
-}
-.dart-lb-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; padding: 4px 0 3px; }
-.dart-lb-empty { font-size: 0.7rem; color: #475569; padding: 6px 2px; text-align: center; }
-.dart-lb-row {
-  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 6px;
-  padding: 5px 6px; border-radius: 8px; margin-bottom: 4px;
-  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.05);
-  -webkit-flex-wrap: wrap; flex-wrap: wrap;
-}
-.dart-lb-row.lb-active { border-color: rgba(192,132,252,0.35); background: rgba(192,132,252,0.06); }
-.dart-lb-player { font-size: 0.85rem; font-weight: 800; color: #c084fc; min-width: 22px; }
-.dart-lb-turns  { font-size: 0.65rem; color: #64748b; -webkit-flex: 1; flex: 1; }
-.dart-lb-shots  { font-size: 0.65rem; color: #94a3b8; width: 100%; padding-left: 2px; }
-.dart-lb-total  { font-size: 1rem; font-weight: 800; text-align: right; }
-.darts-hit-layer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
-.dart-hit-dot {
-  position: absolute;
-  width: 28px; height: 28px; border-radius: 50%;
-  -webkit-transform: translate(-50%,-50%); transform: translate(-50%,-50%);
-  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
-  font-size: 0.6rem; font-weight: 800; color: #fff;
-  border: 2px solid rgba(255,255,255,0.8);
-  -webkit-box-shadow: 0 0 10px rgba(0,0,0,0.7); box-shadow: 0 0 10px rgba(0,0,0,0.7);
-  -webkit-animation: dart-land 0.28s ease; animation: dart-land 0.28s ease;
-  pointer-events: none;
-}
-@-webkit-keyframes dart-land {
-  0%   { -webkit-transform: translate(-50%,-50%) scale(0.2); opacity: 0.5; }
-  70%  { -webkit-transform: translate(-50%,-50%) scale(1.18); }
-  100% { -webkit-transform: translate(-50%,-50%) scale(1); opacity: 1; }
-}
-@keyframes dart-land {
-  0%   { transform: translate(-50%,-50%) scale(0.2); opacity: 0.5; }
-  70%  { transform: translate(-50%,-50%) scale(1.18); }
-  100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
-}
-.dart-score-badge {
-  position: absolute; top: -16px; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%);
-  background: rgba(0,0,0,0.75); color: #fff; font-size: 0.58rem; font-weight: 700;
-  padding: 1px 5px; border-radius: 4px; white-space: nowrap;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-.darts-score-list {
-  width: 100%; max-width: 640px; -webkit-flex: 1; flex: 1; overflow-y: auto;
-  padding: 8px 14px; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; gap: 4px;
-}
-.darts-score-list::-webkit-scrollbar { width: 3px; }
-.darts-score-list::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
-.dart-score-row {
-  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; gap: 10px;
-  padding: 5px 8px; border-radius: 8px;
-  background: rgba(255,255,255,0.04); border: 1px solid #24243a;
-  font-size: 0.82rem;
-}
-.dart-score-num   { font-size: 1.1rem; font-weight: 800; min-width: 38px; text-align: center; }
-.dart-score-label { -webkit-flex: 1; flex: 1; color: #666683; }
-.dart-score-pos   { font-size: 0.7rem; color: #64748b; font-family: monospace; }
-
-/* ── Log panel ── */
-.log-area {
-  overflow-y: auto; padding: 0; display: none; -webkit-flex-direction: column; flex-direction: column; width: 100%;
-}
-.log-area.open {
-  display: -webkit-flex; display: flex;
-  -webkit-flex: 1; flex: 1;
-}
-.log-area::-webkit-scrollbar { width: 4px; }
-.log-area::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
-.log-toolbar {
-  -webkit-flex-shrink: 0; flex-shrink: 0; padding: 8px 20px; border-bottom: 1px solid #24243a;
-  display: -webkit-flex; display: flex; -webkit-justify-content: space-between; justify-content: space-between; -webkit-align-items: center; align-items: center;
-  background: rgba(0,0,0,0.25); font-size: 0.8rem; color: #666683;
-}
-.log-clear-btn {
-  font-size: 0.75rem; padding: 6px 12px; border-radius: 6px; cursor: pointer;
-  background: rgba(255,255,255,0.05); border: 1px solid #24243a; color: #666683;
-  min-height: 36px;
-}
-.log-clear-btn:hover { background: rgba(255,255,255,0.1); }
-.log-entries {
-  -webkit-flex: 1; flex: 1; overflow-y: auto; padding: 0;
-  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; gap: 0;
-  width: 100%;
-}
-.log-entries::-webkit-scrollbar { width: 4px; }
-.log-entries::-webkit-scrollbar-thumb { background: #24243a; border-radius: 2px; }
-.log-entry {
-  padding: 10px 16px 8px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  display: -webkit-flex; display: flex; gap: 12px; -webkit-align-items: flex-start; align-items: flex-start;
-  border-left: 3px solid transparent;
-  width: 100%;
-}
-.log-entry:hover { background: rgba(255,255,255,0.02); }
-.log-entry.log-stt   { background: rgba(147,197,253,0.04); }
-.log-entry.log-pinku { background: rgba(192,132,252,0.04); }
-.log-entry.log-error { background: rgba(248,113,113,0.05); }
-.log-icon { font-size: 1.15rem; -webkit-flex-shrink: 0; flex-shrink: 0; width: 26px; text-align: center; line-height: 1.5; }
-.log-body { -webkit-flex: 1; flex: 1; min-width: 0; }
-.log-msg  { display: block; font-size: 1rem; line-height: 1.5; word-break: break-word; color: #c8ccdc; }
-.log-entry.log-stt   .log-msg { color: #bfdbfe; font-weight: 500; font-size: 1.05rem; }
-.log-entry.log-pinku .log-msg { color: #e9d5ff; font-weight: 500; font-size: 1.05rem; }
-.log-entry.log-error .log-msg { color: #fca5a5; }
-.log-entry.log-warn  .log-msg { color: #fde68a; }
-.log-entry.log-wake  .log-msg { color: #fde68a; }
-.log-ts { display: block; font-size: 0.7rem; color: #44475a; margin-top: 3px; font-family: 'SF Mono','Menlo','Consolas',monospace; }
-
-/* ── Enroll panel ── */
-.enroll-area {
-  display: none; -webkit-flex-direction: column; flex-direction: column;
-  -webkit-align-items: center; align-items: center;
-  gap: 16px; padding: 20px 16px; overflow-y: auto;
-}
-.enroll-area.open {
-  display: -webkit-flex; display: flex;
-  -webkit-flex: 1; flex: 1;
-}
-.enroll-card {
-  width: 100%; max-width: 480px;
-  background: rgba(255,255,255,0.04); border: 1px solid #24243a;
-  border-radius: 16px; padding: 16px;
-  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; gap: 10px;
-}
-.enroll-title { font-size: 1rem; font-weight: 700; color: #c084fc; }
-.enroll-empty { font-size: 0.82rem; color: #64748b; padding: 4px 0; }
-.enroll-hint  { font-size: 0.8rem; color: #64748b; line-height: 1.45; }
-.enroll-profile-row {
-  display: -webkit-flex; display: flex;
-  -webkit-align-items: center; align-items: center;
-  gap: 10px; padding: 8px 10px; border-radius: 10px;
-  background: rgba(192,132,252,0.07); border: 1px solid rgba(192,132,252,0.2);
-}
-.enroll-profile-name { -webkit-flex: 1; flex: 1; font-size: 0.92rem; color: #e8e8f4; }
-.enroll-del-btn {
-  padding: 4px 10px; border-radius: 8px; font-size: 0.78rem; cursor: pointer;
-  border: 1px solid rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); color: #f87171;
-  min-height: 32px;
-}
-.enroll-del-btn:hover { background: rgba(248,113,113,0.18); }
-.enroll-input {
-  width: 100%; padding: 10px 14px; border-radius: 10px; font-size: 0.95rem;
-  border: 1px solid #24243a; background: rgba(255,255,255,0.06); color: #e8e8f4;
-  outline: none; -webkit-appearance: none;
-}
-.enroll-input:focus { border-color: rgba(192,132,252,0.5); }
-.enroll-input:disabled { opacity: 0.5; }
-.enroll-rec-btn {
-  width: 100%; padding: 13px; border-radius: 12px; font-size: 1rem; font-weight: 700;
-  cursor: pointer; border: 2px solid rgba(192,132,252,0.5);
-  background: rgba(192,132,252,0.12); color: #c084fc;
-  -webkit-transition: background 0.18s; transition: background 0.18s;
-  min-height: 52px;
-}
-.enroll-rec-btn:hover:not(:disabled) { background: rgba(192,132,252,0.22); }
-.enroll-rec-btn.recording {
-  border-color: rgba(248,113,113,0.7); color: #f87171; background: rgba(248,113,113,0.12);
-  -webkit-animation: rec-pulse 1s ease-in-out infinite; animation: rec-pulse 1s ease-in-out infinite;
-}
-.enroll-rec-btn:disabled { opacity: 0.5; cursor: default; }
-@-webkit-keyframes rec-pulse {
-  0%,100% { -webkit-box-shadow: 0 0 6px rgba(248,113,113,0.2); }
-  50%     { -webkit-box-shadow: 0 0 18px rgba(248,113,113,0.55); }
-}
-@keyframes rec-pulse {
-  0%,100% { box-shadow: 0 0 6px rgba(248,113,113,0.2); }
-  50%     { box-shadow: 0 0 18px rgba(248,113,113,0.55); }
-}
-.enroll-msg { font-size: 0.82rem; color: #4ade80; padding: 4px 0; text-align: center; }
-.enroll-msg.error { color: #f87171; }
-.enroll-level-wrap { margin-top: 10px; }
-.enroll-level-bar {
-  height: 10px; border-radius: 5px; min-width: 4px;
-  background: rgba(248,113,113,0.5);
-  transition: width 0.1s ease, background 0.2s;
-}
-.enroll-level-bar.active { background: #4ade80; }
-.enroll-level-hint { font-size: 0.75rem; color: #f87171; margin-top: 4px; text-align: center; }
+/* ──── VOICES OVERLAY ──── */
+#voices-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: flex-end;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s;
+}
+#voices-overlay.open { opacity: 1; pointer-events: auto; }
+#voices-panel {
+  width: 100%; max-height: 55vh;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; padding: 24px 32px 40px;
+  overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+}
+#voices-overlay.open #voices-panel { transform: none; }
+.panel-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 18px;
+}
+.panel-ttl {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.panel-x {
+  background: none; border: none; color: var(--muted);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.panel-x:hover { color: var(--text); }
+.enroll-row { display: flex; gap: 9px; margin-bottom: 10px; }
+.enroll-row input {
+  flex: 1; height: 38px; padding: 0 13px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text);
+  font-size: 13px; outline: none;
+}
+.enroll-row input:focus { border-color: var(--accent); }
+.enroll-row input::placeholder { color: var(--muted); }
+#enroll-btn {
+  height: 38px; padding: 0 18px; border-radius: 8px;
+  background: var(--adim); border: 1px solid rgba(245,158,11,0.3);
+  color: var(--accent); font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+#enroll-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+#mic-wrap { height: 2px; background: var(--border); border-radius: 2px; margin-bottom: 10px; overflow: hidden; }
+#mic-bar  { height: 100%; width: 0%; background: var(--green); border-radius: 2px; transition: width 0.08s; }
+#enroll-msg { font-size: 12px; color: var(--muted); min-height: 14px; margin-bottom: 14px; }
+#profile-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 10px 5px 12px; font-size: 12px;
+}
+.chip-del {
+  background: none; border: none; color: var(--muted);
+  font-size: 15px; cursor: pointer; line-height: 1; padding: 0 2px;
+}
+.chip-del:hover { color: var(--red); }
 </style>
 </head>
 <body>
-<div id="root"></div>
 
-<script type="text/babel">
-// ── Constants ──────────────────────────────────────────────────────────────────
-const STATE_UI = {
-  sleeping:  { icon:'💤', label:'Sleeping',    sub:'Face or "Pinku" to wake' },
-  awake:     { icon:'👂', label:'Listening',   sub:'Go ahead, I\'m listening…' },
-  thinking:  { icon:'⚡', label:'Thinking…',   sub:'Sending to Gemini' },
-  speaking:  { icon:'🗣️', label:'Speaking…',   sub:'Tap ⏸ to stop' },
-  paused:    { icon:'🔇', label:'Muted',       sub:'Tap 🎙️ or wave to unmute' },
-  triggered: { icon:'⚡', label:'Working…',    sub:'Running your command' },
-};
+<header id="topbar">
+  <div class="status-cluster">
+    <span class="dot idle" id="dot"></span>
+    <span id="state-lbl">IDLE</span>
+  </div>
+  <div class="brand">Pinku</div>
+  <div class="ctrls">
+    <button class="btn g" onclick="act('wake')">▶ Wake</button>
+    <button class="btn b" onclick="act('sleep')">⏸ Sleep</button>
+    <button class="btn" id="mute-btn" onclick="act('mute_toggle')">Mute</button>
+    <button class="btn a" onclick="toggleVoices()">Voices</button>
+  </div>
+</header>
 
-const LOG_COLORS = {
-  stt:'#93c5fd', wake:'#fbbf24', route:'#a78bfa', chat:'#86efac',
-  tts:'#f9a8d4', camera:'#67e8f9', gesture:'#c084fc', error:'#f87171',
-  warn:'#fbbf24', info:'#64748b', pinku:'#c084fc', laser:'#4ade80', source:'#86efac',
-  you:'#93c5fd', user:'#93c5fd', llm:'#64748b', cam:'#67e8f9',
-};
-const LOG_ICONS = {
-  stt:'🎙️', wake:'⚡', route:'🔀', chat:'💬', tts:'🔊', camera:'📷',
-  gesture:'✋', error:'🔴', warn:'🟡', info:'⚪', pinku:'🤖', laser:'🎯', source:'📖',
-  you:'🧑', user:'🧑', llm:'🤖', cam:'📷',
-};
+<main>
+  <section id="hero">
+    <div id="clock">—</div>
+    <div id="datestr">—</div>
+  </section>
 
-const DART_COLORS = {
-  100: '#ef4444', 75: '#f97316', 50: '#eab308', 25: '#84cc16', 10: '#22d3ee', 0: '#6b7280',
-};
+  <section id="cards">
+    <div class="card">
+      <div class="card-lbl">Nifty 50</div>
+      <div class="card-val" id="n-val">—</div>
+      <div class="card-sub" id="n-chg">—</div>
+    </div>
+    <div class="card">
+      <div class="card-lbl">Bitcoin</div>
+      <div class="card-val" id="b-val">—</div>
+      <div class="card-sub" id="b-chg">—</div>
+    </div>
+    <div class="card">
+      <div class="card-lbl">Gurugram</div>
+      <div class="card-val" id="w-temp">—</div>
+      <div class="card-sub" id="w-cond">—</div>
+    </div>
+  </section>
 
-function dartColor(score) {
-  const keys = [100,75,50,25,10,0];
-  for (const k of keys) { if (score >= k) return DART_COLORS[k]; }
-  return '#6b7280';
+  <section id="feed">
+    <div class="feed-hdr">Recent</div>
+    <div id="feed-list"><div class="feed-empty">Waiting for conversations…</div></div>
+  </section>
+</main>
+
+<!-- Voices slide-up -->
+<div id="voices-overlay" onclick="overlayClick(event)">
+  <div id="voices-panel">
+    <div class="panel-hdr">
+      <span class="panel-ttl">Voice Profiles</span>
+      <button class="panel-x" onclick="toggleVoices()">✕</button>
+    </div>
+    <div class="enroll-row">
+      <input id="enroll-name" type="text" placeholder="Name (e.g. Vivek)" maxlength="30"
+             onkeydown="if(event.key==='Enter')startEnroll()">
+      <button id="enroll-btn" onclick="startEnroll()">⏺ Record 15s</button>
+    </div>
+    <div id="mic-wrap"><div id="mic-bar"></div></div>
+    <div id="enroll-msg"></div>
+    <div id="profile-list"></div>
+  </div>
+</div>
+
+<script>
+// ── Clock ────────────────────────────────────────────────────────────────────
+const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+function tick() {
+  const n = new Date();
+  let h = n.getHours(), m = n.getMinutes(), s = n.getSeconds();
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  document.getElementById('clock').textContent =
+    `${h}:${pad(m)}:${pad(s)} ${ap}`;
+  document.getElementById('datestr').textContent =
+    `${DAYS[n.getDay()]}  ·  ${n.getDate()} ${MONTHS[n.getMonth()]} ${n.getFullYear()}`;
+}
+function pad(x) { return String(x).padStart(2,'0'); }
+tick(); setInterval(tick, 1000);
+
+// ── SSE Status ───────────────────────────────────────────────────────────────
+const dot     = document.getElementById('dot');
+const stateLbl = document.getElementById('state-lbl');
+const muteBtn  = document.getElementById('mute-btn');
+
+function applyStatus(s) {
+  let cls = 'idle', lbl = 'IDLE';
+  if (s.muted)               { cls='muted';   lbl='MUTED'; }
+  else if (s.speaking)       { cls='speaking'; lbl='SPEAKING'; }
+  else if (s.state==='processing') { cls='thinking'; lbl='THINKING'; }
+  else if (s.state==='awake')      { cls='awake';   lbl='LISTENING'; }
+  dot.className = 'dot ' + cls;
+  stateLbl.textContent = lbl;
+  muteBtn.textContent = s.muted ? '🔇 Unmute' : '🔇 Mute';
+  muteBtn.className = 'btn' + (s.muted ? ' r' : '');
 }
 
-function getFaceClass(status, detectFlash) {
-  if (detectFlash) return 'triggered';
-  if (status.muted) return 'paused';
-  if (status.speaking) return 'speaking';
-  const map = {
-    idle:'sleeping', sleeping:'sleeping', awake:'awake',
-    processing:'thinking', speaking:'speaking', muted:'paused', detection:'triggered',
-  };
-  return map[status.state] || 'sleeping';
-}
+const es = new EventSource('/api/stream');
+es.onmessage = e => {
+  try {
+    const d = JSON.parse(e.data);
+    if (d.type === 'status')  applyStatus(d);
+    if (d.type === 'history') pushExchange(d);
+  } catch {}
+};
 
-function apiAction(name) {
+// ── Actions ───────────────────────────────────────────────────────────────────
+function act(name) {
   fetch('/api/action', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({action: name}),
-  }).catch(() => {});
+    body: JSON.stringify({action: name})
+  });
 }
+
+// ── Market data ───────────────────────────────────────────────────────────────
+function fmtINR(n) {
+  if (n == null) return '—';
+  return n.toLocaleString('en-IN', {maximumFractionDigits: 0});
+}
+function fmtUSD(n) {
+  if (n == null) return '—';
+  return '$' + n.toLocaleString('en-US', {maximumFractionDigits: 0});
+}
+function setCard(valId, chgId, price, change, pct, fmt) {
+  document.getElementById(valId).textContent = fmt(price);
+  const el = document.getElementById(chgId);
+  if (price == null) { el.textContent = 'Unavailable'; el.className = 'card-sub'; return; }
+  const up = change >= 0;
+  el.className = 'card-sub ' + (up ? 'up' : 'dn');
+  const arrow = up ? '▲' : '▼';
+  const ac = Math.abs(change), ap = Math.abs(pct);
+  el.textContent = `${arrow} ${fmt === fmtINR
+    ? ac.toFixed(0)
+    : '$'+ac.toLocaleString('en-US',{maximumFractionDigits:0})} (${ap.toFixed(2)}%)`;
+}
+
+async function fetchMarket() {
+  try {
+    const d = await fetch('/api/market').then(r=>r.json());
+    if (d.nifty) setCard('n-val','n-chg', d.nifty.price, d.nifty.change, d.nifty.pct, fmtINR);
+    if (d.btc)   setCard('b-val','b-chg', d.btc.price,   d.btc.change,   d.btc.pct,   fmtUSD);
+  } catch {}
+}
+
+async function fetchWeather() {
+  try {
+    const d = await fetch('/api/weather').then(r=>r.json());
+    document.getElementById('w-temp').textContent = d.temp || '—';
+    const el = document.getElementById('w-cond');
+    el.textContent = d.cond || '—'; el.className = 'card-sub';
+  } catch {}
+}
+
+fetchMarket(); fetchWeather();
+setInterval(fetchMarket, 60000);
+setInterval(fetchWeather, 600000);
+
+// ── Conversation Feed ─────────────────────────────────────────────────────────
+const MAX = 8;
+let convs = [];
+const feedList = document.getElementById('feed-list');
 
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Face component ─────────────────────────────────────────────────────────────
-function Face({ faceClass }) {
-  return React.createElement('div', { className: 'face ' + faceClass },
-    React.createElement('div', { className: 'head' },
-      React.createElement('div', { className: 'hair-side left' }),
-      React.createElement('div', { className: 'hair-side right' }),
-      React.createElement('div', { className: 'hair-fringe' }),
-      React.createElement('div', { className: 'brows' },
-        React.createElement('div', { className: 'brow left' }),
-        React.createElement('div', { className: 'brow right' })
-      ),
-      React.createElement('div', { className: 'eyes' },
-        React.createElement('div', { className: 'eye eye-left' },
-          React.createElement('span', { className: 'eye-lashes' },
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' })
-          )
-        ),
-        React.createElement('div', { className: 'eye eye-right' },
-          React.createElement('span', { className: 'eye-lashes' },
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' }),
-            React.createElement('span', { className: 'lash' })
-          )
-        )
-      ),
-      React.createElement('div', { className: 'nose-bridge' }),
-      React.createElement('div', { className: 'mouth' }),
-      React.createElement('div', { className: 'cheek left' }),
-      React.createElement('div', { className: 'cheek right' })
-    ),
-    React.createElement('div', { className: 'voice-wave' },
-      React.createElement('span'), React.createElement('span'),
-      React.createElement('span'), React.createElement('span'),
-      React.createElement('span')
-    )
-  );
+function renderFeed() {
+  if (!convs.length) {
+    feedList.innerHTML = '<div class="feed-empty">Waiting for conversations…</div>';
+    return;
+  }
+  feedList.innerHTML = convs.slice(-MAX).reverse().map(c => {
+    const ts = (c.ts||'').split(' ')[1]||'';
+    return `<div class="exchange">
+      <div class="ex-user">${esc(c.transcript)}</div>
+      <div class="ex-pinku">${esc(c.reply)}</div>
+      <div class="ex-ts">${ts.substring(0,5)}</div>
+    </div>`;
+  }).join('');
 }
 
-// ── Header ─────────────────────────────────────────────────────────────────────
-function Header({ status, onWake, onPause, onMuteToggle, onSleep, onRestart }) {
-  const faceClass = getFaceClass(status, false);
-  const isMuted = status.muted;
-  const isActive = status.state === 'awake' || status.state === 'processing' || status.speaking;
-
-  // Startup time badge — shows when Pinku last started, e.g. "07:16:42".
-  // Changes on every restart so you can confirm the new code is running.
-  const startLabel = status.start_time_str || '—:——:——';
-
-  function handleRestart() {
-    if (!window.confirm('git pull + restart Pinku?')) return;
-    onRestart();
-  }
-
-  return React.createElement('header', { className: 'header' },
-    React.createElement('div', { className: 'header-left' },
-      React.createElement('div', { className: 'dot-wrap' },
-        React.createElement('div', { className: 'avatar-ring' }, 'P'),
-        React.createElement('div', { className: 'status-dot ' + faceClass })
-      ),
-      React.createElement('div', null,
-        React.createElement('div', { className: 'app-name' }, 'Pinku'),
-        React.createElement('div', { className: 'status-pills' },
-          React.createElement('span', {
-            className: 'spill' + (status.persons > 0 ? ' on' : ''),
-            title: 'Person detected'
-          }, '👤'),
-          React.createElement('span', {
-            className: 'spill' + (isActive ? ' on' : ''),
-            title: 'Session'
-          }, '💬'),
-          React.createElement('span', {
-            className: 'uptime-badge',
-            title: 'Startup time — changes on each restart to confirm new code is running'
-          }, startLabel)
-        )
-      )
-    ),
-    React.createElement('div', { className: 'header-btns' },
-      !isMuted && React.createElement('button', {
-        className: 'hdr-btn stop-btn',
-        title: isActive ? 'Sleep — end conversation, stay listening' : 'Sleep',
-        onClick: onSleep
-      }, '💤'),
-      React.createElement('button', {
-        className: 'hdr-btn mute-btn' + (isMuted ? ' active' : ''),
-        title: isMuted ? 'Unmute — back to standby' : 'Mute — hard off, no listening',
-        onClick: onMuteToggle
-      }, isMuted ? '🎙️' : '🔇'),
-      React.createElement('button', {
-        className: 'hdr-btn restart-btn',
-        title: 'git pull + restart Pinku',
-        onClick: handleRestart
-      }, '↺')
-    )
-  );
+function pushExchange(e) {
+  if (!e.transcript && !e.reply) return;
+  convs.push(e);
+  if (convs.length > 50) convs = convs.slice(-50);
+  renderFeed();
 }
 
-// ── MicMeter ───────────────────────────────────────────────────────────────────
-// Polls /api/mic_level every 80 ms; drives bar heights via requestAnimationFrame.
-function MicMeter({ muted, speaking }) {
-  var N = 8;
-  var barsRef   = React.useRef([]);
-  var levelRef  = React.useRef(0);
-  var smoothRef = React.useRef(0);
-  var frameRef  = React.useRef(null);
-  var tRef      = React.useRef(0);
+fetch('/api/history?limit=20').then(r=>r.json()).then(data => {
+  convs = data; renderFeed();
+}).catch(()=>{});
 
-  // Poll backend for actual mic RMS
-  React.useEffect(function() {
-    var alive = true;
-    function poll() {
-      if (!alive) return;
-      fetch('/api/mic_level')
-        .then(function(r) { return r.json(); })
-        .then(function(d) { levelRef.current = typeof d.level === 'number' ? d.level : 0; })
-        .catch(function(e) { console.warn('[MicMeter] poll error:', e); })
-        .finally(function() { if (alive) setTimeout(poll, 80); });
-    }
-    poll();
-    return function() { alive = false; };
-  }, []);
+// ── Voices ────────────────────────────────────────────────────────────────────
+const overlay = document.getElementById('voices-overlay');
+let voicesOpen = false;
 
-  // RAF animation loop — smooth interpolation + per-bar wave offset
-  React.useEffect(function() {
-    function frame() {
-      tRef.current += 0.09;
-      var t  = tRef.current;
-      var lv = (muted || speaking) ? 0 : levelRef.current;
-      // Smooth toward target level (faster rise 0.40, slower fall 0.78)
-      var alpha_up   = lv > smoothRef.current ? 0.40 : 0.22;
-      smoothRef.current = smoothRef.current * (1 - alpha_up) + lv * alpha_up;
-      var s = smoothRef.current;
-      barsRef.current.forEach(function(bar, i) {
-        if (!bar) return;
-        // Reactive wave: speed and amplitude driven by level
-        var wave     = Math.sin(t * (2.8 + s * 5) + i * 1.05) * 0.5 + 0.5;
-        // Idle pulse: slow breathe so bars are never completely static
-        var idlePulse = Math.sin(t * 1.1 + i * 0.8) * 0.38 + 0.38;
-        var h     = Math.max(2, Math.round(1 + s * 15 * wave + idlePulse));
-        var alpha = (0.28 + s * 0.65 + idlePulse * 0.08).toFixed(2);
-        bar.style.height  = h + 'px';
-        bar.style.opacity = alpha;
-      });
-      frameRef.current = requestAnimationFrame(frame);
-    }
-    frameRef.current = requestAnimationFrame(frame);
-    return function() { cancelAnimationFrame(frameRef.current); };
-  }, [muted, speaking]);
+function toggleVoices() {
+  voicesOpen = !voicesOpen;
+  overlay.classList.toggle('open', voicesOpen);
+  if (voicesOpen) loadProfiles();
+}
+function overlayClick(e) { if (e.target === overlay) toggleVoices(); }
 
-  var bars = [];
-  for (var i = 0; i < N; i++) {
-    (function(idx) {
-      bars.push(React.createElement('div', {
-        key: idx,
-        className: 'mic-bar',
-        ref: function(el) { barsRef.current[idx] = el; }
-      }));
-    })(i);
+async function loadProfiles() {
+  const r = await fetch('/api/enroll/profiles').then(r=>r.json());
+  const el = document.getElementById('profile-list');
+  if (!r.profiles || !r.profiles.length) {
+    el.innerHTML = '<span style="font-size:12px;color:var(--muted)">No voices enrolled yet.</span>';
+    return;
   }
-  return React.createElement('div', { className: 'mic-meter', title: 'Mic level' }, bars);
+  el.innerHTML = r.profiles.map(p =>
+    `<div class="chip">
+      <span>👤 ${esc(p.name)}</span>
+      <span style="color:var(--muted);font-size:10px;margin-left:2px">${p.clips} clip${p.clips!==1?'s':''}</span>
+      <button class="chip-del" onclick="delProfile('${esc(p.name)}')" title="Delete">✕</button>
+    </div>`
+  ).join('');
 }
 
-// ── HomeTab ────────────────────────────────────────────────────────────────────
-function HomeTab({ status, detectFlash, connected, onWake, lastConvTime }) {
-  const faceClass = getFaceClass(status, detectFlash);
-  const ui = STATE_UI[faceClass] || STATE_UI.sleeping;
-  const showBubble = faceClass === 'thinking' || faceClass === 'triggered';
-  const showQuestion = !!status.last_transcript;
-  const showReply = !!status.last_reply;
-  const showPersonBadge = status.persons > 0;
-
-  // Format HH:MM for the conversation timestamp
-  function fmtTime(ts) {
-    if (!ts) return '';
-    var d = new Date(ts);
-    var h = d.getHours(), m = d.getMinutes();
-    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
-  }
-
-  // Dynamic sub text — show question when thinking, reply snippet when speaking
-  var dynamicSub = ui.sub;
-  if (faceClass === 'thinking' && status.last_transcript) {
-    var q = status.last_transcript;
-    dynamicSub = '“' + (q.length > 32 ? q.slice(0, 32) + '…' : q) + '”';
-  } else if (faceClass === 'speaking' && status.last_reply) {
-    var r = status.last_reply;
-    dynamicSub = r.length > 38 ? r.slice(0, 38) + '…' : r;
-  }
-
-  var convTimeLabel = lastConvTime ? fmtTime(lastConvTime) : '';
-
-  return React.createElement('div', { className: 'main-area' },
-    React.createElement('div', { className: 'pinky-stage' },
-      showQuestion && React.createElement('div', { className: 'question-cloud has-text' },
-        React.createElement('span', { className: 'question-cloud-label' },
-          'You said' + (convTimeLabel ? '  ·  ' + convTimeLabel : '')
-        ),
-        React.createElement('span', null, status.last_transcript)
-      ),
-
-      React.createElement('div', { className: 'face-with-actions' },
-        React.createElement('button', {
-          className: 'wake-btn-top',
-          title: 'Tap to speak',
-          onClick: onWake
-        }, '🎙️'),
-
-        React.createElement('div', { className: 'face-wrap ' + faceClass },
-          React.createElement('div', {
-            className: 'face-bubble' + (showBubble ? ' visible' : '') + (faceClass === 'triggered' ? ' triggered' : '')
-          },
-            React.createElement('span', { className: 'bubble-dot d1' }),
-            React.createElement('span', { className: 'bubble-dot d2' }),
-            React.createElement('span', { className: 'bubble-dot d3' })
-          ),
-          React.createElement(Face, { faceClass: faceClass }),
-          React.createElement('div', { className: 'face-sparkles' },
-            React.createElement('span', { className: 'sp sp1' }, '✦'),
-            React.createElement('span', { className: 'sp sp2' }, '✦'),
-            React.createElement('span', { className: 'sp sp3' }, '⋆'),
-            React.createElement('span', { className: 'sp sp4' }, '⋆')
-          )
-        )
-      ),
-
-      showReply && React.createElement('div', { className: 'reply-cloud has-text' },
-        React.createElement('span', { className: 'reply-cloud-label' }, 'Pinku said'),
-        React.createElement('span', { className: 'reply-cloud-body' }, status.last_reply)
-      ),
-
-      React.createElement('div', { className: 'person-badge' + (showPersonBadge ? ' visible' : '') },
-        React.createElement('span', { className: 'person-dot' }),
-        React.createElement('span', null, status.persons > 1 ? status.persons + ' people here' : 'Someone here')
-      ),
-
-      React.createElement('div', { className: 'status-bar ' + faceClass },
-        React.createElement('span', { className: 'status-bar-icon ' + faceClass }, ui.icon),
-        React.createElement('div', { className: 'status-bar-text' },
-          React.createElement('span', { className: 'status-bar-label' }, ui.label),
-          React.createElement('span', { className: 'status-bar-sub' }, dynamicSub)
-        ),
-        React.createElement('div', { className: 'status-bar-right' },
-          React.createElement(MicMeter, { muted: status.muted, speaking: status.speaking }),
-          React.createElement('span', { className: 'ws-dot ' + (connected ? 'on' : 'off') })
-        )
-      )
-    )
-  );
+async function delProfile(name) {
+  if (!confirm(`Delete profile for "${name}"?`)) return;
+  await fetch(`/api/enroll/delete/${encodeURIComponent(name)}`, {method:'DELETE'});
+  loadProfiles();
 }
 
-// ── CameraTab ──────────────────────────────────────────────────────────────────
-function CameraTab({ active, camStatus, detStatus, detections }) {
-  const imgRef = React.useRef(null);
-  const timerRef = React.useRef(null);
-  const [camOnline, setCamOnline] = React.useState(false);
-  const [permBtnText, setPermBtnText] = React.useState('🔓 Permission');
-  const [permBtnDisabled, setPermBtnDisabled] = React.useState(false);
+let enrolling = false, micInterval;
 
-  function refreshCam() {
-    if (!active) return;
-    const tmp = new Image();
-    tmp.onload = function() {
-      if (imgRef.current) {
-        imgRef.current.src = tmp.src;
-        imgRef.current.className = 'visible';
-      }
-      setCamOnline(true);
-      timerRef.current = setTimeout(refreshCam, 200);
-    };
-    tmp.onerror = function() {
-      if (imgRef.current) imgRef.current.className = '';
-      setCamOnline(false);
-      timerRef.current = setTimeout(refreshCam, 2000);
-    };
-    tmp.src = '/api/camera.jpg?t=' + Date.now();
+async function startEnroll() {
+  const name = document.getElementById('enroll-name').value.trim();
+  if (!name) { document.getElementById('enroll-msg').textContent = 'Enter a name first.'; return; }
+  if (enrolling) return;
+  enrolling = true;
+  const btn = document.getElementById('enroll-btn');
+  btn.disabled = true; btn.textContent = '⏺ Recording…';
+  document.getElementById('enroll-msg').textContent = 'Listening — speak naturally for 15 seconds…';
+  document.getElementById('mic-bar').style.width = '0%';
+
+  micInterval = setInterval(async () => {
+    try {
+      const d = await fetch('/api/enroll/level').then(r=>r.json());
+      document.getElementById('mic-bar').style.width = Math.min(d.level*100,100)+'%';
+    } catch {}
+  }, 80);
+
+  try {
+    const d = await fetch('/api/enroll/record', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, seconds:15})
+    }).then(r=>r.json());
+    document.getElementById('enroll-msg').textContent = d.ok
+      ? `✓ Enrolled as "${d.name}" — ${d.clips} clip${d.clips!==1?'s':''}`
+      : '✗ ' + (d.error||'Failed');
+    if (d.ok) { document.getElementById('enroll-name').value = ''; loadProfiles(); }
+  } catch(e) {
+    document.getElementById('enroll-msg').textContent = '✗ ' + e.message;
   }
 
-  React.useEffect(function() {
-    if (active) {
-      refreshCam();
-    }
-    return function() {
-      clearTimeout(timerRef.current);
-    };
-  }, [active]);
-
-  function requestPermission() {
-    setPermBtnText('⏳ Requesting…');
-    setPermBtnDisabled(true);
-    fetch('/api/camera/request-permission').then(function(r) { return r.json(); }).then(function(s) {
-      if (s.ok) {
-        setPermBtnText('✅ Granted!');
-      } else {
-        setPermBtnText('❌ Denied');
-        setPermBtnDisabled(false);
-      }
-      setTimeout(function() { setPermBtnText('🔓 Permission'); setPermBtnDisabled(false); }, 4000);
-    }).catch(function() { setPermBtnText('🔓 Permission'); setPermBtnDisabled(false); });
-  }
-
-  const statusMsg = camStatus && detStatus ? ('Camera: ' + camStatus + ' | Detection: ' + detStatus) : 'Checking…';
-  const offlineMsg = camStatus ? ('📷 Camera: ' + camStatus + ' | Detection: ' + (detStatus || '?')) : '📷 Camera offline or not started';
-
-  return React.createElement('div', { className: 'camera-area open' },
-    React.createElement('div', { className: 'cam-feed-wrap' },
-      React.createElement('img', { ref: imgRef, alt: 'Camera', draggable: false }),
-      !camOnline && React.createElement('div', { className: 'cam-offline' }, offlineMsg)
-    ),
-    React.createElement('div', { className: 'cam-toolbar' },
-      React.createElement('span', { style: { fontSize: '0.72rem', color: '#64748b' } }, statusMsg),
-      React.createElement('button', {
-        className: 'log-clear-btn',
-        onClick: requestPermission,
-        disabled: permBtnDisabled
-      }, permBtnText)
-    ),
-    React.createElement('div', { className: 'cam-detect-feed' },
-      detections.map(function(ev, i) {
-        const ts = (ev.timestamp || '').split(' ')[1] || '';
-        const chips = [];
-        if (ev.persons > 0) chips.push(React.createElement('span', { key: 'p', className: 'det-chip person' }, '👤 ' + (ev.persons === 1 ? 'person' : ev.persons + ' people')));
-        (ev.gestures || []).forEach(function(g, gi) { chips.push(React.createElement('span', { key: 'g'+gi, className: 'det-chip gesture' }, '✋ ' + g.gesture)); });
-        (ev.objects  || []).forEach(function(o, oi) { chips.push(React.createElement('span', { key: 'o'+oi, className: 'det-chip object' }, o.label)); });
-        return React.createElement('div', { key: i, className: 'det-row' },
-          React.createElement('span', { className: 'det-time' }, ts),
-          React.createElement('span', { className: 'det-body' }, chips.length ? chips : 'no detection')
-        );
-      })
-    )
-  );
+  clearInterval(micInterval);
+  document.getElementById('mic-bar').style.width = '0%';
+  btn.disabled = false; btn.textContent = '⏺ Record 15s';
+  enrolling = false;
 }
-
-// ── DartsTab ───────────────────────────────────────────────────────────────────
-function DartsTab({ active, hits, game }) {
-  const imgRef = React.useRef(null);
-  const timerRef = React.useRef(null);
-  const [camOnline, setCamOnline] = React.useState(false);
-  const [speakDisabled, setSpeakDisabled] = React.useState(false);
-  const [calBtnText, setCalBtnText] = React.useState('🎯 Calibrate');
-  const [calDisabled, setCalDisabled] = React.useState(false);
-
-  function refreshDartsCam() {
-    if (!active) return;
-    const tmp = new Image();
-    tmp.onload = function() {
-      if (imgRef.current) {
-        imgRef.current.src = tmp.src;
-        imgRef.current.className = 'visible';
-      }
-      setCamOnline(true);
-      timerRef.current = setTimeout(refreshDartsCam, 200);
-    };
-    tmp.onerror = function() {
-      if (imgRef.current) imgRef.current.className = '';
-      setCamOnline(false);
-      timerRef.current = setTimeout(refreshDartsCam, 2000);
-    };
-    tmp.src = '/api/camera.jpg?annotated=1&t=' + Date.now();
-  }
-
-  React.useEffect(function() {
-    if (active) {
-      refreshDartsCam();
-      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:true})}).catch(function(){});
-    } else {
-      clearTimeout(timerRef.current);
-      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
-    }
-    return function() { clearTimeout(timerRef.current); };
-  }, [active]);
-
-  function handleSpeak() {
-    setSpeakDisabled(true);
-    apiAction('dart_speak');
-    setTimeout(function() { setSpeakDisabled(false); }, 1500);
-  }
-
-  function handleNextPlayer() {
-    apiAction('dart_next_player');
-  }
-
-  function handleCalibrate() {
-    setCalBtnText('⏳ Setting…');
-    setCalDisabled(true);
-    fetch('/api/laser/calibrate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-      .then(function(r) { return r.json(); }).then(function(d) {
-        setCalBtnText(d.ok ? '✅ Set!' : '❌ ' + (d.error || 'Failed'));
-        setTimeout(function() { setCalBtnText('🎯 Calibrate'); setCalDisabled(false); }, 3500);
-      }).catch(function() { setCalBtnText('❌ Error'); setTimeout(function() { setCalBtnText('🎯 Calibrate'); setCalDisabled(false); }, 3500); });
-  }
-
-  function handleNewGame() {
-    if (!window.confirm('Start a new game? This clears all scores.')) return;
-    apiAction('dart_new_game');
-  }
-
-  // Build leaderboard from game.rounds
-  const rounds = (game && game.rounds) || [];
-  const players = {};
-  rounds.forEach(function(r) {
-    if (!players[r.player]) players[r.player] = { turns:0, total:0, lastShots:[] };
-    players[r.player].turns++;
-    players[r.player].total += r.total;
-    players[r.player].lastShots = r.shots || [];
-  });
-  const sortedPlayers = Object.keys(players).sort(function(a,b){ return players[b].total - players[a].total; });
-
-  // Shot dots
-  const shotsDone = (game && game.shots_done) || 0;
-  const shotsTotal = (game && game.shots_total) || 5;
-  const dots = [];
-  for (let i = 0; i < shotsTotal; i++) {
-    dots.push(React.createElement('span', {
-      key: i,
-      style: { color: i < shotsDone ? '#4ade80' : '#334155' }
-    }, i < shotsDone ? '●' : '○'));
-  }
-
-  const awaiting = !!(game && game.awaiting);
-
-  return React.createElement('div', { className: 'darts-area open' },
-    React.createElement('div', { className: 'darts-top-row' },
-      React.createElement('div', { className: 'cam-feed-wrap', style: { flex: 1, position: 'relative' } },
-        React.createElement('img', { ref: imgRef, alt: 'Darts camera', draggable: false }),
-        !camOnline && React.createElement('div', { className: 'cam-offline' }, '📷 Camera offline or not started'),
-        React.createElement('div', { className: 'darts-hit-layer', style: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' } },
-          hits.map(function(hit, i) {
-            const col = dartColor(hit.score);
-            return React.createElement('div', {
-              key: i,
-              className: 'dart-hit-dot',
-              style: {
-                left: (hit.x * 100) + '%',
-                top: (hit.y * 100) + '%',
-                background: col,
-                boxShadow: '0 0 10px ' + col + ', 0 0 20px ' + col + '60'
-              }
-            },
-              React.createElement('span', { className: 'dart-score-badge' },
-                hit.score === 100 ? '🎯' : hit.score === 0 ? '💨' : String(hit.score)
-              )
-            );
-          })
-        )
-      ),
-      React.createElement('div', { className: 'darts-leaderboard' },
-        React.createElement('div', { className: 'dart-lb-title' }, '🏆 Leaderboard'),
-        sortedPlayers.length === 0
-          ? React.createElement('div', { className: 'dart-lb-empty' }, 'No scores yet')
-          : sortedPlayers.map(function(pid) {
-              const p = players[pid];
-              const col = dartColor(p.total / Math.max(1, p.turns));
-              const isActive = game && Number(pid) === game.player;
-              return React.createElement('div', { key: pid, className: 'dart-lb-row' + (isActive ? ' lb-active' : '') },
-                React.createElement('span', { className: 'dart-lb-player' }, 'P' + pid),
-                React.createElement('span', { className: 'dart-lb-turns' }, p.turns + ' turn' + (p.turns > 1 ? 's' : '')),
-                React.createElement('span', { className: 'dart-lb-shots' }, p.lastShots.map(function(s){ return s.score; }).join(' · ')),
-                React.createElement('span', { className: 'dart-lb-total', style: { color: col } }, p.total)
-              );
-            })
-      )
-    ),
-
-    React.createElement('div', { className: 'darts-gamebar' },
-      React.createElement('span', { className: 'dgb-player' }, 'P' + ((game && game.player) || 1)),
-      React.createElement('span', { className: 'dgb-dots' }, dots),
-      React.createElement('span', { className: 'dgb-score' }, ((game && game.turn_total) || 0) + ' pts')
-    ),
-
-    React.createElement('div', { className: 'darts-toolbar' },
-      React.createElement('button', { className: 'darts-btn speak-btn', onClick: handleSpeak, disabled: speakDisabled, title: 'Speak last score' }, '🔊'),
-      React.createElement('button', { className: 'darts-btn next-btn' + (awaiting ? ' awaiting' : ''), onClick: handleNextPlayer },
-        awaiting ? '→ Next Player ⚡' : '→ Next Player'
-      ),
-      React.createElement('button', { className: 'darts-btn cal-btn', onClick: handleCalibrate, disabled: calDisabled }, calBtnText),
-      React.createElement('button', { className: 'darts-btn new-btn', onClick: handleNewGame }, '✕ New Game')
-    ),
-
-    React.createElement('div', { className: 'darts-score-list' },
-      hits.slice().reverse().map(function(hit, i) {
-        const col = dartColor(hit.score);
-        const label = hit.score === 100 ? 'Bullseye!' : hit.score === 0 ? 'Miss' : hit.score + ' pts';
-        return React.createElement('div', { key: i, className: 'dart-score-row' },
-          React.createElement('span', { className: 'dart-score-num', style: { color: col } }, hit.score),
-          React.createElement('span', { className: 'dart-score-label' }, label),
-          React.createElement('span', { className: 'dart-score-pos' }, '(' + ((hit.x||0).toFixed(2)) + ', ' + ((hit.y||0).toFixed(2)) + ')')
-        );
-      })
-    )
-  );
-}
-
-// ── LogTab ─────────────────────────────────────────────────────────────────────
-function LogTab({ logs, onClear }) {
-  return React.createElement('div', { className: 'log-area open' },
-    React.createElement('div', { className: 'log-toolbar' },
-      React.createElement('span', null, 'Live log — newest first'),
-      React.createElement('button', { className: 'log-clear-btn', onClick: onClear }, 'Clear')
-    ),
-    React.createElement('div', { className: 'log-entries' },
-      logs.map(function(entry, i) {
-        const icon = LOG_ICONS[entry.level] || '⚪';
-        const color = LOG_COLORS[entry.level] || '#94a3b8';
-        return React.createElement('div', {
-          key: i,
-          className: 'log-entry log-' + entry.level,
-          style: { borderLeftColor: color }
-        },
-          React.createElement('span', { className: 'log-icon' }, icon),
-          React.createElement('div', { className: 'log-body' },
-            React.createElement('span', { className: 'log-msg' }, entry.msg),
-            React.createElement('span', { className: 'log-ts' }, entry.ts + ' · ' + entry.level)
-          )
-        );
-      })
-    )
-  );
-}
-
-// ── EnrollTab ──────────────────────────────────────────────────────────────────
-// Records via Pinku's own mic on the server — no browser mic needed.
-// Recording the same name multiple times averages the clips together for
-// a more robust profile that better distinguishes family members.
-function EnrollTab() {
-  var [profiles, setProfiles] = React.useState([]);
-  var [name, setName] = React.useState('');
-  var [recState, setRecState] = React.useState('idle'); // idle|recording|done|error
-  var [msg, setMsg] = React.useState('');
-  var [countdown, setCountdown] = React.useState(0);
-  var [micLevel, setMicLevel] = React.useState(0);
-  var cdTimerRef  = React.useRef(null);
-  var levelTimerRef = React.useRef(null);
-
-  function loadProfiles() {
-    fetch('/api/enroll/profiles').then(function(r){ return r.json(); })
-      .then(function(d){ setProfiles(d.profiles || []); }).catch(function(){});
-  }
-  React.useEffect(function(){ loadProfiles(); }, []);
-
-  function startRecording() {
-    var trimmedName = name.trim();
-    if (!trimmedName) { setMsg('Enter a name first'); return; }
-    var SEC = 15;
-    var existing = profiles.find(function(p){ return p.name === trimmedName; });
-    var hint = existing
-      ? 'Adding clip ' + (existing.clips + 1) + ' to "' + trimmedName + '" — speak for ' + SEC + 's…'
-      : 'Speak naturally for ' + SEC + ' seconds…';
-    setRecState('recording'); setMsg(hint);
-    setCountdown(SEC);
-    var cdVal = SEC;
-    clearInterval(cdTimerRef.current);
-    cdTimerRef.current = setInterval(function(){
-      cdVal--;
-      setCountdown(cdVal);
-      if (cdVal <= 0) clearInterval(cdTimerRef.current);
-    }, 1000);
-
-    // Poll mic level from server every 150ms while recording
-    clearInterval(levelTimerRef.current);
-    levelTimerRef.current = setInterval(function(){
-      fetch('/api/enroll/level').then(function(r){ return r.json(); })
-        .then(function(d){ setMicLevel(d.active ? Math.min(d.level, 1.0) : 0); })
-        .catch(function(){ setMicLevel(0); });
-    }, 150);
-
-    fetch('/api/enroll/record', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName, seconds: SEC }),
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      clearInterval(cdTimerRef.current);
-      clearInterval(levelTimerRef.current); setMicLevel(0);
-      if (d.ok) {
-        var clips = d.clips || 1;
-        var doneMsg = clips > 1
-          ? '"' + d.name + '" updated (' + clips + ' clips blended)'
-          : 'Enrolled "' + d.name + '"! Record again to improve accuracy.';
-        setRecState('done'); setMsg(doneMsg);
-        loadProfiles();
-        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 4000);
-      } else {
-        setRecState('error'); setMsg(d.error || 'Failed');
-        setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
-      }
-    }).catch(function(e){
-      clearInterval(cdTimerRef.current);
-      clearInterval(levelTimerRef.current); setMicLevel(0);
-      setRecState('error'); setMsg('Error: ' + e.message);
-      setTimeout(function(){ setRecState('idle'); setMsg(''); }, 5000);
-    });
-  }
-
-  function deleteProfile(pname) {
-    if (!window.confirm('Delete voice profile "' + pname + '"?')) return;
-    fetch('/api/enroll/delete/' + encodeURIComponent(pname), { method: 'DELETE' })
-      .then(function(r){ return r.json(); })
-      .then(function(){ loadProfiles(); }).catch(function(){});
-  }
-
-  var isRecording = recState === 'recording';
-  var existingProfile = profiles.find(function(p){ return p.name === name.trim(); });
-  var btnLabel = isRecording
-    ? ('🔴 Recording… ' + countdown + 's')
-    : recState === 'done' ? '✅ Done!'
-    : existingProfile ? '🎙️ Add clip (' + (existingProfile.clips + 1) + ')'
-    : '🎙️ Record (15s)';
-
-  return React.createElement('div', { className: 'enroll-area open' },
-    React.createElement('div', { className: 'enroll-card' },
-      React.createElement('div', { className: 'enroll-title' }, '🎤 Enrolled Voices'),
-      profiles.length === 0
-        ? React.createElement('div', { className: 'enroll-empty' }, 'No voices enrolled yet')
-        : profiles.map(function(p){
-            var clipsLabel = p.clips > 1 ? (' · ' + p.clips + ' clips') : ' · 1 clip';
-            return React.createElement('div', { key: p.name, className: 'enroll-profile-row' },
-              React.createElement('span', { className: 'enroll-profile-name' }, '👤 ' + p.name),
-              React.createElement('span', { className: 'enroll-profile-clips' }, clipsLabel),
-              React.createElement('button', { className: 'enroll-del-btn', onClick: function(){ deleteProfile(p.name); } }, '✕')
-            );
-          })
-    ),
-    React.createElement('div', { className: 'enroll-card' },
-      React.createElement('div', { className: 'enroll-title' }, 'Add / Improve Voice'),
-      React.createElement('div', { className: 'enroll-hint' },
-        'Pinku records from its own mic (15s). Recording the same name again blends ' +
-        'the new clip in — 3+ clips gives the best accuracy for distinguishing family members.'
-      ),
-      React.createElement('input', {
-        className: 'enroll-input',
-        type: 'text', placeholder: 'Name  (e.g. Vivek, Daughter)',
-        value: name,
-        onChange: function(e){ setName(e.target.value); },
-        disabled: isRecording
-      }),
-      React.createElement('button', {
-        className: 'enroll-rec-btn' + (isRecording ? ' recording' : ''),
-        onClick: startRecording,
-        disabled: isRecording || !name.trim()
-      }, btnLabel),
-      isRecording && React.createElement('div', { className: 'enroll-level-wrap' },
-        React.createElement('div', {
-          className: 'enroll-level-bar' + (micLevel > 0.15 ? ' active' : ''),
-          style: { width: Math.round(micLevel * 100) + '%' }
-        }),
-        micLevel < 0.04 && React.createElement('div', { className: 'enroll-level-hint' },
-          'No audio detected — speak louder or check mic'
-        )
-      ),
-      msg && React.createElement('div', { className: 'enroll-msg' + (recState === 'error' ? ' error' : '') }, msg)
-    )
-  );
-}
-
-// ── NavBar ─────────────────────────────────────────────────────────────────────
-function NavBar({ tab, onTab }) {
-  const tabs = [
-    { id: 'home',   icon: '🏠', label: 'Home' },
-    { id: 'cam',    icon: '📷', label: 'Camera' },
-    { id: 'darts',  icon: '🎯', label: 'Darts' },
-    { id: 'enroll', icon: '🎤', label: 'Voices' },
-    { id: 'log',    icon: '📋', label: 'Log' },
-  ];
-  return React.createElement('nav', { className: 'pinky-nav' },
-    tabs.map(function(t) {
-      return React.createElement('button', {
-        key: t.id,
-        className: 'pinky-nav-item' + (tab === t.id ? ' active' : ''),
-        onClick: function() { onTab(t.id); }
-      },
-        React.createElement('span', { className: 'pinky-nav-ic' }, t.icon),
-        t.label
-      );
-    })
-  );
-}
-
-// ── App ────────────────────────────────────────────────────────────────────────
-function App() {
-  const [tab, setTab] = React.useState('home');
-  const [status, setStatus] = React.useState({
-    state: 'idle', muted: false, speaking: false,
-    last_transcript: '', last_reply: '',
-    cam_status: '', det_status: '',
-    persons: 0,
-  });
-  const [detectFlash, setDetectFlash] = React.useState(false);
-  const [detections, setDetections] = React.useState([]);
-  const [logs, setLogs] = React.useState([]);
-  const [dartHits, setDartHits] = React.useState([]);
-  const [dartGame, setDartGame] = React.useState({ player:1, shots_done:0, shots_total:5, turn_total:0, awaiting:false, rounds:[] });
-  const [connected, setConnected] = React.useState(false);
-  const [lastConvTime, setLastConvTime] = React.useState(0);
-  const [appHeight, setAppHeight] = React.useState(window.innerHeight);
-
-  const detectTimerRef = React.useRef(null);
-  const clearTimerRef  = React.useRef(null);
-  const esRef = React.useRef(null);
-  const statusRef = React.useRef(status);
-  statusRef.current = status;
-
-  // Window height (iOS 9 dvh fix)
-  React.useEffect(function() {
-    function onResize() { setAppHeight(window.innerHeight); }
-    window.addEventListener('resize', onResize);
-    return function() { window.removeEventListener('resize', onResize); };
-  }, []);
-
-  // Auto-clear conversation clouds after 3 minutes of inactivity
-  React.useEffect(function() {
-    if (!(status.last_transcript || status.last_reply)) return;
-    clearTimeout(clearTimerRef.current);
-    clearTimerRef.current = setTimeout(function() {
-      setStatus(function(prev) {
-        return Object.assign({}, prev, { last_transcript: '', last_reply: '' });
-      });
-    }, 3 * 60 * 1000);
-  }, [status.last_transcript, status.last_reply]);
-
-  // Load dart data when switching to darts tab
-  React.useEffect(function() {
-    if (tab === 'darts') {
-      fetch('/api/dart/hits').then(function(r){ return r.json(); }).then(function(hits){ setDartHits(hits); }).catch(function(){});
-      fetch('/api/dart/game').then(function(r){ return r.json(); }).then(function(g){ setDartGame(g); }).catch(function(){});
-    }
-  }, [tab]);
-
-  // SSE connection
-  React.useEffect(function() {
-    function connect() {
-      if (esRef.current) { try { esRef.current.close(); } catch(e) {} esRef.current = null; }
-      var es = new EventSource('/api/stream');
-      esRef.current = es;
-      setConnected(false);
-
-      es.onopen = function() { setConnected(true); };
-      es.onerror = function() {
-        setConnected(false);
-        try { es.close(); } catch(e) {}
-        esRef.current = null;
-        setTimeout(connect, 3000);
-      };
-      es.onmessage = function(e) {
-        try {
-          var data = JSON.parse(e.data);
-          if (data.type === 'status') {
-            if (data.last_transcript || data.last_reply) setLastConvTime(Date.now());
-            setStatus(function(prev) {
-              return Object.assign({}, prev, {
-                state: data.state || prev.state,
-                muted: !!data.muted,
-                speaking: !!data.speaking,
-                last_transcript: data.last_transcript || prev.last_transcript,
-                last_reply: data.last_reply || prev.last_reply,
-                cam_status: data.cam_status !== undefined ? data.cam_status : prev.cam_status,
-                det_status: data.det_status !== undefined ? data.det_status : prev.det_status,
-              });
-            });
-          } else if (data.type === 'detection') {
-            var persons = data.persons || 0;
-            setStatus(function(prev) { return Object.assign({}, prev, { persons: persons }); });
-            setDetections(function(prev) { return [data].concat(prev).slice(0, 60); });
-            setDetectFlash(true);
-            clearTimeout(detectTimerRef.current);
-            detectTimerRef.current = setTimeout(function() { setDetectFlash(false); }, 1500);
-          } else if (data.type === 'log') {
-            setLogs(function(prev) {
-              return [{ level: data.level || 'info', msg: data.msg || '', ts: data.ts || '' }].concat(prev).slice(0, 200);
-            });
-            // Show what Whisper heard immediately in the question cloud
-            if (data.level === 'stt' && data.msg) {
-              setLastConvTime(Date.now());
-              setStatus(function(prev) { return Object.assign({}, prev, { last_transcript: data.msg }); });
-            }
-          } else if (data.type === 'dart_hit') {
-            setDartHits(function(prev) { return prev.concat([data]).slice(-20); });
-          } else if (data.type === 'dart_reset') {
-            setDartHits([]);
-            setDartGame(function(prev) { return Object.assign({}, prev, { rounds: [], turn_total: 0, shots_done: 0 }); });
-          } else if (data.type === 'dart_hits_clear') {
-            setDartHits([]);
-          } else if (data.type === 'dart_game') {
-            setDartGame(data);
-          }
-        } catch(err) {}
-      };
-    }
-    connect();
-    // Ensure laser off on load
-    fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
-    return function() {
-      if (esRef.current) { try { esRef.current.close(); } catch(e) {} }
-    };
-  }, []);
-
-  function handleTab(newTab) {
-    if (newTab !== 'darts' && tab === 'darts') {
-      fetch('/api/laser/active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:false})}).catch(function(){});
-    }
-    setTab(newTab);
-  }
-
-  function handleWake() {
-    apiAction('wake');
-    setStatus(function(prev) { return Object.assign({}, prev, { state: 'awake' }); });
-  }
-  function handleSleep() {
-    apiAction('sleep');
-    setStatus(function(prev) { return Object.assign({}, prev, { state: 'idle', speaking: false }); });
-  }
-  function handlePause() { apiAction('pause'); }
-  function handleMuteToggle() { apiAction('mute_toggle'); }
-  function handleRestart() {
-    fetch('/api/restart', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({token:'pinku'}),
-    }).then(function(r){ return r.json(); }).then(function(d){
-      if (d.ok) setTimeout(function(){ location.reload(); }, 5000);
-    }).catch(function(){});
-  }
-
-  return React.createElement('div', { id: 'app', style: { height: appHeight + 'px', display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
-    React.createElement(Header, { status: status, onWake: handleWake, onSleep: handleSleep, onPause: handlePause, onMuteToggle: handleMuteToggle, onRestart: handleRestart }),
-    tab === 'home'   && React.createElement(HomeTab,   { status: status, detectFlash: detectFlash, connected: connected, onWake: handleWake, lastConvTime: lastConvTime }),
-    tab === 'cam'    && React.createElement(CameraTab,  { active: tab === 'cam',   camStatus: status.cam_status, detStatus: status.det_status, detections: detections }),
-    tab === 'darts'  && React.createElement(DartsTab,   { active: tab === 'darts', hits: dartHits, game: dartGame }),
-    tab === 'enroll' && React.createElement(EnrollTab,  {}),
-    tab === 'log'    && React.createElement(LogTab,     { logs: logs, onClear: function(){ setLogs([]); } }),
-    React.createElement(NavBar, { tab: tab, onTab: handleTab })
-  );
-}
-
-ReactDOM.render(React.createElement(App), document.getElementById('root'));
 </script>
 </body>
 </html>

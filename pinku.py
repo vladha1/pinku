@@ -6,12 +6,9 @@ Stack:
   STT  : faster-whisper (local, MPS-accelerated on Apple Silicon)
   LLM  : Ollama (local, llama3.2:3b default)
   TTS  : macOS `say` (built-in neural voices)
-  Vision: YOLOv8 + MediaPipe (local, MPS-accelerated)
-  Laser: green dot detection for wake / mute toggle
 
 Usage:
   python pinku.py
-  python pinku.py --no-camera     # skip camera (voice only)
   python pinku.py --no-dashboard  # skip web UI
   python pinku.py --model llama3.1:8b
 """
@@ -426,351 +423,6 @@ def _extend_session():
     _log("wake", "Session open — listening")
 
 
-# ── Gesture action map ────────────────────────────────────────────────────────
-#
-# Gestures detected by camera.py (OpenCV skin + convexity defects on wrist crop):
-#   Thumbs Up, Thumbs Down, Open Hand, Fist, Peace
-#
-# _GESTURE_ACTIONS[label] = (requires_awake_session, handler_fn_name)
-#   requires_awake_session=False → fires even in idle/muted state (good for wake gestures)
-#   requires_awake_session=True  → only fires during an active voice session
-#
-# Cooldown prevents repeat-firing while hand is held steady.
-_gesture_last_at: dict[str, float] = {}
-_gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
-_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
-
-_GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
-    # requires_session=False → fires even from muted/idle state
-    "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → unmute + wake
-    "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → mute toggle (any state)
-    # Fist removed — too many false positives from normal resting hand
-}
-
-
-def _gesture_throttle(label: str) -> bool:
-    """Return True if we should fire (not in cooldown).
-    Lock makes the read-check-write atomic so simultaneous on_detection
-    calls from the camera thread can't both slip past the cooldown."""
-    with _gesture_throttle_lock:
-        now = time.time()
-        if now - _gesture_last_at.get(label, 0) < _GESTURE_COOLDOWN:
-            return False
-        _gesture_last_at[label] = now
-        return True
-
-
-def _gesture_hands_up():
-    """🙌 Hands up (wrist above shoulder) — wake from muted state.
-    This is the ONLY gesture that wakes Pinku when user-muted."""
-    _log("wake", "🙌 Hands Up → unmute + wake")
-    _handle_unmute()   # clears silent flag, plays unmute tone, opens session
-
-
-def _gesture_open_hand():
-    """🖐 Open hand / wave.
-    Hard-muted  → unmute back to standby.
-    In session  → sleep (end conversation, stay listening).
-    Sleeping    → hard mute (next wave unmutes)."""
-    if _user_muted.is_set():
-        _log("wake", "🖐 Open Hand → unmute")
-        _handle_unmute()
-    elif _awake.is_set() or tts.is_speaking():
-        tts.stop_speaking()
-        _log("wake", "🖐 Open Hand → sleep")
-        _handle_sleep()
-    else:
-        _log("wake", "🖐 Open Hand → mute")
-        _handle_mute()
-
-
-def _gesture_fist():
-    """✊ Closed fist — sleep (end session, stay in standby)."""
-    _log("wake", "✊ Fist → sleep")
-    _handle_sleep()
-
-
-_GESTURE_FN_MAP: dict[str, object] = {
-    "_gesture_hands_up":  _gesture_hands_up,
-    "_gesture_open_hand": _gesture_open_hand,
-}
-
-
-def _dispatch_gestures(event: dict):
-    for g in event.get("gestures", []):
-        label = g.get("gesture", "")
-        if label not in _GESTURE_ACTIONS:
-            continue
-        requires_session, fn_name = _GESTURE_ACTIONS[label]
-        if requires_session and not _awake.is_set():
-            continue
-        if not _gesture_throttle(label):
-            continue
-        fn = _GESTURE_FN_MAP.get(fn_name)
-        if fn:
-            threading.Thread(target=fn, daemon=True).start()
-
-
-# ── Laser dot handler ────────────────────────────────────────────────────────
-
-import math as _math
-import json as _json
-
-_laser_was_present: bool = False   # True while a dot is on the wall
-_dart_hits: list[dict] = []        # [{x, y, score, callout}] — last 20 throws
-
-# ── Dart game state ───────────────────────────────────────────────────────────
-_GAME_SHOTS = 5                    # shots per turn
-_game_shots:   list[dict] = []     # current player's shots this turn
-_game_rounds:  list[dict] = []     # completed turns [{player, shots, total}]
-_game_player:  int  = 1            # current player number (1-based)
-_game_awaiting: bool = False       # True after 5 shots — waiting for "Next Player"
-
-# ── Laser calibration ─────────────────────────────────────────────────────────
-# Bullseye centre in normalised frame coords (0-1).
-# Loaded from ~/.pinku_laser_cal.json; defaults to frame-centre (0.5, 0.5).
-_laser_bull_x: float = 0.5
-_laser_bull_y: float = 0.5
-_LASER_CAL_FILE = os.path.expanduser("~/.pinku_laser_cal.json")
-
-
-def _load_laser_cal():
-    """Load saved bullseye calibration from disk (called at startup)."""
-    global _laser_bull_x, _laser_bull_y
-    try:
-        with open(_LASER_CAL_FILE) as f:
-            cal = _json.load(f)
-        _laser_bull_x = float(cal.get("bull_x", 0.5))
-        _laser_bull_y = float(cal.get("bull_y", 0.5))
-    except FileNotFoundError:
-        pass   # first run — use defaults
-    except Exception as e:
-        _log("warn", f"Laser cal load failed: {e}")
-
-
-def _save_laser_cal():
-    """Persist current bullseye to disk."""
-    try:
-        with open(_LASER_CAL_FILE, "w") as f:
-            _json.dump({"bull_x": _laser_bull_x, "bull_y": _laser_bull_y}, f)
-    except Exception as e:
-        _log("warn", f"Laser cal save failed: {e}")
-
-
-def _dart_score(x: float, y: float) -> tuple[int, str]:
-    """
-    Map a normalised (x, y) position to a dartboard score using the calibrated
-    bullseye centre.  100 = bullseye, decreasing rings outward, 0 = off-board.
-    Returns (score, callout_text).
-    """
-    dx = (x - _laser_bull_x) * 2
-    dy = (y - _laser_bull_y) * 2
-    dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
-
-    if   dist < 0.035: return 100, "Bullseye! One hundred!"
-    elif dist < 0.09:  return  75, "Seventy five!"
-    elif dist < 0.16:  return  50, "Fifty!"
-    elif dist < 0.24:  return  25, "Twenty five."
-    elif dist < 0.35:  return  10, "Ten."
-    else:              return   0, "Miss."
-
-
-_LASER_MUTE_DOTS    = 10     # need this many simultaneous dots to trigger mute toggle
-_LASER_MUTE_COOLDOWN = 5.0  # seconds — ignore repeated multi-dot events
-_laser_mute_last_at: float = 0.0
-
-
-def _handle_laser(dots: list[dict]):
-    """
-    0 dots   → mark absent (next appearance will rescore).
-    1–9 dots → dart scoring only (single dot = throw; few dots = reflections, ignored).
-    10+ dots → mute / unmute toggle, with 5-second cooldown to avoid accidental re-fires.
-    """
-    global _laser_was_present, _laser_mute_last_at
-
-    # ── Dot gone — reset so next throw rescores ───────────────────────────────
-    if not dots:
-        if _laser_was_present:
-            _log("laser", "🔴 Laser gone — ready for next throw")
-            dashboard.update_status(laser=None)
-        _laser_was_present = False
-        return
-
-    # ── Many dots: toggle mute (no score) ────────────────────────────────────
-    if len(dots) >= _LASER_MUTE_DOTS:
-        now = time.time()
-        if now - _laser_mute_last_at < _LASER_MUTE_COOLDOWN:
-            _laser_was_present = True
-            return   # within cooldown — ignore
-        _laser_mute_last_at = now
-        _log("laser", f"🔴×{len(dots)} → mute toggle")
-        if _user_muted.is_set():
-            _handle_unmute()
-        else:
-            _handle_mute()
-        _laser_was_present = True
-        return
-
-    # ── Single dot ────────────────────────────────────────────────────────────
-    dot = dots[0]
-    x, y = dot["x"], dot["y"]
-    score, callout = _dart_score(x, y)
-    dashboard.update_status(laser={"x": x, "y": y, "score": score})
-
-    if _laser_was_present:
-        return   # dot still on wall, just moved — don't rescore
-
-    # Ignore new shots while waiting for "Next Player" tap
-    if _game_awaiting:
-        return
-
-    # Fresh appearance — record hit, show on screen (no auto-callout)
-    _laser_was_present = True
-    _dart_hits.append({"x": x, "y": y, "score": score, "callout": callout})
-    if len(_dart_hits) > 20:
-        _dart_hits[:] = _dart_hits[-20:]
-    _log("laser", f"🎯 ({x:.2f},{y:.2f}) → {score} pts")
-    dashboard.push_dart_hit({"x": x, "y": y, "score": score, "callout": callout})
-
-    # ── Game tracking ─────────────────────────────────────────────────────────
-    _game_shots.append({"x": x, "y": y, "score": score})
-    _push_game_state()
-    if len(_game_shots) >= _GAME_SHOTS:
-        _end_dart_turn()
-
-
-def _push_game_state():
-    dashboard.push_game_update({
-        "player":     _game_player,
-        "shots_done": len(_game_shots),
-        "shots_total": _GAME_SHOTS,
-        "turn_total": sum(s["score"] for s in _game_shots),
-        "awaiting":   _game_awaiting,
-        "rounds":     _game_rounds,
-    })
-
-
-def _end_dart_turn():
-    global _game_awaiting
-    total = sum(s["score"] for s in _game_shots)
-    _game_rounds.append({
-        "player": _game_player,
-        "shots":  list(_game_shots),
-        "total":  total,
-    })
-    _game_awaiting = True
-    _log("laser", f"🎯 P{_game_player} turn done: {len(_game_shots)} shots → {total} pts")
-    _push_game_state()
-
-
-def _dart_next_player():
-    global _game_player, _game_awaiting
-    # If turn ended manually before 5 shots, record it first
-    if not _game_awaiting and _game_shots:
-        _end_dart_turn()
-    _game_shots.clear()
-    _dart_hits.clear()             # clear so reconnecting clients see only new turn
-    _game_player += 1
-    _game_awaiting = False
-    dashboard.push_dart_hits_clear()   # wipe dots on overlay for new turn
-    _push_game_state()
-    _log("laser", f"🎯 P{_game_player}'s turn — ready")
-
-
-def _dart_new_game():
-    global _game_player, _game_awaiting
-    _game_shots.clear()
-    _game_rounds.clear()
-    _game_player  = 1
-    _game_awaiting = False
-    _dart_reset()   # also clears _dart_hits + broadcasts dart_reset
-    _push_game_state()
-    _log("laser", "🎯 New dart game — P1's turn")
-
-
-def _dart_speak_last():
-    """Speak the most recent dart score aloud — triggered by dashboard button."""
-    if not _dart_hits:
-        threading.Thread(target=tts.speak,
-            kwargs={"text": "No dart hits recorded yet.", "block": False},
-            daemon=True, name="dart-speak").start()
-        return
-    hit = _dart_hits[-1]
-    threading.Thread(target=tts.speak,
-        kwargs={"text": hit["callout"], "block": False},
-        daemon=True, name="dart-speak").start()
-
-
-def _dart_reset():
-    """Clear all recorded dart hits — triggered by dashboard button."""
-    _dart_hits.clear()
-    dashboard.dart_reset()
-    _log("laser", "🎯 Dart hits cleared")
-
-
-def _handle_laser_calibrate():
-    """
-    Set the scoring bullseye to wherever the laser dot currently is.
-    Called from dashboard 'laser_calibrate' action or /api/laser/calibrate.
-    Returns a dict so the REST endpoint can relay the result to the browser.
-    """
-    global _laser_bull_x, _laser_bull_y
-    try:
-        from camera import _laser_overlay_dots, _laser_overlay_lock
-        with _laser_overlay_lock:
-            dots = list(_laser_overlay_dots)
-    except Exception as e:
-        _log("warn", f"Laser calibrate: camera error — {e}")
-        return {"ok": False, "error": str(e)}
-
-    if not dots:
-        _log("warn", "🎯 Calibrate failed — no dot detected (point laser at bullseye first)")
-        return {"ok": False, "error": "No laser dot detected — point your laser at the bullseye and try again."}
-
-    dot = dots[0]
-    _laser_bull_x = dot["x"]
-    _laser_bull_y = dot["y"]
-    _save_laser_cal()
-
-    # Update camera overlay so the bullseye ring redraws immediately
-    try:
-        from camera import set_laser_bull
-        set_laser_bull(_laser_bull_x, _laser_bull_y)
-    except Exception:
-        pass
-
-    _log("laser", f"🎯 Bullseye set → ({_laser_bull_x:.3f},{_laser_bull_y:.3f})")
-    if not _user_muted.is_set():
-        threading.Thread(
-            target=tts.speak,
-            kwargs={"text": "Bullseye calibrated.", "block": False},
-            daemon=True, name="laser-cal",
-        ).start()
-    return {"ok": True, "bull_x": _laser_bull_x, "bull_y": _laser_bull_y}
-
-
-# ── Detection callback ────────────────────────────────────────────────────────
-
-def on_detection(event: dict):
-    """Camera detection callback — auto-wakes on person presence, dispatches gestures."""
-    global _last_human_at, _last_speech_at
-    _det_logger.log(event)
-    dashboard.push_detection(event)
-
-    if event.get("persons", 0) > 0:
-        now = time.time()
-        _last_human_at = now
-        if _awake.is_set():
-            # Already in a session — keep the inactivity timer alive while person is visible
-            _last_speech_at = now
-
-    if "laser" in event:   # always call — empty list = dot gone
-        _handle_laser(event["laser"])
-
-    if event.get("gestures"):
-        _dispatch_gestures(event)
-
-
 # ── Wake word / session end detection ────────────────────────────────────────
 
 # Wake phrases — must appear at the START of the utterance.
@@ -942,8 +594,6 @@ def _dispatch_action(action: dict):
         _handle_unmute()
     elif act == "time":
         _handle_time(action)
-    elif act == "describe":
-        _handle_describe(action)
     elif act == "scripture":
         _handle_scripture(action)
     elif act == "weather":
@@ -1073,7 +723,7 @@ def _handle_gemini_result(result: dict):
     # Actions that Python handles — discard any Gemini-supplied reply (it ignores our
     # system prompt instruction to leave reply:"" and generates text anyway).
     _PYTHON_ACTIONS = {
-        "time", "weather", "mute", "unmute", "describe",
+        "time", "weather", "mute", "unmute",
         "lights_on", "lights_off",
     }
     # weather is handled by Python (_handle_weather fetches from wttr.in)
@@ -1245,8 +895,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
         # ── Session timeout ───────────────────────────────────────────────────
         if (_awake.is_set()
-                and time.time() - _last_speech_at > config.SESSION_TIMEOUT
-                and not _human_is_present()):
+                and time.time() - _last_speech_at > config.SESSION_TIMEOUT):
             _awake.clear()
             dashboard.update_status(state="idle")
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
@@ -1305,7 +954,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             # ── Gate: active session ─────────────────────────────────────────
             if _awake.is_set():
                 # Drop uncertain/unknown speakers to block TV/background audio.
-                if _current_speaker is None and not _human_is_present():
+                if _current_speaker is None:
                     continue
 
                 dashboard.update_status(state="processing")
@@ -1489,7 +1138,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
 def main():
     _acquire_lock()   # exit immediately if another instance is running
     ap = argparse.ArgumentParser(description="Pinku — local home assistant")
-    ap.add_argument("--no-camera",    action="store_true", help="Disable camera detection")
     ap.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard")
     ap.add_argument("--model",        default=None,        help="Override Ollama model")
     ap.add_argument("--port",         type=int, default=config.DASHBOARD_PORT)
@@ -1519,7 +1167,7 @@ def main():
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
     if not args.no_dashboard:
-        dashboard.start(logger=_det_logger, port=args.port)
+        dashboard.start(port=args.port)
         # Wire dashboard buttons → pinku actions
         dashboard.register_action("wake",             _extend_session)
         dashboard.register_action("sleep",            _handle_sleep)
@@ -1528,25 +1176,6 @@ def main():
         dashboard.register_action("pause",            _handle_pause)
         dashboard.register_action("stop",             _handle_pause)   # alias
         dashboard.register_action("mute_toggle",      lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
-        dashboard.register_action("laser_calibrate",  _handle_laser_calibrate)
-        dashboard.register_action("dart_speak",       _dart_speak_last)
-        dashboard.register_action("dart_reset",       _dart_reset)
-        dashboard.register_action("dart_next_player", _dart_next_player)
-        dashboard.register_action("dart_new_game",    _dart_new_game)
-
-    # ── Laser calibration ─────────────────────────────────────────────────────
-    _load_laser_cal()
-
-    # ── Camera ────────────────────────────────────────────────────────────────
-    cam = None
-    if not args.no_camera:
-        global _camera_enabled
-        from camera import CameraDetector, set_laser_bull
-        cam = CameraDetector(on_detection=on_detection)
-        cam.start()
-        _camera_enabled = True
-        # Push calibrated bull to camera overlay renderer
-        set_laser_bull(_laser_bull_x, _laser_bull_y)
 
     # ── Mic ───────────────────────────────────────────────────────────────────
     # Boost macOS input volume to maximum so distant speech reaches the mic pipeline
@@ -1585,8 +1214,6 @@ def main():
     finally:
         _stop_all.set()
         recorder.stop()
-        if cam:
-            cam.stop()
 
 
 if __name__ == "__main__":
