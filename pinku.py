@@ -90,9 +90,7 @@ _last_gate_at:    float = 0.0           # last time a PCM chunk passed the speak
 # Consecutive Gemini wake-word-only / hallucination counter.
 # Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
 # increments this counter; a real command (with content words) resets it.
-# When it reaches _HALLUC_MAX the session is forcibly closed so the voice loop
-# drops back to cheap local Whisper wake-word detection instead of hammering
-# the Gemini audio API every ~3 s.
+# When it reaches _HALLUC_MAX the session is forcibly closed.
 _gemini_halluc_count: int = 0
 _HALLUC_MAX:          int = 4   # close session after this many consecutive non-commands
 
@@ -111,13 +109,6 @@ _REPLY_COOLDOWN:   float = 10.0   # seconds before the same reply can be spoken 
 _last_user_transcript: str   = ""
 _last_transcript_at:   float = 0.0
 _TRANSCRIPT_DEDUP_SEC: float = 4.0   # seconds — same transcript in this window = duplicate
-
-# When hallucinations force-close the session, face-detection cannot reopen it
-# until this epoch — prevents the open→hallucinate×4→close→reopen cycle that
-# burned through the Gemini daily quota.  Only a spoken wake word (Whisper) or
-# explicit gesture can reopen the session during the cooldown.
-_face_wake_blocked_until: float = 0.0
-_FACE_WAKE_BLOCK_SEC:     float = 60.0   # seconds to block face-detection wake after hallucination flush
 
 # How long after last camera person detection before we consider room empty
 _HUMAN_GONE_SEC = 12.0
@@ -488,12 +479,6 @@ _gesture_last_at: dict[str, float] = {}
 _gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
 _GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
 
-# Lock that makes the face-detection wake block atomic.
-# The camera thread fires on_detection at frame-rate (≥15 fps); without a lock
-# two rapid frames both pass "if not _awake.is_set()" before either sets it,
-# causing duplicate wake logs, duplicate beeps, and duplicate Gemini calls.
-_face_wake_lock = threading.Lock()
-
 _GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
     # requires_session=False → fires even from muted/idle state
     "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → unmute + wake
@@ -814,28 +799,9 @@ def on_detection(event: dict):
     if event.get("persons", 0) > 0:
         now = time.time()
         _last_human_at = now
-        if not _user_muted.is_set():
-            # Lock makes the check-and-set atomic: camera fires on_detection at
-            # frame-rate so two consecutive frames can both see _awake==False
-            # and both trigger the wake logic before either sets _awake.
-            with _face_wake_lock:
-                if not _awake.is_set():
-                    if time.time() < _face_wake_blocked_until:
-                        # Session was recently closed due to hallucinations.
-                        # Don't reopen from face-detection alone — require an
-                        # explicit spoken wake word or gesture to break the cycle.
-                        pass
-                    else:
-                        # Person detected — gentle ack chime + open session
-                        # NOTE: chime is temporary (entry=True applies 25s cooldown)
-                        _last_speech_at = now
-                        _awake.set()
-                        dashboard.update_status(state="awake")
-                        _log("wake", "👤 Face detected → listening")
-                        tts.play_beep(entry=True)
-                else:
-                    # Already awake — keep the inactivity timer alive while person is visible
-                    _last_speech_at = now
+        if _awake.is_set():
+            # Already in a session — keep the inactivity timer alive while person is visible
+            _last_speech_at = now
 
     if "laser" in event:   # always call — empty list = dot gone
         _handle_laser(event["laser"])
@@ -1116,27 +1082,23 @@ def _handle_gemini_result(result: dict):
             # noise and inventing wake words.  Close the session so the loop
             # falls back to cheap local Whisper wake-word detection instead of
             # hammering the Gemini audio API.
-            global _face_wake_blocked_until
             _log("info",
                  f"Gemini hallucinated wake word {_gemini_halluc_count}× in a row "
-                 f"— closing session, blocking face-wake for {_FACE_WAKE_BLOCK_SEC:.0f}s")
+                 f"— closing session")
             _gemini_halluc_count = 0
             _awake.clear()
             _session_hist.clear()
-            _face_wake_blocked_until = time.time() + _FACE_WAKE_BLOCK_SEC
             dashboard.update_status(state="idle")
             _brief_mute(6.0)   # long pause before resuming wake-word listening
             return
-        if _human_is_present() or _awake.is_set():
-            # Person is present — possible intentional wake-word call.
+        if _awake.is_set():
+            # In session — possible intentional wake-word call.
             # IMPORTANT: do NOT update _last_speech_at here.  If this is a
             # hallucination, updating the timer would keep the session open
             # forever, causing a perpetual Gemini-hammering feedback loop.
             _log("wake",
                  f'🔤 Wake word ({_gemini_halluc_count}/{_HALLUC_MAX}) — waiting for command')
-            _awake.set()
-            dashboard.update_status(state="awake")
-            _brief_mute(3.0)   # was 0.8 s — longer throttle limits Gemini call rate
+            _brief_mute(3.0)
             return
         _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
         _brief_mute(3.0)   # was 1.0 s
@@ -1379,12 +1341,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
             continue   # silently discard — previous response still in flight
 
         try:
-            # ── Gate: active session (face visible or session open) ───────────
-            if _human_is_present() or _awake.is_set():
-                # Drop uncertain speakers when session is open via wake word only
-                # (prevents YouTube/TV audio from being processed as commands).
-                # When face is visible, allow uncertain — person is clearly there.
-                if _awake.is_set() and not _human_is_present() and _current_speaker is None:
+            # ── Gate: active session ─────────────────────────────────────────
+            if _awake.is_set():
+                # Drop uncertain/unknown speakers to block TV/background audio.
+                if _current_speaker is None and not _human_is_present():
                     continue
 
                 dashboard.update_status(state="processing")
