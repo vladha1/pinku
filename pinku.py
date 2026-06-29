@@ -864,6 +864,7 @@ _WAKE_PHRASES = [
     "hey pink", "hi pink", "ok pink", "pink",
     "hey piku", "hi piku", "ok piku", "piku",     # Pinku with dropped n
     "hey pico", "hi pico", "pico",               # Whisper English mishearing
+    "hey pinsky", "hi pinsky", "pinsky",         # Pinky with s inserted
     "hey minkoo", "hi minkoo", "minkoo",         # m instead of p mishearing
     "hey minku", "hi minku", "minku",
     "hey minky", "hi minky", "minky",
@@ -921,7 +922,8 @@ def _check_wake(text: str) -> tuple[bool, str]:
                    "पिकू", "पिकु", "पिको", "पिखु", "पिखू",
                    "पिर्कू", "पिर्कु",           # r inserted
                    "पीनको", "पीनकू", "पीनकु",    # long I variant
-                   "पिंगू", "पिंगु"}
+                   "पिंगू", "पिंगु",
+                   "तेंकी", "तेंकु", "तेंकू", "तेंको"}  # t-for-p mishearing
     _HINDI_PRE  = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}  # है = Whisper hearing "Hi" as hai
     _t_words = [w.strip(",.!?।॥ ") for w in t.split()]
     for i, w in enumerate(_t_words):
