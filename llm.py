@@ -61,7 +61,7 @@ _load_env(Path(__file__).parent / ".env")
 
 # ── Gemini config ─────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL   = os.environ.get("PINKY_GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
 
 if not GEMINI_API_KEY:
     print("[LLM] WARNING: GEMINI_API_KEY not set — chat will fall back to Ollama")
@@ -87,9 +87,9 @@ Actions:
 - "weather"     → user asked about weather, मौसम, मोसम, मोसन, barish, baarish, temperature
 - "mute"        → user wants you to stop listening / be quiet / sleep
 - "unmute"      → user wants you to start listening again / wake up
-- "describe"    → user asked you to look / describe what you see / camera
 - "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
+                  (NOT panchang/calendar queries like Ekadashi/tithi/nakshatra → those are "chat")
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
 - "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
@@ -140,6 +140,8 @@ Respond naturally and concisely — you are speaking aloud, so keep replies unde
 If a topic needs more, give the single most important fact and stop.
 No markdown, no bullet points. Plain conversational sentences only.
 Be precise with facts and numbers.
+For factual or external questions answer directly without preamble or greeting. Personality only for questions about yourself or casual chitchat.
+Never address the speaker by name.
 """
 
 _CHAT_SYSTEM_HI = """\
@@ -156,6 +158,8 @@ The user is speaking Hindi. Reply in natural spoken Hindi using Devanagari scrip
 Keep replies under 40 words. If a topic needs more, give the single most important fact and stop.
 No markdown, no bullet points. Plain conversational sentences only.
 Do not mix English unless the user does. Be precise with facts and numbers.
+For factual or external questions answer directly without preamble or greeting. Personality only for questions about yourself or casual chitchat.
+Never address the speaker by name.
 """
 
 # ── Gemini audio: transcription + routing + reply in one call ─────────────────
@@ -190,6 +194,8 @@ A microphone is always on.
 You will receive a short audio clip from the mic. Do all three steps:
 
 STEP 1 — TRANSCRIBE
+CONFIDENCE GATE (apply before transcribing): Only proceed if you are at least 90% confident the audio contains a real human speaking directly in the room. If audio is faint, unclear, mostly silence, ambient noise, or you are not sure — set transcript:"" and action:"ignore". A missed command is better than an invented one.
+
 Write the exact spoken words if the audio is a PERSON DIRECTLY SPEAKING (not a TV, radio, or other playback device).
 The speaker may use:
 - Indian English accent
@@ -224,21 +230,30 @@ ACTION LIST (pick exactly one):
 "chat"       → clear question/conversation → reply REQUIRED (≤60 words, plain sentences)
 "scripture"  → Gita, Ramayana, Mahabharata, Vedas, Upanishads, yoga, meditation, Ayurveda,
                Indian mythology, history, classical music, poetry, Sanskrit → reply REQUIRED
+               NOTE: Panchang calendar queries (Ekadashi kab hai, aaj ki tithi, nakshatra, vrat, tyohar)
+               → use "chat" action with a direct factual reply, NOT "scripture"
 "time"       → asked for current time or date → reply: "" (system inserts actual time)
 "weather"    → weather question, मौसम, मोसम, मोसन, barish, baarish, temperature, forecast → reply: ""
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
 "unmute"     → told Pinky to wake / start / listen → reply: ""
-"describe"   → asked Pinky to look / describe what it sees (camera, dekho, kya dikh raha) → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
 
 RULES:
-- LANGUAGE: Detect the language the person spoke and match it exactly.
-  English question → "lang":"en", English reply.
-  Hindi question → "lang":"hi", Hindi reply (Devanagari script).
-  Hinglish → match the dominant language.
-  Do NOT switch language based on the user's name, the household location, or the topic.
-  "Hi Pinku" followed by an English question is an English question — reply in English.
+- LANGUAGE (strict — overrides all other considerations):
+  Reply in EXACTLY the language the person spoke. Never switch based on their name, nationality, location, or topic.
+  English words dominant → "lang":"en" → reply in English only. No Hindi, no Devanagari.
+  Hindi words dominant (Devanagari script OR clear Hindi vocabulary like aaj/kal/kya/mausam/hai/hain) → "lang":"hi" → reply in Hindi (Devanagari).
+  Truly mixed Hinglish → match dominant language (count words: whichever language has more words wins).
+  Pure English question = English answer. Always. Even if the speaker is Indian or lives in India or asks about Indian topics.
+  "Hi Pinku what is the time?" → "lang":"en". "Hi Pinku aaj time kya hai?" → "lang":"hi".
+  "tell me about Bhagavad Gita chapter 2" → "lang":"en" (English words, Indian topic doesn't matter).
+  "भगवद गीता के बारे में बताओ" → "lang":"hi" (Devanagari script → Hindi).
+  When in doubt between en/hi → default to "en".
+- TONE: For factual, historical, scientific, or external questions (who made X, what is Y, how does Z work)
+  answer directly — no greeting, no preamble, no personality intro. Just the fact.
+  Reserve warmth and personality for questions about yourself, your preferences, or casual chitchat.
+- Never address the speaker by name in your reply.
 - Who built/made/created Pinku → reply: "Vivek made me." Be warm; add a line about living in his home.
 - Questions about Pinku's own preferences, favourites, personality, or feelings → reply using EXACTLY the fixed personal facts above. Be warm, specific, personal. Under 30 words.
 - Reply is SPOKEN ALOUD — no bullet points, no markdown, natural sentences only
@@ -251,11 +266,13 @@ RULES:
 
 # Wake rule injected into STEP 2 depending on session state
 _WAKE_RULE_IDLE = """\
-Is the wake word (Pinky / Pinku / Pink / Pingu) CLEARLY AND EXPLICITLY spoken in this clip?
-- Wake word not clearly audible → "ignore". When in doubt, ignore.
-- Do NOT infer the wake word. It must be audibly present.
+MANDATORY: Check your transcript for the wake word (Pinky / Pinku / Pink / Pingu).
+- Wake word NOT present in transcript → action MUST be "ignore". No exceptions.
+- Wake word present but not clearly audible → "ignore". When in doubt, ignore.
+- Do NOT infer or assume the wake word. It must be explicitly in what was said.
 - Background noise, room echo, TV, side-conversations, or silence → "ignore".
-- Wake word alone (nothing actionable after it) → "ignore"."""
+- Wake word alone with nothing actionable after it → "ignore".
+REMINDER: if your transcript does not contain one of Pinky/Pinku/Pink/Pingu, you must return action:"ignore"."""
 
 _WAKE_RULE_SESSION = """\
 You are in an ACTIVE CONVERSATION SESSION — the person is talking TO YOU.
@@ -274,15 +291,28 @@ RESPOND when:
 
 If you cannot clearly tell whether audio is from a real person or background media → "ignore"."""
 
-def _make_transcribe_system(session_active: bool) -> str:
+def _make_transcribe_system(session_active: bool, speaker: str | None = None) -> str:
+    from datetime import datetime as _dt
+    import calendar as _cal
+    _now = _dt.now()
+    date_ctx = (
+        f"Current date and time: {_now.strftime('%A, %d %B %Y, %I:%M %p')} IST. "
+        f"Days in current month ({_now.strftime('%B')}): "
+        f"{_cal.monthrange(_now.year, _now.month)[1]}."
+    )
     rule = _WAKE_RULE_SESSION if session_active else _WAKE_RULE_IDLE
-    return _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+    base = _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
+    base += f"\n\nDATE/TIME CONTEXT: {date_ctx}"
+    if speaker:
+        base += f"\nThe person speaking is {speaker}. Do not address them by name in your reply."
+    return base
 
 
 def transcribe_and_respond(
     pcm: bytes,
     history: list[dict] | None = None,
     session_active: bool = False,
+    speaker: str | None = None,
 ) -> dict | None:
     """
     Send microphone PCM audio to Gemini for transcription + intent + reply in one call.
@@ -356,7 +386,7 @@ def transcribe_and_respond(
         "parts": [{"inline_data": {"mime_type": "audio/wav", "data": wav_b64}}],
     }]
 
-    system = _make_transcribe_system(session_active)
+    system = _make_transcribe_system(session_active, speaker=speaker)
     try:
         raw = _gemini_call(contents, temperature=0.0, max_tokens=700,
                            system=system)
@@ -390,6 +420,127 @@ def transcribe_and_respond(
     result.setdefault("action", "ignore")
     result.setdefault("reply", "")
     print(f"[LLM] transcribed: {result['transcript']!r} → {result['action']}")
+    return result
+
+
+# ── Gemini text routing (fast path for active sessions) ───────────────────────
+
+_TEXT_ROUTE_BASE = """\
+You are Pinky (lovingly called Pinku), a home AI assistant in an Indian household in Gurugram, India.
+GENDER: Pinky is FEMALE. Always use feminine grammar — in Hindi: "मैं करती हूँ", "मुझे पसंद है",
+"बता सकती हूँ" — NEVER masculine forms like "करता हूँ" or "सकता हूँ".
+If asked your name: answer in ≤8 words, warm, vary phrasing naturally each time.
+  EN: "Pinky! Everyone here calls me Pinku." / "Pinku — Vivek named me." / "Pinky, but Pinku works."
+  HI: "Pinky! घर में Pinku बुलाते हैं।" / "Pinku — Vivek ने नाम रखा।"
+Default location for weather, local info, or any place-based question: Gurugram, Haryana, India.
+
+""" + _PERSONALITY + """
+
+You receive a TEXT TRANSCRIPT of what a person in the room just said (already transcribed).
+Route it to the correct action and generate a reply if needed.
+
+{WAKE_RULE}
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "transcript": "<exact words from input>",
+  "lang": "en" or "hi",
+  "action": "<see list>",
+  "reply": "<spoken response, or empty string>"
+}
+
+ACTION LIST (pick exactly one):
+"ignore"     → background noise, TV, unintelligible, not addressed to Pinky → reply: ""
+"chat"       → general conversation, questions → reply REQUIRED (≤60 words, plain sentences)
+"scripture"  → Gita, Ramayana, Vedas, yoga, Indian mythology, Sanskrit → reply REQUIRED
+"time"       → asked for current time or date → reply: ""
+"weather"    → weather, मौसम, barish, temperature → reply: ""
+"mute"       → told Pinky to stop / sleep / be quiet → reply: ""
+"unmute"     → told Pinky to wake / start / listen → reply: ""
+"lights_on"  → lights on → reply: ""
+"lights_off" → lights off → reply: ""
+
+RULES:
+- Reply in EXACTLY the language the person spoke. English dominant → English only. Hindi dominant → Hindi (Devanagari).
+- Pure English question = English answer, always. Even if the speaker is Indian or the topic is Indian (Gita, yoga, etc.).
+- TONE: For factual, historical, scientific, or external questions answer directly — no greeting, no preamble,
+  no personality intro. Just the fact. Reserve warmth and personality for questions about yourself or casual chat.
+- Never address the speaker by name in your reply.
+- Keep replies ≤40 words (scripture: ≤70 words). Plain conversational sentences, no markdown.
+- For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS → reply: ""
+- Be precise with facts and numbers.
+"""
+
+_WAKE_RULE_TEXT_SESSION = """\
+You are in an ACTIVE CONVERSATION — the person is talking directly to you. No wake word required.
+Respond to anything clearly spoken by the person. Ignore obvious TV/background audio descriptions."""
+
+_WAKE_RULE_TEXT_IDLE = """\
+MANDATORY: The transcript must contain the wake word (Pinky / Pinku / Pink / Pingu).
+If wake word is NOT present → action MUST be "ignore". No exceptions."""
+
+
+def text_route_and_respond(
+    transcript: str,
+    history: list[dict] | None = None,
+    session_active: bool = True,
+    speaker: str | None = None,
+) -> dict | None:
+    """
+    Route and reply from an already-transcribed text string.
+    Skips audio upload — ~3× faster than transcribe_and_respond for active sessions.
+
+    Returns the same dict format as transcribe_and_respond:
+      {transcript, lang, action, reply}
+    """
+    if not GEMINI_API_KEY or not transcript.strip():
+        return None
+
+    rule = _WAKE_RULE_TEXT_SESSION if session_active else _WAKE_RULE_TEXT_IDLE
+    system = _TEXT_ROUTE_BASE.replace("{WAKE_RULE}", rule)
+    if speaker:
+        system += f"\n\nThe person speaking is {speaker}. Do not address them by name in your reply."
+
+    contents: list[dict] = []
+    for turn in (history or [])[-6:]:
+        role = "model" if turn["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": transcript}]})
+
+    try:
+        raw = _gemini_call(contents, temperature=0.0, max_tokens=300,
+                           system=system, use_search=False)
+        print(f"[LLM] text-route raw: {raw[:140]!r}")
+    except Exception as e:
+        print(f"[LLM] text_route_and_respond error: {e}")
+        return None
+
+    m = re.search(r'\{.*\}', raw, re.DOTALL)
+    if not m:
+        # Gemini returned plain prose instead of JSON (common for Hindi replies).
+        # Use it directly as a chat reply rather than falling back to Gemini audio.
+        # Guard: if it starts with '{' it's truncated JSON, not prose — don't speak it.
+        stripped = raw.strip()
+        if stripped and not stripped.startswith('{'):
+            print(f"[LLM] text_route_and_respond: no JSON — using raw prose as reply")
+            has_devanagari = bool(re.search(r'[ऀ-ॿ]', stripped))
+            return {
+                "transcript": transcript,
+                "lang":       "hi" if has_devanagari else "en",
+                "action":     "chat",
+                "reply":      stripped,
+            }
+        return None
+    try:
+        result = json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
+
+    result["transcript"] = transcript   # trust our transcript, not Gemini's rewrite
+    result.setdefault("lang",   "en")
+    result.setdefault("action", "ignore")
+    result.setdefault("reply",  "")
+    print(f"[LLM] text-routed: {transcript!r} → {result['action']}")
     return result
 
 
@@ -429,13 +580,14 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
 
-    body: dict = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature":    temperature,
-            "maxOutputTokens": max_tokens,
-        },
+    gen_config: dict = {
+        "temperature":     temperature,
+        "maxOutputTokens": max_tokens,
     }
+    # thinkingBudget:0 is only supported on 2.5-series models.
+    if "2.5" in GEMINI_MODEL:
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+    body: dict = {"contents": contents, "generationConfig": gen_config}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
     if use_search:
@@ -447,11 +599,21 @@ def _gemini_call(contents: list[dict], temperature: float = 0.9,
         headers={"Content-Type": "application/json"},
     )
     try:
+        _t0 = _time.time()
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
+        print(f"[LLM] Gemini HTTP: {_time.time()-_t0:.2f}s")
+        candidate = data["candidates"][0]
+        finish    = candidate.get("finishReason", "STOP")
+        if finish not in ("STOP", "MAX_TOKENS"):
+            print(f"[LLM] Gemini finishReason={finish} — response may be incomplete")
         # Extract text — grounded responses may have multiple parts; join them
-        parts = data["candidates"][0]["content"]["parts"]
+        parts = candidate["content"]["parts"]
         text = " ".join(p.get("text", "") for p in parts).strip()
+        # If finish reason caused a sentence fragment, make it at least complete
+        # enough to speak — don't return a dangling clause.
+        if finish not in ("STOP", "MAX_TOKENS") and text and not text[-1] in ".!?।":
+            text = text.rstrip(",;:— ") + "."
         return text
     except urllib.error.HTTPError as e:
         if e.code == 429:
@@ -550,9 +712,9 @@ def chat(transcript: str,
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        reply = _gemini_call(contents, temperature=0.9, max_tokens=300,
+        reply = _gemini_call(contents, temperature=0.9, max_tokens=500,
                              system=system, use_search=True)
-        reply = _trim_reply(reply, max_words=55)
+        reply = _trim_reply(reply, max_words=70)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
         return reply
     except Exception as e:

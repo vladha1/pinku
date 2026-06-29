@@ -6,12 +6,9 @@ Stack:
   STT  : faster-whisper (local, MPS-accelerated on Apple Silicon)
   LLM  : Ollama (local, llama3.2:3b default)
   TTS  : macOS `say` (built-in neural voices)
-  Vision: YOLOv8 + MediaPipe (local, MPS-accelerated)
-  Laser: green dot detection for wake / mute toggle
 
 Usage:
   python pinku.py
-  python pinku.py --no-camera     # skip camera (voice only)
   python pinku.py --no-dashboard  # skip web UI
   python pinku.py --model llama3.1:8b
 """
@@ -34,24 +31,39 @@ def _acquire_lock():
     try:
         fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        # Read the stale PID so we can report it
         try:
             pid = open(_LOCKFILE).read().strip()
         except Exception:
             pid = "?"
         print(f"[Pinku] Another instance is already running (PID {pid}). Exiting.")
-        sys.exit(1)
+        sys.exit(2)   # exit code 2 = lockfile conflict; start_pinku.command waits longer before retry
     _lock_fh.write(str(os.getpid()))
     _lock_fh.flush()
     return _lock_fh   # keep open — released automatically when process exits
+
+import signal
 
 import config
 import stt
 import tts
 import llm
 import knowledge
-import logger as log_module
 import dashboard
+import speaker_id
+import apple_stt
+import mlx_stt
+import math_handler
+
+
+# ── SIGTERM handler — clean exit when pkill/kill sends SIGTERM ────────────────
+# Without this, Python's default SIGTERM kills the process but bypasses the
+# finally block in _voice_loop, leaving threads mid-flight.  Raising
+# KeyboardInterrupt re-uses the existing clean-shutdown path in main().
+def _handle_sigterm(signum, frame):
+    print("[Pinku] Received SIGTERM — shutting down cleanly …")
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 
 # ── Global state ──────────────────────────────────────────────────────────────
@@ -62,19 +74,16 @@ _awake         = threading.Event()   # set = in active voice session
 _stop_all      = threading.Event()
 _processing    = threading.Lock()    # held while handling an utterance end-to-end
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
-_det_logger    = log_module.DetectionLogger()
 
-_last_speech_at: float = time.time()   # reset on every utterance / wake / gesture
-_last_human_at:  float = 0.0           # last time camera saw a person in frame
-_camera_enabled: bool  = False         # True once camera starts; enables auto-wake
-_settle_until:   float = 0.0           # voice loop blocked until this time (TTS + echo settle)
+_last_speech_at:  float = time.time()   # reset on every utterance / wake / gesture
+_settle_until:    float = 0.0           # voice loop blocked until this time (TTS + echo settle)
+_current_speaker: str | None = None    # name of identified speaker for this utterance
+_last_gate_at:    float = 0.0           # last time a PCM chunk passed the speaker gate
 
 # Consecutive Gemini wake-word-only / hallucination counter.
 # Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
 # increments this counter; a real command (with content words) resets it.
-# When it reaches _HALLUC_MAX the session is forcibly closed so the voice loop
-# drops back to cheap local Whisper wake-word detection instead of hammering
-# the Gemini audio API every ~3 s.
+# When it reaches _HALLUC_MAX the session is forcibly closed.
 _gemini_halluc_count: int = 0
 _HALLUC_MAX:          int = 4   # close session after this many consecutive non-commands
 
@@ -94,24 +103,8 @@ _last_user_transcript: str   = ""
 _last_transcript_at:   float = 0.0
 _TRANSCRIPT_DEDUP_SEC: float = 4.0   # seconds — same transcript in this window = duplicate
 
-# When hallucinations force-close the session, face-detection cannot reopen it
-# until this epoch — prevents the open→hallucinate×4→close→reopen cycle that
-# burned through the Gemini daily quota.  Only a spoken wake word (Whisper) or
-# explicit gesture can reopen the session during the cooldown.
-_face_wake_blocked_until: float = 0.0
-_FACE_WAKE_BLOCK_SEC:     float = 60.0   # seconds to block face-detection wake after hallucination flush
-
-# How long after last camera person detection before we consider room empty
-_HUMAN_GONE_SEC = 12.0
-
-
 def is_muted() -> bool:
     return _muted.is_set()
-
-
-def _human_is_present() -> bool:
-    """True if camera is running and saw someone within the last _HUMAN_GONE_SEC seconds."""
-    return _camera_enabled and (time.time() - _last_human_at < _HUMAN_GONE_SEC)
 
 
 # ── Logging helper ────────────────────────────────────────────────────────────
@@ -140,7 +133,8 @@ def _brief_mute(seconds: float = 1.5):
     threading.Thread(target=_clear, daemon=True, name="brief-mute").start()
 
 
-def _speak_reply(reply: str, is_hi: bool):
+def _speak_reply(reply: str, is_hi: bool, _t_utterance: float = 0.0,
+                 _t_spk: float = 0.0, _t_llm: float = 0.0):
     global _last_speech_at, _settle_until, _last_reply_text, _last_reply_at
     # If user explicitly muted, discard reply entirely — don't speak even if
     # Gemini finished processing after the button was pressed.
@@ -174,23 +168,36 @@ def _speak_reply(reply: str, is_hi: bool):
     # Edge-tts can speak noticeably faster than the 95 WPM word-count estimate,
     # so without re-anchoring the mic would be dead for several extra seconds.
     known_duration = tts.known_duration(reply)
-    # Minimum 4.0 s settle — gives room echo time to die down before the mic
-    # reopens.  3 s was not enough for longer responses: a 10-second reply at
-    # 0.15 coefficient only gave 3 s, but the reverb tail persisted longer.
-    # 0.25 coefficient + 4-6 s range adds ~2 s of safety margin on long replies.
-    settle          = max(4.0, min(known_duration * 0.25, 6.0))   # 4.0 – 6.0 s
+    # Echo-settle: short replies use TTS_SETTLE_MIN (default 1.5 s); longer
+    # replies scale at 0.25× duration so a 10 s reply gets ~2.5 s settle.
+    # Cap at 6 s — more than enough for any room echo tail.
+    settle          = max(config.TTS_SETTLE_MIN, min(known_duration * 0.25, 6.0))
     _settle_until   = time.time() + known_duration + settle        # upper bound
 
     print(f"[TTS] known={known_duration:.1f}s  settle={settle:.1f}s")
+    if _t_utterance:
+        _t_tts = time.time()
+        print(
+            f"[LATENCY] spk={_t_spk-_t_utterance:.2f}s"
+            f"  gemini={_t_llm-_t_spk:.2f}s"
+            f"  dispatch={_t_tts-_t_llm:.2f}s"
+            f"  → total={_t_tts-_t_utterance:.2f}s  (utterance→first word)"
+        )
 
     # NOTE: _processing is intentionally NOT released here.
     # tts.speak(block=True) blocks the voice loop thread anyway, so releasing
     # early would only allow a second queued clip to slip in BEFORE the settle
     # window is enforced — causing double-processing.  The finally block in
     # _voice_loop releases the lock after _speak_reply returns.
-    tts.speak(reply, prefer_hi=is_hi, block=True)
+    actual_duration = tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
+
+    # Recalculate settle from actual measured duration (edge-tts returns exact
+    # duration via afinfo; much more accurate than the 95 WPM pre-estimate).
+    if actual_duration > 0:
+        settle = max(config.TTS_SETTLE_MIN, min(actual_duration * 0.25, 6.0))
+        print(f"[TTS] actual={actual_duration:.1f}s  settle={settle:.1f}s")
 
     # TTS is done. Re-anchor settle window to actual end of speech.
     # _muted stays set during settle; the voice loop won't call wait_for_utterance
@@ -211,7 +218,8 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("source", f"Gemini + Google Search ({llm.GEMINI_MODEL})")
-    reply = llm.chat(tr, history=_session_hist, is_hi=is_hi)
+    spk_ctx = f"The person speaking is {_current_speaker}." if _current_speaker else ""
+    reply = llm.chat(tr, history=_session_hist, is_hi=is_hi, system_extra=spk_ctx)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
     if len(_session_hist) > 12:
@@ -322,32 +330,6 @@ def _handle_weather(action: dict):
     _speak_reply(reply, lang == "hi")
 
 
-def _handle_describe(action: dict):
-    """Grab camera frame, describe via vision LLM."""
-    tr   = action.get("transcript", "What do you see?")
-    lang = action.get("lang", "en")
-    is_hi = lang == "hi"
-    try:
-        from camera import get_frame, frame_to_b64
-        frame = get_frame()
-    except Exception:
-        frame = None
-    if frame is None:
-        reply = "कैमरा अभी उपलब्ध नहीं है।" if is_hi else "Camera isn't available right now."
-        dashboard.update_status(last_transcript=tr, last_reply=reply)
-        _speak_reply(reply, is_hi)
-        return
-    tts.speak("Let me look…" if not is_hi else "देखती हूँ…")
-    b64  = frame_to_b64(frame)
-    desc = llm.describe_image(b64, question=tr, is_hi=is_hi)
-    print(f"[Vision] {desc!r}")
-    # Gracefully handle vision model failures
-    if desc == "__vision_error__" or (desc.startswith("[") and "error" in desc.lower()):
-        desc = "माफ करना, अभी देख नहीं पा रही।" if is_hi else "Sorry, I couldn't see anything right now."
-    dashboard.update_status(last_transcript=tr, last_reply=desc)
-    _speak_reply(desc, is_hi)
-
-
 def _handle_scripture(action: dict):
     """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
     knowledge.handle(
@@ -441,376 +423,6 @@ def _extend_session():
     _log("wake", "Session open — listening")
 
 
-# ── Gesture action map ────────────────────────────────────────────────────────
-#
-# Gestures detected by camera.py (OpenCV skin + convexity defects on wrist crop):
-#   Thumbs Up, Thumbs Down, Open Hand, Fist, Peace
-#
-# _GESTURE_ACTIONS[label] = (requires_awake_session, handler_fn_name)
-#   requires_awake_session=False → fires even in idle/muted state (good for wake gestures)
-#   requires_awake_session=True  → only fires during an active voice session
-#
-# Cooldown prevents repeat-firing while hand is held steady.
-_gesture_last_at: dict[str, float] = {}
-_gesture_throttle_lock = threading.Lock()   # makes read-check-write atomic
-_GESTURE_COOLDOWN = 8.0   # seconds between same-gesture re-fires
-
-# Lock that makes the face-detection wake block atomic.
-# The camera thread fires on_detection at frame-rate (≥15 fps); without a lock
-# two rapid frames both pass "if not _awake.is_set()" before either sets it,
-# causing duplicate wake logs, duplicate beeps, and duplicate Gemini calls.
-_face_wake_lock = threading.Lock()
-
-_GESTURE_ACTIONS: dict[str, tuple[bool, str]] = {
-    # requires_session=False → fires even from muted/idle state
-    "Hands Up":  (False, "_gesture_hands_up"),   # 🙌 arm raised → unmute + wake
-    "Open Hand": (False, "_gesture_open_hand"),  # 🖐 wave → mute toggle (any state)
-    # Fist removed — too many false positives from normal resting hand
-}
-
-
-def _gesture_throttle(label: str) -> bool:
-    """Return True if we should fire (not in cooldown).
-    Lock makes the read-check-write atomic so simultaneous on_detection
-    calls from the camera thread can't both slip past the cooldown."""
-    with _gesture_throttle_lock:
-        now = time.time()
-        if now - _gesture_last_at.get(label, 0) < _GESTURE_COOLDOWN:
-            return False
-        _gesture_last_at[label] = now
-        return True
-
-
-def _gesture_hands_up():
-    """🙌 Hands up (wrist above shoulder) — wake from muted state.
-    This is the ONLY gesture that wakes Pinku when user-muted."""
-    _log("wake", "🙌 Hands Up → unmute + wake")
-    _handle_unmute()   # clears silent flag, plays unmute tone, opens session
-
-
-def _gesture_open_hand():
-    """🖐 Open hand / wave.
-    Hard-muted  → unmute back to standby.
-    In session  → sleep (end conversation, stay listening).
-    Sleeping    → hard mute (next wave unmutes)."""
-    if _user_muted.is_set():
-        _log("wake", "🖐 Open Hand → unmute")
-        _handle_unmute()
-    elif _awake.is_set() or tts.is_speaking():
-        tts.stop_speaking()
-        _log("wake", "🖐 Open Hand → sleep")
-        _handle_sleep()
-    else:
-        _log("wake", "🖐 Open Hand → mute")
-        _handle_mute()
-
-
-def _gesture_fist():
-    """✊ Closed fist — sleep (end session, stay in standby)."""
-    _log("wake", "✊ Fist → sleep")
-    _handle_sleep()
-
-
-_GESTURE_FN_MAP: dict[str, object] = {
-    "_gesture_hands_up":  _gesture_hands_up,
-    "_gesture_open_hand": _gesture_open_hand,
-}
-
-
-def _dispatch_gestures(event: dict):
-    for g in event.get("gestures", []):
-        label = g.get("gesture", "")
-        if label not in _GESTURE_ACTIONS:
-            continue
-        requires_session, fn_name = _GESTURE_ACTIONS[label]
-        if requires_session and not _awake.is_set():
-            continue
-        if not _gesture_throttle(label):
-            continue
-        fn = _GESTURE_FN_MAP.get(fn_name)
-        if fn:
-            threading.Thread(target=fn, daemon=True).start()
-
-
-# ── Laser dot handler ────────────────────────────────────────────────────────
-
-import math as _math
-import json as _json
-
-_laser_was_present: bool = False   # True while a dot is on the wall
-_dart_hits: list[dict] = []        # [{x, y, score, callout}] — last 20 throws
-
-# ── Dart game state ───────────────────────────────────────────────────────────
-_GAME_SHOTS = 5                    # shots per turn
-_game_shots:   list[dict] = []     # current player's shots this turn
-_game_rounds:  list[dict] = []     # completed turns [{player, shots, total}]
-_game_player:  int  = 1            # current player number (1-based)
-_game_awaiting: bool = False       # True after 5 shots — waiting for "Next Player"
-
-# ── Laser calibration ─────────────────────────────────────────────────────────
-# Bullseye centre in normalised frame coords (0-1).
-# Loaded from ~/.pinku_laser_cal.json; defaults to frame-centre (0.5, 0.5).
-_laser_bull_x: float = 0.5
-_laser_bull_y: float = 0.5
-_LASER_CAL_FILE = os.path.expanduser("~/.pinku_laser_cal.json")
-
-
-def _load_laser_cal():
-    """Load saved bullseye calibration from disk (called at startup)."""
-    global _laser_bull_x, _laser_bull_y
-    try:
-        with open(_LASER_CAL_FILE) as f:
-            cal = _json.load(f)
-        _laser_bull_x = float(cal.get("bull_x", 0.5))
-        _laser_bull_y = float(cal.get("bull_y", 0.5))
-    except FileNotFoundError:
-        pass   # first run — use defaults
-    except Exception as e:
-        _log("warn", f"Laser cal load failed: {e}")
-
-
-def _save_laser_cal():
-    """Persist current bullseye to disk."""
-    try:
-        with open(_LASER_CAL_FILE, "w") as f:
-            _json.dump({"bull_x": _laser_bull_x, "bull_y": _laser_bull_y}, f)
-    except Exception as e:
-        _log("warn", f"Laser cal save failed: {e}")
-
-
-def _dart_score(x: float, y: float) -> tuple[int, str]:
-    """
-    Map a normalised (x, y) position to a dartboard score using the calibrated
-    bullseye centre.  100 = bullseye, decreasing rings outward, 0 = off-board.
-    Returns (score, callout_text).
-    """
-    dx = (x - _laser_bull_x) * 2
-    dy = (y - _laser_bull_y) * 2
-    dist = _math.sqrt(dx*dx + dy*dy) / _math.sqrt(2)   # 0 = bull, 1 = corner
-
-    if   dist < 0.035: return 100, "Bullseye! One hundred!"
-    elif dist < 0.09:  return  75, "Seventy five!"
-    elif dist < 0.16:  return  50, "Fifty!"
-    elif dist < 0.24:  return  25, "Twenty five."
-    elif dist < 0.35:  return  10, "Ten."
-    else:              return   0, "Miss."
-
-
-_LASER_MUTE_DOTS    = 10     # need this many simultaneous dots to trigger mute toggle
-_LASER_MUTE_COOLDOWN = 5.0  # seconds — ignore repeated multi-dot events
-_laser_mute_last_at: float = 0.0
-
-
-def _handle_laser(dots: list[dict]):
-    """
-    0 dots   → mark absent (next appearance will rescore).
-    1–9 dots → dart scoring only (single dot = throw; few dots = reflections, ignored).
-    10+ dots → mute / unmute toggle, with 5-second cooldown to avoid accidental re-fires.
-    """
-    global _laser_was_present, _laser_mute_last_at
-
-    # ── Dot gone — reset so next throw rescores ───────────────────────────────
-    if not dots:
-        if _laser_was_present:
-            _log("laser", "🔴 Laser gone — ready for next throw")
-            dashboard.update_status(laser=None)
-        _laser_was_present = False
-        return
-
-    # ── Many dots: toggle mute (no score) ────────────────────────────────────
-    if len(dots) >= _LASER_MUTE_DOTS:
-        now = time.time()
-        if now - _laser_mute_last_at < _LASER_MUTE_COOLDOWN:
-            _laser_was_present = True
-            return   # within cooldown — ignore
-        _laser_mute_last_at = now
-        _log("laser", f"🔴×{len(dots)} → mute toggle")
-        if _user_muted.is_set():
-            _handle_unmute()
-        else:
-            _handle_mute()
-        _laser_was_present = True
-        return
-
-    # ── Single dot ────────────────────────────────────────────────────────────
-    dot = dots[0]
-    x, y = dot["x"], dot["y"]
-    score, callout = _dart_score(x, y)
-    dashboard.update_status(laser={"x": x, "y": y, "score": score})
-
-    if _laser_was_present:
-        return   # dot still on wall, just moved — don't rescore
-
-    # Ignore new shots while waiting for "Next Player" tap
-    if _game_awaiting:
-        return
-
-    # Fresh appearance — record hit, show on screen (no auto-callout)
-    _laser_was_present = True
-    _dart_hits.append({"x": x, "y": y, "score": score, "callout": callout})
-    if len(_dart_hits) > 20:
-        _dart_hits[:] = _dart_hits[-20:]
-    _log("laser", f"🎯 ({x:.2f},{y:.2f}) → {score} pts")
-    dashboard.push_dart_hit({"x": x, "y": y, "score": score, "callout": callout})
-
-    # ── Game tracking ─────────────────────────────────────────────────────────
-    _game_shots.append({"x": x, "y": y, "score": score})
-    _push_game_state()
-    if len(_game_shots) >= _GAME_SHOTS:
-        _end_dart_turn()
-
-
-def _push_game_state():
-    dashboard.push_game_update({
-        "player":     _game_player,
-        "shots_done": len(_game_shots),
-        "shots_total": _GAME_SHOTS,
-        "turn_total": sum(s["score"] for s in _game_shots),
-        "awaiting":   _game_awaiting,
-        "rounds":     _game_rounds,
-    })
-
-
-def _end_dart_turn():
-    global _game_awaiting
-    total = sum(s["score"] for s in _game_shots)
-    _game_rounds.append({
-        "player": _game_player,
-        "shots":  list(_game_shots),
-        "total":  total,
-    })
-    _game_awaiting = True
-    _log("laser", f"🎯 P{_game_player} turn done: {len(_game_shots)} shots → {total} pts")
-    _push_game_state()
-
-
-def _dart_next_player():
-    global _game_player, _game_awaiting
-    # If turn ended manually before 5 shots, record it first
-    if not _game_awaiting and _game_shots:
-        _end_dart_turn()
-    _game_shots.clear()
-    _dart_hits.clear()             # clear so reconnecting clients see only new turn
-    _game_player += 1
-    _game_awaiting = False
-    dashboard.push_dart_hits_clear()   # wipe dots on overlay for new turn
-    _push_game_state()
-    _log("laser", f"🎯 P{_game_player}'s turn — ready")
-
-
-def _dart_new_game():
-    global _game_player, _game_awaiting
-    _game_shots.clear()
-    _game_rounds.clear()
-    _game_player  = 1
-    _game_awaiting = False
-    _dart_reset()   # also clears _dart_hits + broadcasts dart_reset
-    _push_game_state()
-    _log("laser", "🎯 New dart game — P1's turn")
-
-
-def _dart_speak_last():
-    """Speak the most recent dart score aloud — triggered by dashboard button."""
-    if not _dart_hits:
-        threading.Thread(target=tts.speak,
-            kwargs={"text": "No dart hits recorded yet.", "block": False},
-            daemon=True, name="dart-speak").start()
-        return
-    hit = _dart_hits[-1]
-    threading.Thread(target=tts.speak,
-        kwargs={"text": hit["callout"], "block": False},
-        daemon=True, name="dart-speak").start()
-
-
-def _dart_reset():
-    """Clear all recorded dart hits — triggered by dashboard button."""
-    _dart_hits.clear()
-    dashboard.dart_reset()
-    _log("laser", "🎯 Dart hits cleared")
-
-
-def _handle_laser_calibrate():
-    """
-    Set the scoring bullseye to wherever the laser dot currently is.
-    Called from dashboard 'laser_calibrate' action or /api/laser/calibrate.
-    Returns a dict so the REST endpoint can relay the result to the browser.
-    """
-    global _laser_bull_x, _laser_bull_y
-    try:
-        from camera import _laser_overlay_dots, _laser_overlay_lock
-        with _laser_overlay_lock:
-            dots = list(_laser_overlay_dots)
-    except Exception as e:
-        _log("warn", f"Laser calibrate: camera error — {e}")
-        return {"ok": False, "error": str(e)}
-
-    if not dots:
-        _log("warn", "🎯 Calibrate failed — no dot detected (point laser at bullseye first)")
-        return {"ok": False, "error": "No laser dot detected — point your laser at the bullseye and try again."}
-
-    dot = dots[0]
-    _laser_bull_x = dot["x"]
-    _laser_bull_y = dot["y"]
-    _save_laser_cal()
-
-    # Update camera overlay so the bullseye ring redraws immediately
-    try:
-        from camera import set_laser_bull
-        set_laser_bull(_laser_bull_x, _laser_bull_y)
-    except Exception:
-        pass
-
-    _log("laser", f"🎯 Bullseye set → ({_laser_bull_x:.3f},{_laser_bull_y:.3f})")
-    if not _user_muted.is_set():
-        threading.Thread(
-            target=tts.speak,
-            kwargs={"text": "Bullseye calibrated.", "block": False},
-            daemon=True, name="laser-cal",
-        ).start()
-    return {"ok": True, "bull_x": _laser_bull_x, "bull_y": _laser_bull_y}
-
-
-# ── Detection callback ────────────────────────────────────────────────────────
-
-def on_detection(event: dict):
-    """Camera detection callback — auto-wakes on person presence, dispatches gestures."""
-    global _last_human_at, _last_speech_at
-    _det_logger.log(event)
-    dashboard.push_detection(event)
-
-    if event.get("persons", 0) > 0:
-        now = time.time()
-        _last_human_at = now
-        if not _user_muted.is_set():
-            # Lock makes the check-and-set atomic: camera fires on_detection at
-            # frame-rate so two consecutive frames can both see _awake==False
-            # and both trigger the wake logic before either sets _awake.
-            with _face_wake_lock:
-                if not _awake.is_set():
-                    if time.time() < _face_wake_blocked_until:
-                        # Session was recently closed due to hallucinations.
-                        # Don't reopen from face-detection alone — require an
-                        # explicit spoken wake word or gesture to break the cycle.
-                        pass
-                    else:
-                        # Person detected — gentle ack chime + open session
-                        # NOTE: chime is temporary (entry=True applies 25s cooldown)
-                        _last_speech_at = now
-                        _awake.set()
-                        dashboard.update_status(state="awake")
-                        _log("wake", "👤 Face detected → listening")
-                        tts.play_beep(entry=True)
-                else:
-                    # Already awake — keep the inactivity timer alive while person is visible
-                    _last_speech_at = now
-
-    if "laser" in event:   # always call — empty list = dot gone
-        _handle_laser(event["laser"])
-
-    if event.get("gestures"):
-        _dispatch_gestures(event)
-
-
 # ── Wake word / session end detection ────────────────────────────────────────
 
 # Wake phrases — must appear at the START of the utterance.
@@ -820,9 +432,22 @@ _WAKE_PHRASES = [
     "hello pinku", "yo pinku", "pinku",
     "hey pinky", "hi pinky", "ok pinky", "okay pinky",
     "hello pinky", "yo pinky", "pinky",
+    "hey pinkie", "hi pinkie", "pinkie",          # alternate spelling
+    "hey pinki", "hi pinki", "pinki",             # Indian English spelling
     # Common Whisper mishearings of "Pinku"/"Pinky":
     "hey pinko", "hi pinko", "ok pinko", "hello pinko", "pinko",
+    "hey pinkku", "hi pinkku", "pinkku",          # doubled k (Pinku)
+    "hey pinkky", "hi pinkky", "pinkky",          # doubled k (Pinky)
+    "hey pinkhu", "hi pinkhu", "pinkhu",          # inserted h (Pinku)
+    "hey pinkhy", "hi pinkhy", "pinkhy",          # inserted h (Pinky)
     "hey pink", "hi pink", "ok pink", "pink",
+    "hey piku", "hi piku", "ok piku", "piku",     # Pinku with dropped n
+    "hey pico", "hi pico", "pico",               # Whisper English mishearing
+    "hey pinsky", "hi pinsky", "pinsky",         # Pinky with s inserted
+    "hey minkoo", "hi minkoo", "minkoo",         # m instead of p mishearing
+    "hey minku", "hi minku", "minku",
+    "hey minky", "hi minky", "minky",
+    "hey piky", "hi piky", "piky",                # Pinky with dropped n
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
 ]
@@ -843,19 +468,53 @@ import re as _re
 # and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
-    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|आई|ए|अरी)[,.\s]+)?'   # optional Hindi/English prefix
-    r'(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
-    r'|पिंकू|पिंकु|पिंको|पिंकी'
-    r'|पिकु|पिकू)\b[,\s।]*',                                       # पिकु = Whisper drops anusvara ं
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
+    r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|पिंकू|पिंकु|पिंको|पिंकी|पिंक्व'
+    r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु/पिंक्व = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
-    r'\b(pinku|pinky|pinko|pinco|pingo|pingu|pinkoo|penku|penko|pintu|pink'
-    r'|पिंकू|पिंकु|पिंको|पिंकी'
-    r'|पिकु|पिकू)\b[\W]*$',
+    r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|पिंकू|पिंकु|पिंको|पिंकी|पिंक्व'
+    r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
     _re.IGNORECASE,
 )
+
+_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}
+# Devanagari fuzzy: initial consonant (प/त/म/ब) + vowel (ि/ी/े) +
+# optional nasal/r + k-family consonant + optional ending vowel/cluster
+_DEVANAGARI_WAKE_RE = _re.compile(
+    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीो]|्[वय])?$'
+)
+# Roman fuzzy targets — edit distance ≤ 2 catches pinkku, piku, minkoo, pinsky, etc.
+_FUZZY_TARGETS = ["pinku", "pinky", "pinki", "pinkoo", "penku"]
+_FUZZY_PREFIXES = set("pmbt")  # consonant substitutions seen in Whisper mishearings
+_FUZZY_GREETINGS = {"hi", "hey", "ok", "okay", "hello", "yo"}
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) > len(b):
+        a, b = b, a
+    row = list(range(len(a) + 1))
+    for c2 in b:
+        new = [row[0] + 1]
+        for j, c1 in enumerate(a):
+            new.append(min(new[-1] + 1, row[j + 1] + 1, row[j] + (c1 != c2)))
+        row = new
+    return row[-1]
+
+
+def _is_fuzzy_wake(word: str) -> bool:
+    """True if word is a plausible Whisper mishearing of Pinku/Pinky."""
+    w = word.lower().strip(",.!?'\"")
+    if not (4 <= len(w) <= 8):
+        return False
+    if w[0] not in _FUZZY_PREFIXES:
+        return False
+    return any(_levenshtein(w, t) <= 2 for t in _FUZZY_TARGETS)
+
 
 def _check_wake(text: str) -> tuple[bool, str]:
     """
@@ -863,30 +522,46 @@ def _check_wake(text: str) -> tuple[bool, str]:
     Matches wake word at start OR end of utterance.
     e.g. "Pinky what's the time" and "what's the time Pinky" both work.
     """
-    t = text.strip()
-    # Strip leading filler
+    import unicodedata
+    t = unicodedata.normalize("NFC", text.strip())
     for filler in ("um ", "uh ", "so ", "like ", "well ", "okay so "):
         if t.lower().startswith(filler):
             t = t[len(filler):]
 
-    # Wake word at START — "Pinky, what's the time?"
+    words = t.split()
+    words_clean = [w.strip(",.!?।॥ '\"") for w in words]
+
+    # ── Devanagari fuzzy check ─────────────────────────────────────────────
+    for i, w in enumerate(words_clean):
+        wn = unicodedata.normalize("NFC", w)
+        if _DEVANAGARI_WAKE_RE.match(wn):
+            if i == 0 or words_clean[i - 1] in _HINDI_PRE:
+                return True, " ".join(words_clean[i + 1:]).strip()
+
+    # ── Roman regex (explicit variants + exact phrase list) ────────────────
     m = _PINKU_RE_START.match(t)
     if m:
-        rest = t[m.end():].strip(" ,.")
-        return True, rest
+        return True, t[m.end():].strip(" ,.")
 
-    # Exact phrase fallback (start)
     tl = t.lower()
     for phrase in _WAKE_PHRASES:
         if tl.startswith(phrase):
-            rest = t[len(phrase):].strip(" ,.")
-            return True, rest
+            after_idx = len(phrase)
+            if after_idx < len(tl) and tl[after_idx].isalnum():
+                continue
+            return True, t[after_idx:].strip(" ,.")
 
-    # Wake word at END — "what's the time Pinky?"
+    # ── Roman fuzzy check (catches unseen Whisper variants) ────────────────
+    wl = [w.lower().strip(",.!?'\"") for w in words]
+    for i, w in enumerate(wl):
+        if _is_fuzzy_wake(w):
+            if i == 0 or wl[i - 1] in _FUZZY_GREETINGS:
+                return True, " ".join(words[i + 1:]).strip(" ,.")
+
+    # ── Wake word at END — "what's the time Pinky?" ────────────────────────
     m = _PINKU_RE_ANY.search(t)
     if m:
-        command = t[:m.start()].strip(" ,.")
-        return True, command
+        return True, t[:m.start()].strip(" ,.")
 
     return False, text
 
@@ -919,8 +594,6 @@ def _dispatch_action(action: dict):
         _handle_unmute()
     elif act == "time":
         _handle_time(action)
-    elif act == "describe":
-        _handle_describe(action)
     elif act == "scripture":
         _handle_scripture(action)
     elif act == "weather":
@@ -938,22 +611,34 @@ def _handle_gemini_result(result: dict):
     Gemini has already transcribed + classified + (optionally) generated the reply.
     """
     global _last_speech_at
+    _t_utterance = result.get("_t_utterance", 0.0)
+    _t_spk       = result.get("_t_spk",       0.0)
+    _t_llm       = result.get("_t_llm",       0.0)
 
     transcript = result.get("transcript", "").strip()
     action     = result.get("action", "ignore")
     lang       = result.get("lang", "en")
-    # Correct Gemini language misclassification: if transcript has no Devanagari
-    # characters, it can't be Hindi — force English.
-    if lang == "hi" and not _re.search(r'[ऀ-ॿ]', transcript):
-        lang = "en"
-        # If Gemini also generated its reply in Hindi, discard it so the action
-        # falls through to _dispatch_action → _handle_chat which will regenerate
-        # in English.  Keeping a Hindi reply and just changing the voice would
-        # speak Hindi words through the English TTS voice — sounds wrong.
-        _reply_raw = result.get("reply", "")
-        if _reply_raw and _re.search(r'[ऀ-ॿ]', _reply_raw):
-            _log("info", "Gemini replied in Hindi to an English question — discarding reply, regenerating")
-            result["reply"] = ""
+
+    # ── Idle-mode wake-word guard ─────────────────────────────────────────────
+    # When called with session_active=False (idle / known-speaker path), Gemini
+    # must have heard the wake word.  If the transcript contains no wake-word
+    # variant, Gemini hallucinated a command from background audio — force ignore.
+    # This catches cases like Gemini returning "chat" for garbled ambient audio
+    # even though the idle prompt explicitly requires the wake word.
+    _session_was_active = result.get("_session_active", True)   # injected below
+    if not _session_was_active and not _awake.is_set():
+        _WAKE_RE = _re.compile(
+            r'\b(pinku|pinky|pinko|pink|pingu|pinkoo|penku|penko'
+            r'|पिंकू|पिंकु|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)\b',
+            _re.IGNORECASE)
+        if action != "ignore" and not _WAKE_RE.search(transcript):
+            _log("info",
+                 f'Idle hallucination suppressed — no wake word in: "{transcript[:60]}"')
+            _brief_mute(1.5)
+            return
+
+    # Trust Gemini's language classification — transliterated Hindi
+    # ("aath aur aath kitna hota hai") has no Devanagari but is still Hindi.
     is_hi      = lang == "hi"
 
     if not transcript:
@@ -1008,27 +693,23 @@ def _handle_gemini_result(result: dict):
             # noise and inventing wake words.  Close the session so the loop
             # falls back to cheap local Whisper wake-word detection instead of
             # hammering the Gemini audio API.
-            global _face_wake_blocked_until
             _log("info",
                  f"Gemini hallucinated wake word {_gemini_halluc_count}× in a row "
-                 f"— closing session, blocking face-wake for {_FACE_WAKE_BLOCK_SEC:.0f}s")
+                 f"— closing session")
             _gemini_halluc_count = 0
             _awake.clear()
             _session_hist.clear()
-            _face_wake_blocked_until = time.time() + _FACE_WAKE_BLOCK_SEC
             dashboard.update_status(state="idle")
             _brief_mute(6.0)   # long pause before resuming wake-word listening
             return
-        if _human_is_present() or _awake.is_set():
-            # Person is present — possible intentional wake-word call.
+        if _awake.is_set():
+            # In session — possible intentional wake-word call.
             # IMPORTANT: do NOT update _last_speech_at here.  If this is a
             # hallucination, updating the timer would keep the session open
             # forever, causing a perpetual Gemini-hammering feedback loop.
             _log("wake",
                  f'🔤 Wake word ({_gemini_halluc_count}/{_HALLUC_MAX}) — waiting for command')
-            _awake.set()
-            dashboard.update_status(state="awake")
-            _brief_mute(3.0)   # was 0.8 s — longer throttle limits Gemini call rate
+            _brief_mute(3.0)
             return
         _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
         _brief_mute(3.0)   # was 1.0 s
@@ -1042,7 +723,7 @@ def _handle_gemini_result(result: dict):
     # Actions that Python handles — discard any Gemini-supplied reply (it ignores our
     # system prompt instruction to leave reply:"" and generates text anyway).
     _PYTHON_ACTIONS = {
-        "time", "weather", "mute", "unmute", "describe",
+        "time", "weather", "mute", "unmute",
         "lights_on", "lights_off",
     }
     # weather is handled by Python (_handle_weather fetches from wttr.in)
@@ -1067,6 +748,9 @@ def _handle_gemini_result(result: dict):
             return
 
     _last_speech_at = time.time()
+    # Open an active session so follow-up queries use the fast Apple STT path
+    # instead of going back through Gemini audio every time.
+    _awake.set()
 
     # Session-end check (short utterances only)
     if _check_end(transcript) and _awake.is_set():
@@ -1088,7 +772,9 @@ def _handle_gemini_result(result: dict):
 
     if reply:
         # Gemini already generated the reply (chat / scripture)
-        src = f"Gemini audio ({llm.GEMINI_MODEL})"
+        _stt = result.get("_stt_label")
+        src = (f"{_stt} + Gemini text ({llm.GEMINI_MODEL})" if _stt
+               else f"Gemini audio ({llm.GEMINI_MODEL})")
         _log("source", src)
         _session_hist.append({"role": "user",      "content": transcript})
         _session_hist.append({"role": "assistant", "content": reply})
@@ -1096,11 +782,14 @@ def _handle_gemini_result(result: dict):
             _session_hist[:] = _session_hist[-12:]
         dashboard.update_status(last_transcript=transcript, last_reply=reply)
         dashboard.record_conversation(transcript, reply, lang=lang, source=src)
-        _speak_reply(reply, is_hi)
+        _speak_reply(reply, is_hi,
+                     _t_utterance=_t_utterance, _t_spk=_t_spk, _t_llm=_t_llm)
     else:
         # Action needs Python handler (time, mute, describe, etc.)
-        _dispatch_action({"action": action, "lang": lang,
-                          "transcript": transcript, **result})
+        # Put explicit overrides AFTER **result so they win over Gemini's original values.
+        # ("lang": lang must come last — otherwise **result's lang:"hi" silently wins.)
+        _dispatch_action({**result, "action": action, "lang": lang,
+                          "transcript": transcript})
 
 
 def _has_repeated_phrase(text: str, n: int = 3) -> bool:
@@ -1185,7 +874,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
     Fallback to Whisper + Ollama + Gemini if Gemini audio is unavailable.
     """
-    global _last_speech_at
+    global _last_speech_at, _current_speaker, _last_gate_at
 
     while not _stop_all.is_set():
         if tts.is_speaking():
@@ -1206,11 +895,15 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
         # ── Session timeout ───────────────────────────────────────────────────
         if (_awake.is_set()
-                and time.time() - _last_speech_at > config.SESSION_TIMEOUT
-                and not _human_is_present()):
+                and time.time() - _last_speech_at > config.SESSION_TIMEOUT):
             _awake.clear()
             dashboard.update_status(state="idle")
             _log("info", f"Session timeout after {config.SESSION_TIMEOUT}s → idle")
+
+        # ── Pause while dashboard Voices tab is recording enrollment audio ────
+        if dashboard.is_enrolling():
+            time.sleep(0.2)
+            continue
 
         pcm = recorder.wait_for_utterance(stop_event=_stop_all, timeout=5.0)
         if pcm is None:
@@ -1226,31 +919,180 @@ def _voice_loop(recorder: stt.AudioRecorder):
         if time.time() < _settle_until:
             continue
 
+        _t_utterance = time.time()   # ← latency clock starts when PCM is ready
+
+        # ── Speaker gate ──────────────────────────────────────────────────────────
+        # Drop audio from unrecognised voices (TV, Pinky's TTS echo, guests) before
+        # any expensive Whisper / Gemini call.  Falls back to open gate when no
+        # profiles are enrolled so the system works out of the box.
+        if config.SPEAKER_ID_ENABLED and speaker_id.has_profiles():
+            _spk_name, _spk_score = speaker_id.identify(pcm)
+            if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
+                _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
+                continue
+            # Inter-utterance cooldown: drop tail-audio reblips arriving within 3s
+            # of the previous utterance that passed the gate (prevents duplicate processing).
+            _gate_now = time.time()
+            if _gate_now - _last_gate_at < 3.0:
+                continue
+            _last_gate_at = _gate_now
+            _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
+            if _spk_name:
+                _log("info", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
+            else:
+                _log("info", f"SpeakerID: uncertain ({_spk_score:.2f}) — passing anonymously")
+        else:
+            _current_speaker = None
+
+        _t_spk = time.time()   # after speaker ID (or skipped)
+
         # ── Processing lock: drop audio if already handling a previous utterance ─
         if not _processing.acquire(blocking=False):
             continue   # silently discard — previous response still in flight
 
         try:
-            # ── Gate: Gemini path (face visible or session open) ──────────────
-            if _human_is_present() or _awake.is_set():
-                # session_active=True → no wake word required; person is already
-                # in conversation (face detected or awake session open).
+            # ── Gate: active session ─────────────────────────────────────────
+            if _awake.is_set():
+                # Drop uncertain/unknown speakers to block TV/background audio.
+                if _current_speaker is None:
+                    continue
+
                 dashboard.update_status(state="processing")
+
+                # ── Fast path: local STT + local math + Gemini text ──────────
+                # Apple STT ~0.2s (when authorized) → mlx-whisper ~0.5s →
+                # Gemini text routing ~1.0s.  Total ~1.0–1.5s vs ~3.5s audio.
+                _fast_transcript = apple_stt.transcribe(pcm)
+                _stt_label = "AppleSTT"
+                if not _fast_transcript:
+                    _fast_transcript = mlx_stt.transcribe(pcm)
+                    _stt_label = "MLXWhisper"
+
+                if _fast_transcript:
+                    _t_stt = time.time()
+                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
+
+                    # MLX mangles Devanagari Hindi — bypass text routing, use Gemini audio.
+                    # Transliterated Hindi (Roman script) still goes through text routing fine.
+                    _has_devanagari = bool(_re.search(r'[ऀ-ॿ]', _fast_transcript))
+                    if not _has_devanagari:
+                        # Math shortcut — no LLM call at all
+                        _math_answer = math_handler.detect_and_compute(_fast_transcript)
+                        if _math_answer:
+                            _t_llm = time.time()
+                            result = {
+                                "transcript": _fast_transcript,
+                                "lang": "en",
+                                "action": "chat",
+                                "reply": _math_answer,
+                                "_session_active": True,
+                                "_t_utterance": _t_utterance,
+                                "_t_spk": _t_spk,
+                                "_t_llm": _t_llm,
+                            }
+                            print(f"[MATH] {_math_answer}")
+                            _handle_gemini_result(result)
+                            continue
+
+                        # Gemini text routing (no audio upload)
+                        result = llm.text_route_and_respond(
+                            _fast_transcript, history=_session_hist,
+                            session_active=True, speaker=_current_speaker)
+                        _t_llm = time.time()
+                        # Only accept if Gemini understood the transcript.
+                        # "ignore" in active session usually means MLX mangled Hindi
+                        # into English gibberish — fall through to Gemini audio which
+                        # re-transcribes from raw PCM and handles Hindi natively.
+                        if result is not None and result.get("action") != "ignore":
+                            result["_session_active"] = True
+                            result["_t_utterance"]    = _t_utterance
+                            result["_t_spk"]          = _t_spk
+                            result["_t_llm"]          = _t_llm
+                            result["_stt_label"]      = _stt_label
+                            _handle_gemini_result(result)
+                            continue
+                        if result is not None:
+                            print(f"[STT] Text-route ignored active-session speech — retrying via Gemini audio")
+
+                # Devanagari Hindi, text-route ignored, STT failed, or routing failed — Gemini audio
                 result = llm.transcribe_and_respond(
-                    pcm, history=_session_hist, session_active=True)
+                    pcm, history=_session_hist, session_active=True,
+                    speaker=_current_speaker)
+                _t_llm = time.time()
                 if result is not None:
+                    result["_session_active"] = True
+                    result["_t_utterance"]    = _t_utterance
+                    result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
                 else:
-                    # Gemini unavailable or rate-guard skipped — fall back to Whisper + Ollama.
-                    # Real errors are already logged in llm.py; don't double-log here.
                     _fallback_process(pcm)
                 continue
 
-            # ── Gate: idle mode — Whisper locally for wake word only ─────────
+            # ── Gate: idle mode ───────────────────────────────────────────────
             dur = len(pcm) / (16000 * 2)
             if dur > 6.0:
                 print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
+
+            # Known speaker in idle mode.
+            if _current_speaker is not None:
+                dashboard.update_status(state="processing")
+
+                if mlx_stt.is_ready():
+                    # English first (~0.85s), Hindi retry only if wake word not found.
+                    # English gives reliable Roman wake words; Hindi retry handles
+                    # pure Hindi speech where English transliteration misses the name.
+                    _idle_transcript, triggered, command = \
+                        mlx_stt.transcribe_with_fallback(pcm, _check_wake)
+                    _t_mlx = time.time()
+                    print(f"[MLXWhisper] ({_t_mlx-_t_spk:.2f}s)")
+                    if triggered:
+                        _awake.set()
+                        _last_speech_at = time.time()
+                        if command:
+                            dashboard.update_status(last_transcript=command)
+                            result = llm.text_route_and_respond(
+                                command, history=_session_hist,
+                                session_active=True, speaker=_current_speaker)
+                            _t_llm = time.time()
+                            if result is not None:
+                                result["_session_active"] = False
+                                result["_t_utterance"]    = _t_utterance
+                                result["_t_spk"]          = _t_spk
+                                result["_t_llm"]          = _t_llm
+                                result["_stt_label"]      = "MLXWhisper"
+                                _handle_gemini_result(result)
+                            else:
+                                _fallback_process(pcm)
+                        else:
+                            tts.play_beep()
+                            dashboard.update_status(state="awake")
+                            _brief_mute(1.5)
+                    elif _idle_transcript:
+                        # MLX produced text but missed the wake word — likely Hindi mangled
+                        # into English. Fall through to Gemini audio, which handles Hindi
+                        # natively and applies its own wake-word check (session_active=False).
+                        print(f'[STT] Idle — MLX no wake word ("{_idle_transcript}") — Gemini audio retry')
+                    else:
+                        dashboard.update_status(state="idle")
+                        continue
+
+                # mlx-whisper not ready, OR MLX found text but no wake word — Gemini audio
+                result = llm.transcribe_and_respond(
+                    pcm, history=_session_hist, session_active=False,
+                    speaker=_current_speaker)
+                _t_llm = time.time()
+                if result is not None:
+                    result["_session_active"] = False
+                    result["_t_utterance"]    = _t_utterance
+                    result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
+                    _handle_gemini_result(result)
+                else:
+                    _fallback_process(pcm)
+                continue
+
             try:
                 text = stt.transcribe(pcm)
             except Exception as e:
@@ -1282,7 +1124,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
             # Wake word + inline command — send audio to Gemini for quality response
             dashboard.update_status(state="processing")
-            result = llm.transcribe_and_respond(pcm, history=_session_hist)
+            result = llm.transcribe_and_respond(pcm, history=_session_hist,
+                                                speaker=_current_speaker)
             if result is not None:
                 _handle_gemini_result(result)
             else:
@@ -1303,7 +1146,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
 def main():
     _acquire_lock()   # exit immediately if another instance is running
     ap = argparse.ArgumentParser(description="Pinku — local home assistant")
-    ap.add_argument("--no-camera",    action="store_true", help="Disable camera detection")
     ap.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard")
     ap.add_argument("--model",        default=None,        help="Override Ollama model")
     ap.add_argument("--port",         type=int, default=config.DASHBOARD_PORT)
@@ -1333,7 +1175,7 @@ def main():
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
     if not args.no_dashboard:
-        dashboard.start(logger=_det_logger, port=args.port)
+        dashboard.start(port=args.port)
         # Wire dashboard buttons → pinku actions
         dashboard.register_action("wake",             _extend_session)
         dashboard.register_action("sleep",            _handle_sleep)
@@ -1342,25 +1184,6 @@ def main():
         dashboard.register_action("pause",            _handle_pause)
         dashboard.register_action("stop",             _handle_pause)   # alias
         dashboard.register_action("mute_toggle",      lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
-        dashboard.register_action("laser_calibrate",  _handle_laser_calibrate)
-        dashboard.register_action("dart_speak",       _dart_speak_last)
-        dashboard.register_action("dart_reset",       _dart_reset)
-        dashboard.register_action("dart_next_player", _dart_next_player)
-        dashboard.register_action("dart_new_game",    _dart_new_game)
-
-    # ── Laser calibration ─────────────────────────────────────────────────────
-    _load_laser_cal()
-
-    # ── Camera ────────────────────────────────────────────────────────────────
-    cam = None
-    if not args.no_camera:
-        global _camera_enabled
-        from camera import CameraDetector, set_laser_bull
-        cam = CameraDetector(on_detection=on_detection)
-        cam.start()
-        _camera_enabled = True
-        # Push calibrated bull to camera overlay renderer
-        set_laser_bull(_laser_bull_x, _laser_bull_y)
 
     # ── Mic ───────────────────────────────────────────────────────────────────
     # Boost macOS input volume to maximum so distant speech reaches the mic pipeline
@@ -1375,6 +1198,18 @@ def main():
     recorder = stt.AudioRecorder()
     recorder.start()
 
+    # ── Fast STT for active sessions ─────────────────────────────────────────
+    apple_stt.request_authorization()   # no-op if permission not yet granted
+    mlx_stt.preload()                   # background download + warm-up
+
+    # ── Speaker identification ────────────────────────────────────────────────
+    if config.SPEAKER_ID_ENABLED:
+        n = speaker_id.load()
+        if n:
+            _log("info", f"SpeakerID: gate active — {n} profile(s) loaded: {', '.join(speaker_id._profiles)}")
+        else:
+            _log("info", "SpeakerID: no profiles enrolled — gate inactive (open to all voices)")
+
     dashboard.update_status(state="idle", muted=False, model=config.OLLAMA_MODEL)
     _log("info", f"Pinku ready — model={config.OLLAMA_MODEL} whisper={config.WHISPER_MODEL}")
     time.sleep(2.0)   # let mic settle before speaking so startup chime isn't heard as wake word
@@ -1387,8 +1222,6 @@ def main():
     finally:
         _stop_all.set()
         recorder.stop()
-        if cam:
-            cam.stop()
 
 
 if __name__ == "__main__":
