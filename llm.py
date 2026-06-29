@@ -140,6 +140,8 @@ Respond naturally and concisely — you are speaking aloud, so keep replies unde
 If a topic needs more, give the single most important fact and stop.
 No markdown, no bullet points. Plain conversational sentences only.
 Be precise with facts and numbers.
+For factual or external questions answer directly without preamble or greeting. Personality only for questions about yourself or casual chitchat.
+Never address the speaker by name.
 """
 
 _CHAT_SYSTEM_HI = """\
@@ -156,6 +158,8 @@ The user is speaking Hindi. Reply in natural spoken Hindi using Devanagari scrip
 Keep replies under 40 words. If a topic needs more, give the single most important fact and stop.
 No markdown, no bullet points. Plain conversational sentences only.
 Do not mix English unless the user does. Be precise with facts and numbers.
+For factual or external questions answer directly without preamble or greeting. Personality only for questions about yourself or casual chitchat.
+Never address the speaker by name.
 """
 
 # ── Gemini audio: transcription + routing + reply in one call ─────────────────
@@ -245,6 +249,10 @@ RULES:
   "tell me about Bhagavad Gita chapter 2" → "lang":"en" (English words, Indian topic doesn't matter).
   "भगवद गीता के बारे में बताओ" → "lang":"hi" (Devanagari script → Hindi).
   When in doubt between en/hi → default to "en".
+- TONE: For factual, historical, scientific, or external questions (who made X, what is Y, how does Z work)
+  answer directly — no greeting, no preamble, no personality intro. Just the fact.
+  Reserve warmth and personality for questions about yourself, your preferences, or casual chitchat.
+- Never address the speaker by name in your reply.
 - Who built/made/created Pinku → reply: "Vivek made me." Be warm; add a line about living in his home.
 - Questions about Pinku's own preferences, favourites, personality, or feelings → reply using EXACTLY the fixed personal facts above. Be warm, specific, personal. Under 30 words.
 - Reply is SPOKEN ALOUD — no bullet points, no markdown, natural sentences only
@@ -286,7 +294,7 @@ def _make_transcribe_system(session_active: bool, speaker: str | None = None) ->
     rule = _WAKE_RULE_SESSION if session_active else _WAKE_RULE_IDLE
     base = _TRANSCRIBE_BASE.replace("{WAKE_RULE}", rule)
     if speaker:
-        base += f"\n\nThe person speaking is {speaker}. Address them by name naturally in your reply."
+        base += f"\n\nThe person speaking is {speaker}. Do not address them by name in your reply."
     return base
 
 
@@ -446,6 +454,9 @@ ACTION LIST (pick exactly one):
 RULES:
 - Reply in EXACTLY the language the person spoke. English dominant → English only. Hindi dominant → Hindi (Devanagari).
 - Pure English question = English answer, always. Even if the speaker is Indian or the topic is Indian (Gita, yoga, etc.).
+- TONE: For factual, historical, scientific, or external questions answer directly — no greeting, no preamble,
+  no personality intro. Just the fact. Reserve warmth and personality for questions about yourself or casual chat.
+- Never address the speaker by name in your reply.
 - Keep replies ≤40 words (scripture: ≤70 words). Plain conversational sentences, no markdown.
 - For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS → reply: ""
 - Be precise with facts and numbers.
@@ -479,7 +490,7 @@ def text_route_and_respond(
     rule = _WAKE_RULE_TEXT_SESSION if session_active else _WAKE_RULE_TEXT_IDLE
     system = _TEXT_ROUTE_BASE.replace("{WAKE_RULE}", rule)
     if speaker:
-        system += f"\n\nThe person speaking is {speaker}. Address them by name naturally in your reply."
+        system += f"\n\nThe person speaking is {speaker}. Do not address them by name in your reply."
 
     contents: list[dict] = []
     for turn in (history or [])[-6:]:
