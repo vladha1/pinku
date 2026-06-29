@@ -87,7 +87,6 @@ Actions:
 - "weather"     → user asked about weather, मौसम, मोसम, मोसन, barish, baarish, temperature
 - "mute"        → user wants you to stop listening / be quiet / sleep
 - "unmute"      → user wants you to start listening again / wake up
-- "describe"    → user asked you to look / describe what you see / camera
 - "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
 - "lights_on"   → turn lights on
@@ -234,7 +233,6 @@ ACTION LIST (pick exactly one):
 "weather"    → weather question, मौसम, मोसम, मोसन, barish, baarish, temperature, forecast → reply: ""
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
 "unmute"     → told Pinky to wake / start / listen → reply: ""
-"describe"   → asked Pinky to look / describe what it sees (camera, dekho, kya dikh raha) → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
 
@@ -447,7 +445,6 @@ ACTION LIST (pick exactly one):
 "weather"    → weather, मौसम, barish, temperature → reply: ""
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
 "unmute"     → told Pinky to wake / start / listen → reply: ""
-"describe"   → asked Pinky to look / describe what it sees → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
 

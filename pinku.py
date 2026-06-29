@@ -51,7 +51,6 @@ import stt
 import tts
 import llm
 import knowledge
-import logger as log_module
 import dashboard
 import speaker_id
 import apple_stt
@@ -78,11 +77,8 @@ _awake         = threading.Event()   # set = in active voice session
 _stop_all      = threading.Event()
 _processing    = threading.Lock()    # held while handling an utterance end-to-end
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
-_det_logger    = log_module.DetectionLogger()
 
 _last_speech_at:  float = time.time()   # reset on every utterance / wake / gesture
-_last_human_at:   float = 0.0           # last time camera saw a person in frame
-_camera_enabled:  bool  = False         # True once camera starts; enables auto-wake
 _settle_until:    float = 0.0           # voice loop blocked until this time (TTS + echo settle)
 _current_speaker: str | None = None    # name of identified speaker for this utterance
 _last_gate_at:    float = 0.0           # last time a PCM chunk passed the speaker gate
@@ -110,17 +106,8 @@ _last_user_transcript: str   = ""
 _last_transcript_at:   float = 0.0
 _TRANSCRIPT_DEDUP_SEC: float = 4.0   # seconds — same transcript in this window = duplicate
 
-# How long after last camera person detection before we consider room empty
-_HUMAN_GONE_SEC = 12.0
-
-
 def is_muted() -> bool:
     return _muted.is_set()
-
-
-def _human_is_present() -> bool:
-    """True if camera is running and saw someone within the last _HUMAN_GONE_SEC seconds."""
-    return _camera_enabled and (time.time() - _last_human_at < _HUMAN_GONE_SEC)
 
 
 # ── Logging helper ────────────────────────────────────────────────────────────
@@ -344,32 +331,6 @@ def _handle_weather(action: dict):
 
     dashboard.update_status(last_transcript=tr, last_reply=reply)
     _speak_reply(reply, lang == "hi")
-
-
-def _handle_describe(action: dict):
-    """Grab camera frame, describe via vision LLM."""
-    tr   = action.get("transcript", "What do you see?")
-    lang = action.get("lang", "en")
-    is_hi = lang == "hi"
-    try:
-        from camera import get_frame, frame_to_b64
-        frame = get_frame()
-    except Exception:
-        frame = None
-    if frame is None:
-        reply = "कैमरा अभी उपलब्ध नहीं है।" if is_hi else "Camera isn't available right now."
-        dashboard.update_status(last_transcript=tr, last_reply=reply)
-        _speak_reply(reply, is_hi)
-        return
-    tts.speak("Let me look…" if not is_hi else "देखती हूँ…")
-    b64  = frame_to_b64(frame)
-    desc = llm.describe_image(b64, question=tr, is_hi=is_hi)
-    print(f"[Vision] {desc!r}")
-    # Gracefully handle vision model failures
-    if desc == "__vision_error__" or (desc.startswith("[") and "error" in desc.lower()):
-        desc = "माफ करना, अभी देख नहीं पा रही।" if is_hi else "Sorry, I couldn't see anything right now."
-    dashboard.update_status(last_transcript=tr, last_reply=desc)
-    _speak_reply(desc, is_hi)
 
 
 def _handle_scripture(action: dict):
