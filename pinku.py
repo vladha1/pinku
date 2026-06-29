@@ -903,6 +903,40 @@ _PINKU_RE_ANY = _re.compile(
     _re.IGNORECASE,
 )
 
+_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}
+# Devanagari fuzzy: initial consonant (प/त/म/ब) + vowel (ि/ी/े) +
+# optional nasal/r + k-family consonant + optional ending vowel/cluster
+_DEVANAGARI_WAKE_RE = _re.compile(
+    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीो]|्[वय])?$'
+)
+# Roman fuzzy targets — edit distance ≤ 2 catches pinkku, piku, minkoo, pinsky, etc.
+_FUZZY_TARGETS = ["pinku", "pinky", "pinki", "pinkoo", "penku"]
+_FUZZY_PREFIXES = set("pmbt")  # consonant substitutions seen in Whisper mishearings
+_FUZZY_GREETINGS = {"hi", "hey", "ok", "okay", "hello", "yo"}
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) > len(b):
+        a, b = b, a
+    row = list(range(len(a) + 1))
+    for c2 in b:
+        new = [row[0] + 1]
+        for j, c1 in enumerate(a):
+            new.append(min(new[-1] + 1, row[j + 1] + 1, row[j] + (c1 != c2)))
+        row = new
+    return row[-1]
+
+
+def _is_fuzzy_wake(word: str) -> bool:
+    """True if word is a plausible Whisper mishearing of Pinku/Pinky."""
+    w = word.lower().strip(",.!?'\"")
+    if not (4 <= len(w) <= 8):
+        return False
+    if w[0] not in _FUZZY_PREFIXES:
+        return False
+    return any(_levenshtein(w, t) <= 2 for t in _FUZZY_TARGETS)
+
+
 def _check_wake(text: str) -> tuple[bool, str]:
     """
     Returns (triggered, command).
@@ -911,49 +945,44 @@ def _check_wake(text: str) -> tuple[bool, str]:
     """
     import unicodedata
     t = unicodedata.normalize("NFC", text.strip())
-    # Strip leading filler
     for filler in ("um ", "uh ", "so ", "like ", "well ", "okay so "):
         if t.lower().startswith(filler):
             t = t[len(filler):]
 
-    # Hindi word-based check — handles Devanagari wake words robustly
-    # without relying on regex Unicode byte matching
-    _HINDI_WAKE = {"पिंकू", "पिंकु", "पिंकी", "पिंको", "पिंक्व",
-                   "पिकू", "पिकु", "पिको", "पिखु", "पिखू",
-                   "पिर्कू", "पिर्कु",           # r inserted
-                   "पीनको", "पीनकू", "पीनकु",    # long I variant
-                   "पिंगू", "पिंगु",
-                   "तेंकी", "तेंकु", "तेंकू", "तेंको"}  # t-for-p mishearing
-    _HINDI_PRE  = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}  # है = Whisper hearing "Hi" as hai
-    _t_words = [w.strip(",.!?।॥ ") for w in t.split()]
-    for i, w in enumerate(_t_words):
-        if unicodedata.normalize("NFC", w) in _HINDI_WAKE:
-            if i == 0 or _t_words[i - 1] in _HINDI_PRE:
-                command = " ".join(_t_words[i + 1:]).strip()
-                return True, command
+    words = t.split()
+    words_clean = [w.strip(",.!?।॥ '\"") for w in words]
 
-    # Wake word at START — "Pinky, what's the time?"
+    # ── Devanagari fuzzy check ─────────────────────────────────────────────
+    for i, w in enumerate(words_clean):
+        wn = unicodedata.normalize("NFC", w)
+        if _DEVANAGARI_WAKE_RE.match(wn):
+            if i == 0 or words_clean[i - 1] in _HINDI_PRE:
+                return True, " ".join(words_clean[i + 1:]).strip()
+
+    # ── Roman regex (explicit variants + exact phrase list) ────────────────
     m = _PINKU_RE_START.match(t)
     if m:
-        rest = t[m.end():].strip(" ,.")
-        return True, rest
+        return True, t[m.end():].strip(" ,.")
 
-    # Exact phrase fallback (start) — require word boundary after phrase
-    # so "hi pink" doesn't match "hi pinkku" (Whisper doubled-letter mishearing)
     tl = t.lower()
     for phrase in _WAKE_PHRASES:
         if tl.startswith(phrase):
             after_idx = len(phrase)
             if after_idx < len(tl) and tl[after_idx].isalnum():
-                continue  # partial match, e.g. "pink" inside "pinkku"
-            rest = t[after_idx:].strip(" ,.")
-            return True, rest
+                continue
+            return True, t[after_idx:].strip(" ,.")
 
-    # Wake word at END — "what's the time Pinky?"
+    # ── Roman fuzzy check (catches unseen Whisper variants) ────────────────
+    wl = [w.lower().strip(",.!?'\"") for w in words]
+    for i, w in enumerate(wl):
+        if _is_fuzzy_wake(w):
+            if i == 0 or wl[i - 1] in _FUZZY_GREETINGS:
+                return True, " ".join(words[i + 1:]).strip(" ,.")
+
+    # ── Wake word at END — "what's the time Pinky?" ────────────────────────
     m = _PINKU_RE_ANY.search(t)
     if m:
-        command = t[:m.start()].strip(" ,.")
-        return True, command
+        return True, t[:m.start()].strip(" ,.")
 
     return False, text
 
