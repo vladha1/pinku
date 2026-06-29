@@ -1402,39 +1402,43 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _t_stt = time.time()
                     print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
 
-                    # Math shortcut — no LLM call at all
-                    _math_answer = math_handler.detect_and_compute(_fast_transcript)
-                    if _math_answer:
+                    # MLX mangles Devanagari Hindi — bypass text routing, use Gemini audio.
+                    # Transliterated Hindi (Roman script) still goes through text routing fine.
+                    _has_devanagari = bool(_re.search(r'[ऀ-ॿ]', _fast_transcript))
+                    if not _has_devanagari:
+                        # Math shortcut — no LLM call at all
+                        _math_answer = math_handler.detect_and_compute(_fast_transcript)
+                        if _math_answer:
+                            _t_llm = time.time()
+                            result = {
+                                "transcript": _fast_transcript,
+                                "lang": "en",
+                                "action": "chat",
+                                "reply": _math_answer,
+                                "_session_active": True,
+                                "_t_utterance": _t_utterance,
+                                "_t_spk": _t_spk,
+                                "_t_llm": _t_llm,
+                            }
+                            print(f"[MATH] {_math_answer}")
+                            _handle_gemini_result(result)
+                            continue
+
+                        # Gemini text routing (no audio upload)
+                        result = llm.text_route_and_respond(
+                            _fast_transcript, history=_session_hist,
+                            session_active=True, speaker=_current_speaker)
                         _t_llm = time.time()
-                        result = {
-                            "transcript": _fast_transcript,
-                            "lang": "en",
-                            "action": "chat",
-                            "reply": _math_answer,
-                            "_session_active": True,
-                            "_t_utterance": _t_utterance,
-                            "_t_spk": _t_spk,
-                            "_t_llm": _t_llm,
-                        }
-                        print(f"[MATH] {_math_answer}")
-                        _handle_gemini_result(result)
-                        continue
+                        if result is not None:
+                            result["_session_active"] = True
+                            result["_t_utterance"]    = _t_utterance
+                            result["_t_spk"]          = _t_spk
+                            result["_t_llm"]          = _t_llm
+                            result["_stt_label"]      = _stt_label
+                            _handle_gemini_result(result)
+                            continue
 
-                    # Gemini text routing (no audio upload)
-                    result = llm.text_route_and_respond(
-                        _fast_transcript, history=_session_hist,
-                        session_active=True, speaker=_current_speaker)
-                    _t_llm = time.time()
-                    if result is not None:
-                        result["_session_active"] = True
-                        result["_t_utterance"]    = _t_utterance
-                        result["_t_spk"]          = _t_spk
-                        result["_t_llm"]          = _t_llm
-                        result["_stt_label"]      = _stt_label
-                        _handle_gemini_result(result)
-                        continue
-
-                # Apple STT failed or text routing failed — fall back to Gemini audio
+                # Devanagari Hindi, STT failed, or text routing failed — Gemini audio
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
