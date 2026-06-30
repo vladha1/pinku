@@ -1047,28 +1047,38 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         mlx_stt.transcribe_with_fallback(pcm, _check_wake)
                     _t_mlx = time.time()
                     print(f"[MLXWhisper] ({_t_mlx-_t_spk:.2f}s)")
+                    _triggered = triggered   # capture for Gemini audio session_active below
                     if triggered:
                         _awake.set()
                         _last_speech_at = time.time()
                         if command:
                             dashboard.update_status(last_transcript=command)
-                            result = llm.text_route_and_respond(
-                                command, history=_session_hist,
-                                session_active=True, speaker=_current_speaker)
-                            _t_llm = time.time()
-                            if result is not None:
-                                result["_session_active"] = False
-                                result["_t_utterance"]    = _t_utterance
-                                result["_t_spk"]          = _t_spk
-                                result["_t_llm"]          = _t_llm
-                                result["_stt_label"]      = "MLXWhisper"
-                                _handle_gemini_result(result)
-                            else:
-                                _fallback_process(pcm)
+                            # Skip text routing for Devanagari commands — MLX mangles Hindi.
+                            # Fall through to Gemini audio which re-transcribes from raw PCM.
+                            _has_deva_cmd = bool(_re.search(r'[ऀ-ॿ]', command))
+                            if not _has_deva_cmd:
+                                result = llm.text_route_and_respond(
+                                    command, history=_session_hist,
+                                    session_active=True, speaker=_current_speaker)
+                                _t_llm = time.time()
+                                if result is not None:
+                                    result["_session_active"] = False
+                                    result["_t_utterance"]    = _t_utterance
+                                    result["_t_spk"]          = _t_spk
+                                    result["_t_llm"]          = _t_llm
+                                    result["_stt_label"]      = "MLXWhisper"
+                                    _handle_gemini_result(result)
+                                    if result.get("action") != "ignore":
+                                        continue   # handled — skip Gemini audio
+                                else:
+                                    _fallback_process(pcm)
+                                    continue
+                            # Devanagari command OR text-route ignored → Gemini audio below
                         else:
                             tts.play_beep()
                             dashboard.update_status(state="awake")
                             _brief_mute(1.5)
+                            continue   # wake-word-only — nothing to send to Gemini
                     elif _idle_transcript:
                         # MLX produced text but missed the wake word — likely Hindi mangled
                         # into English. Fall through to Gemini audio, which handles Hindi
@@ -1078,9 +1088,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         dashboard.update_status(state="idle")
                         continue
 
-                # mlx-whisper not ready, OR MLX found text but no wake word — Gemini audio
+                # MLX not ready, no wake word found, or Devanagari/ignored command — Gemini audio.
+                # Use session_active=True if wake word was already confirmed by MLX this utterance.
                 result = llm.transcribe_and_respond(
-                    pcm, history=_session_hist, session_active=False,
+                    pcm, history=_session_hist,
+                    session_active=(_triggered if mlx_stt.is_ready() else False),
                     speaker=_current_speaker)
                 _t_llm = time.time()
                 if result is not None:
