@@ -491,18 +491,25 @@ def start(logger=None, port=DASHBOARD_PORT):
     t.start()
     print(f"[Dashboard] http://{DASHBOARD_HOST}:{port}")
 
-# ── HTML ──────────────────────────────────────────────────────────────────────────────
+# ── HTML ──────────────────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>Pinku</title>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* iOS 9 compatible — no clamp(), no max(), no inset, no gap, no env(),
+   all webkit-prefixed, fetch() replaced with XHR                        */
+
+*, *::before, *::after {
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+  margin: 0; padding: 0;
+}
 
 html, body {
   height: 100%; width: 100%; overflow: hidden;
@@ -511,252 +518,306 @@ html, body {
   font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
-  touch-action: manipulation;
 }
 
-/* subtle vignette */
-body::before {
-  content: '';
-  position: fixed; inset: 0; pointer-events: none;
-  background: radial-gradient(ellipse 90% 55% at 50% 30%, #0d0d22 0%, transparent 70%);
-}
-
-/* ── Two full-screen views that crossfade ── */
+/* Two full-screen views — crossfade between them.
+   Use top/left/right/bottom instead of inset shorthand (iOS 9 compat). */
 .view {
-  position: fixed; inset: 0;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: max(32px,5vmin) max(24px,4vmin)
-           calc(max(32px,5vmin) + max(52px,10vmin) + max(12px,2vmin));
-           /* leave room for the fixed bottom bar */
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+  /* leave 120px at bottom for the fixed controls bar */
+  padding: 28px 24px 120px;
+  -webkit-transition: opacity 0.55s ease;
   transition: opacity 0.55s ease;
 }
 
-/* clock view — visible by default */
-#clock-view  { opacity: 1; }
-#conv-view   { opacity: 0; pointer-events: none; }
+#clock-view { opacity: 1; }
+#conv-view  { opacity: 0; pointer-events: none; }
 
 body.has-conv #clock-view { opacity: 0; pointer-events: none; }
 body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 
-/* ── CLOCK VIEW ── */
+/* ── Clock ── */
 #time-row {
-  display: flex; align-items: flex-start; line-height: 1;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: flex-start; align-items: flex-start;
+  line-height: 1;
 }
 
+/* vmin: min(vw,vh) — supported iOS 6+. On iPad mini 768px min: 22vmin = ~169px */
 #time {
-  font-size: clamp(80px, 30vmin, 240px);
+  font-size: 22vmin;
   font-weight: 100;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
   color: #e2e8f8;
   line-height: 1;
 }
 
 #ampm {
-  font-size: clamp(16px, 5.5vmin, 42px);
+  font-size: 3.5vmin;
   font-weight: 300;
   color: #f59e0b;
-  margin-left: max(8px,1.5vmin);
-  margin-top: max(6px,1vmin);
+  margin-left: 8px;
+  margin-top: 6px;
   letter-spacing: 0.07em;
 }
 
 #day-name {
-  font-size: clamp(20px, 5.5vmin, 44px);
+  font-size: 5.2vmin;
   font-weight: 200;
-  color: rgba(226, 232, 248, 0.55);
+  color: rgba(226,232,248,0.55);
   letter-spacing: 0.04em;
-  margin-top: max(10px,2vmin);
+  margin-top: 14px;
+  text-align: center;
 }
 
 #date-str {
-  font-size: clamp(14px, 3.8vmin, 30px);
+  font-size: 3.8vmin;
   font-weight: 200;
-  color: rgba(226, 232, 248, 0.32);
+  color: rgba(226,232,248,0.32);
   letter-spacing: 0.05em;
-  margin-top: max(4px,0.7vmin);
+  margin-top: 5px;
+  text-align: center;
 }
 
-/* ── CONVERSATION VIEW ── */
+/* ── Conversation ── */
 #conv-view {
+  -webkit-justify-content: space-between;
   justify-content: space-between;
-  padding-top: max(40px,7vmin);
+  padding-top: 40px;
 }
 
 #q-text {
   width: 100%;
-  font-size: clamp(16px, 4.5vmin, 36px);
+  font-size: 4.2vmin;
   font-weight: 200;
   font-style: italic;
-  color: rgba(226, 232, 248, 0.42);
+  color: rgba(226,232,248,0.42);
   line-height: 1.45;
   text-align: center;
-  padding-bottom: max(16px,3vmin);
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 #r-text {
-  flex: 1;
+  -webkit-flex: 1; flex: 1;
   width: 100%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: clamp(26px, 7.5vmin, 62px);
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+  font-size: 7.5vmin;
   font-weight: 200;
   color: #e2e8f8;
   line-height: 1.5;
   text-align: center;
-  padding: max(20px,4vmin) 0;
-  overflow: hidden;
+  padding: 16px 0;
 }
 
-/* ── FIXED BOTTOM BAR — always on top of both views ── */
+/* ── Fixed bottom bar ── */
 #bottom-bar {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  display: flex; flex-direction: column; align-items: center;
-  gap: max(8px,1.5vmin);
-  padding: 0 max(20px,3vmin) max(20px,env(safe-area-inset-bottom,0px));
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center;
+  padding: 0 20px 18px;
   z-index: 20;
 }
 
-/* countdown bar — only visible when has-conv */
 #cbar {
   width: 100%;
-  max-width: 640px;
   height: 2px;
   background: rgba(255,255,255,0.06);
   border-radius: 2px;
   overflow: hidden;
   opacity: 0;
-  transition: opacity 0.4s ease;
+  margin-bottom: 10px;
+  -webkit-transition: opacity 0.4s;
+  transition: opacity 0.4s;
 }
 body.has-conv #cbar { opacity: 1; }
+
 #cbar-fill {
   height: 100%;
   width: 100%;
-  background: rgba(226,232,248,0.2);
+  background: rgba(226,232,248,0.22);
   border-radius: 2px;
+  -webkit-transition: width linear;
   transition: width linear;
 }
 
-/* status pill */
 #status-pill {
-  display: inline-flex; align-items: center;
-  gap: max(7px,1.4vmin);
-  padding: max(9px,1.8vmin) max(22px,4.5vmin);
+  display: -webkit-inline-flex; display: inline-flex;
+  -webkit-align-items: center; align-items: center;
+  padding: 10px 24px;
   border-radius: 100px;
   border: 1px solid rgba(255,255,255,0.07);
   background: rgba(255,255,255,0.025);
-  transition: border-color 0.4s, background 0.4s;
+  margin-bottom: 10px;
+  -webkit-transition: border-color 0.4s;
+  transition: border-color 0.4s;
 }
 
 #sdot {
-  width: max(10px,1.8vmin);
-  height: max(10px,1.8vmin);
+  width: 11px; height: 11px;
   border-radius: 50%;
-  flex-shrink: 0;
-  background: rgba(50,55,90,0.8);
+  background: rgba(50,55,90,0.9);
+  -webkit-flex-shrink: 0; flex-shrink: 0;
+  margin-right: 9px;
+  -webkit-transition: background 0.4s, box-shadow 0.4s;
   transition: background 0.4s, box-shadow 0.4s;
 }
 
 #slabel {
-  font-size: clamp(11px, 2.6vmin, 19px);
+  font-size: 2.2vmin;
   font-weight: 700;
   letter-spacing: 0.17em;
   color: rgba(226,232,248,0.28);
+  -webkit-transition: color 0.4s;
   transition: color 0.4s;
 }
 
+/* status state classes on body */
 body.s-awake    #sdot  { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.2); }
 body.s-awake    #slabel { color: #22c55e; }
 body.s-awake    #status-pill { border-color: rgba(34,197,94,0.2); }
-body.s-thinking #sdot  { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,0.2); animation: blink 0.8s ease-in-out infinite; }
+
+body.s-thinking #sdot  { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,0.2);
+  -webkit-animation: blink 0.8s ease-in-out infinite;
+  animation: blink 0.8s ease-in-out infinite; }
 body.s-thinking #slabel { color: #f59e0b; }
 body.s-thinking #status-pill { border-color: rgba(245,158,11,0.2); }
-body.s-speaking #sdot  { background: #818cf8; box-shadow: 0 0 0 4px rgba(129,140,248,0.2); animation: swell 1.7s ease-in-out infinite; }
+
+body.s-speaking #sdot  { background: #818cf8; box-shadow: 0 0 0 4px rgba(129,140,248,0.2);
+  -webkit-animation: swell 1.7s ease-in-out infinite;
+  animation: swell 1.7s ease-in-out infinite; }
 body.s-speaking #slabel { color: #818cf8; }
 body.s-speaking #status-pill { border-color: rgba(129,140,248,0.2); }
-body.s-muted    #sdot  { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.15); }
-body.s-muted    #slabel { color: #f87171; }
-body.s-muted    #status-pill { border-color: rgba(248,113,113,0.2); }
 
-@keyframes blink {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(0.78); }
+body.s-muted #sdot    { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.15); }
+body.s-muted #slabel  { color: #f87171; }
+body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
+
+@-webkit-keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes         blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@-webkit-keyframes swell {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
+  50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.28); }
 }
 @keyframes swell {
   0%, 100% { box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
-  50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.25); }
+  50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.28); }
 }
 
-/* control buttons */
+/* controls */
 #controls {
-  display: flex; gap: max(8px,1.8vmin);
+  display: -webkit-flex; display: flex;
 }
 
 .cb {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
-  color: rgba(226,232,248,0.32);
-  font-size: clamp(9px, 1.9vmin, 13px);
+  color: rgba(226,232,248,0.35);
+  font-size: 1.8vmin;
   font-weight: 700;
   letter-spacing: 0.1em;
-  padding: max(7px,1.4vmin) max(18px,3.5vmin);
+  padding: 8px 18px;
   border-radius: 100px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background 0.18s, color 0.18s, border-color 0.18s;
+  -webkit-transition: background 0.18s, color 0.18s;
+  transition: background 0.18s, color 0.18s;
   font-family: inherit;
-  white-space: nowrap;
+  margin-right: 10px;  /* gap replacement for iOS 9 */
 }
-.cb:active { background: rgba(255,255,255,0.1); color: rgba(226,232,248,0.85); border-color: rgba(255,255,255,0.18); }
-.cb.on     { border-color: rgba(248,113,113,0.4); color: rgba(248,113,113,0.75); }
+.cb:last-child { margin-right: 0; }
+.cb:active { background: rgba(255,255,255,0.1); color: rgba(226,232,248,0.85); }
+.cb.on     { border-color: rgba(248,113,113,0.45); color: rgba(248,113,113,0.8); }
 
 /* ── Voices slide-up ── */
 #voices-overlay {
-  position: fixed; inset: 0;
-  background: rgba(5,5,13,0.85);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  display: flex; align-items: flex-end;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(5,5,13,0.88);
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: flex-end; align-items: flex-end;
   opacity: 0; pointer-events: none;
-  transition: opacity 0.3s ease; z-index: 50;
+  -webkit-transition: opacity 0.3s;
+  transition: opacity 0.3s;
+  z-index: 50;
 }
 #voices-overlay.open { opacity: 1; pointer-events: auto; }
+
 #voices-panel {
   width: 100%;
   background: #0b0b1d;
   border-top: 1px solid rgba(255,255,255,0.08);
   border-radius: 20px 20px 0 0;
-  padding: 24px 24px calc(32px + env(safe-area-inset-bottom,0px));
+  padding: 24px 24px 40px;
+  -webkit-transform: translateY(100%);
   transform: translateY(100%);
+  -webkit-transition: -webkit-transform 0.4s cubic-bezier(.4,0,.2,1);
   transition: transform 0.4s cubic-bezier(.4,0,.2,1);
-  max-height: 80vh; overflow-y: auto;
+  max-height: 80%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
-#voices-overlay.open #voices-panel { transform: none; }
-#voices-panel h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; color: rgba(226,232,248,0.38); margin-bottom: 18px; }
-.erow { display: flex; gap: 8px; margin-bottom: 12px; }
+#voices-overlay.open #voices-panel {
+  -webkit-transform: none;
+  transform: none;
+}
+
+#voices-panel h3 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  color: rgba(226,232,248,0.38); margin-bottom: 18px;
+}
+.erow { display: -webkit-flex; display: flex; margin-bottom: 12px; }
 .erow input {
-  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 10px; color: #dde4f5; font-size: 15px; padding: 11px 14px;
+  -webkit-flex: 1; flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; color: #dde4f5;
+  font-size: 15px; padding: 11px 14px;
   font-family: inherit; outline: none;
+  margin-right: 8px;
 }
-.erow input::placeholder { color: rgba(226,232,248,0.25); }
-.erow input:focus { border-color: rgba(245,158,11,0.4); }
+.erow input::-webkit-input-placeholder { color: rgba(226,232,248,0.25); }
 .erow button {
-  background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.28);
+  background: rgba(245,158,11,0.12);
+  border: 1px solid rgba(245,158,11,0.28);
   color: #f59e0b; font-size: 13px; font-weight: 700;
-  padding: 11px 16px; border-radius: 10px; cursor: pointer; font-family: inherit; white-space: nowrap;
+  padding: 11px 16px; border-radius: 10px;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
 }
 #mtrack { height: 3px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
-#mfill  { height: 100%; width: 0; background: #22c55e; border-radius: 3px; transition: width 0.08s; }
+#mfill  { height: 100%; width: 0; background: #22c55e; border-radius: 3px; -webkit-transition: width 0.08s; transition: width 0.08s; }
 #emsg   { font-size: 12px; color: rgba(226,232,248,0.38); min-height: 16px; margin-bottom: 14px; }
-#plist  { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 20px; padding: 5px 8px 5px 12px; font-size: 12px; color: rgba(226,232,248,0.62); }
-.chip button { background: none; border: none; color: rgba(226,232,248,0.28); font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1; }
+#plist  { display: -webkit-flex; display: flex; -webkit-flex-wrap: wrap; flex-wrap: wrap; }
+.chip {
+  display: -webkit-inline-flex; display: inline-flex;
+  -webkit-align-items: center; align-items: center;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 20px; padding: 5px 8px 5px 12px;
+  font-size: 12px; color: rgba(226,232,248,0.62);
+  margin-right: 8px; margin-bottom: 8px;
+}
+.chip button {
+  background: none; border: none;
+  color: rgba(226,232,248,0.28);
+  font-size: 11px; cursor: pointer;
+  padding: 0 2px; line-height: 1; margin-left: 4px;
+}
 </style>
 </head>
 <body>
 
-<!-- clock view -->
+<!-- clock -->
 <div class="view" id="clock-view">
   <div id="time-row">
     <span id="time">12:00</span>
@@ -766,13 +827,13 @@ body.s-muted    #status-pill { border-color: rgba(248,113,113,0.2); }
   <div id="date-str">1 January</div>
 </div>
 
-<!-- conversation view -->
+<!-- conversation (crossfades over clock) -->
 <div class="view" id="conv-view">
   <div id="q-text"></div>
   <div id="r-text"></div>
 </div>
 
-<!-- fixed bottom bar: countdown + status + controls -->
+<!-- always-on-top bottom bar -->
 <div id="bottom-bar">
   <div id="cbar"><div id="cbar-fill"></div></div>
   <div id="status-pill">
@@ -787,13 +848,13 @@ body.s-muted    #status-pill { border-color: rgba(248,113,113,0.2); }
   </div>
 </div>
 
-<!-- voices overlay -->
+<!-- voices panel -->
 <div id="voices-overlay" onclick="if(event.target===this)closeVoices()">
   <div id="voices-panel">
     <h3>VOICE ENROLLMENT</h3>
     <div class="erow">
       <input id="ename" type="text" placeholder="Name" autocomplete="off" autocorrect="off" autocapitalize="words">
-      <button id="ebtn" onclick="startEnroll()">&#9210; Record 15s</button>
+      <button id="ebtn" onclick="startEnroll()">Record 15s</button>
     </div>
     <div id="mtrack"><div id="mfill"></div></div>
     <div id="emsg"></div>
@@ -802,6 +863,21 @@ body.s-muted    #status-pill { border-color: rgba(248,113,113,0.2); }
 </div>
 
 <script>
+// ── XHR helper — replaces fetch() which is absent on iOS 9 ───────────────────
+function xhr(method, url, body, cb) {
+  var req = new XMLHttpRequest();
+  req.open(method, url, true);
+  if (body !== null) req.setRequestHeader('Content-Type', 'application/json');
+  req.onreadystatechange = function() {
+    if (req.readyState === 4 && cb) {
+      try { cb(null, JSON.parse(req.responseText)); }
+      catch(e) { cb(null, {}); }
+    }
+  };
+  req.onerror = function() { if (cb) cb(new Error('xhr error'), null); };
+  req.send(body ? JSON.stringify(body) : null);
+}
+
 // ── Clock ─────────────────────────────────────────────────────────────────────
 var _lastMin = -1;
 var DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -823,16 +899,14 @@ setInterval(tick, 4000);
 // ── Status ────────────────────────────────────────────────────────────────────
 function setStatus(s) {
   var cls, lbl;
-  if (s.muted)                      { cls = 's-muted';   lbl = 'MUTED'; }
-  else if (s.speaking)              { cls = 's-speaking'; lbl = 'SPEAKING'; }
+  if (s.muted)                       { cls = 's-muted';   lbl = 'MUTED'; }
+  else if (s.speaking)               { cls = 's-speaking'; lbl = 'SPEAKING'; }
   else if (s.state === 'processing') { cls = 's-thinking'; lbl = 'THINKING'; }
   else if (s.state === 'awake')      { cls = 's-awake';   lbl = 'LISTENING'; }
   else                               { cls = '';           lbl = 'READY'; }
-  // preserve voices-open class if set
-  var extra = document.body.className.indexOf('voices-open') >= 0 ? ' voices-open' : '';
-  document.body.className = cls + extra;
+  document.body.className = cls;
   document.getElementById('slabel').textContent = lbl;
-  document.getElementById('mute-btn').classList.toggle('on', !!s.muted);
+  document.getElementById('mute-btn').className = 'cb' + (s.muted ? ' on' : '');
 }
 
 // ── Conversation ──────────────────────────────────────────────────────────────
@@ -842,23 +916,19 @@ var SHOW_MS = 13000;
 function showConv(q, r) {
   if (!r && !q) return;
   if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
-
   document.getElementById('q-text').textContent = q ? '“' + q + '”' : '';
   document.getElementById('r-text').textContent = r || '';
-  document.body.classList.add('has-conv');
+  document.body.className = (document.body.className + ' has-conv').trim();
 
   var fill = document.getElementById('cbar-fill');
-  fill.style.transition = 'none';
-  fill.style.width = '100%';
-  requestAnimationFrame(function() {
-    requestAnimationFrame(function() {
-      fill.style.transition = 'width ' + (SHOW_MS / 1000) + 's linear';
-      fill.style.width = '0%';
-    });
-  });
+  fill.style.cssText = 'transition:none;width:100%';
+  setTimeout(function() {
+    fill.style.cssText = 'transition:width ' + (SHOW_MS/1000) + 's linear;width:0%';
+  }, 30);
 
   _clearTimer = setTimeout(function() {
-    document.body.classList.remove('has-conv');
+    var c = document.body.className.replace(/\bhas-conv\b/g, '').trim();
+    document.body.className = c;
     _clearTimer = null;
   }, SHOW_MS);
 }
@@ -866,76 +936,98 @@ function showConv(q, r) {
 // ── SSE ───────────────────────────────────────────────────────────────────────
 function connect() {
   var es = new EventSource('/api/stream');
-  es.onmessage = function(e) {
+  es.onmessage = function(evt) {
     try {
-      var d = JSON.parse(e.data);
+      var d = JSON.parse(evt.data);
       if (d.type === 'status')  setStatus(d);
       if (d.type === 'history') showConv(d.transcript, d.reply);
-    } catch(err) {}
+    } catch(e) {}
   };
-  es.onerror = function() { es.close(); setTimeout(connect, 3000); };
+  es.onerror = function() {
+    es.close();
+    setTimeout(connect, 3000);
+  };
 }
 connect();
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 function act(name) {
-  fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:name}) });
+  xhr('POST', '/api/action', {action: name}, null);
 }
 
 // ── Voices ────────────────────────────────────────────────────────────────────
-function openVoices()  { document.getElementById('voices-overlay').classList.add('open'); loadProfiles(); }
-function closeVoices() { document.getElementById('voices-overlay').classList.remove('open'); }
+function openVoices()  {
+  document.getElementById('voices-overlay').className = 'open';
+  loadProfiles();
+}
+function closeVoices() {
+  document.getElementById('voices-overlay').className = '';
+}
 
-function esc(s) {
-  return String(s).replace(/[&<>"]/g, function(c) {
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function loadProfiles() {
+  xhr('GET', '/api/enroll/profiles', null, function(err, r) {
+    var el = document.getElementById('plist');
+    if (!r || !r.profiles || !r.profiles.length) {
+      el.innerHTML = '<span style="font-size:12px;color:rgba(226,232,248,0.28)">No voices enrolled yet.</span>';
+      return;
+    }
+    el.innerHTML = r.profiles.map(function(p) {
+      return '<div class="chip"><span>👤 ' + escHtml(p.name) + '</span>'
+        + '<span style="color:rgba(226,232,248,0.3);font-size:10px;margin-left:3px">'
+        + p.clips + ' clip' + (p.clips !== 1 ? 's' : '') + '</span>'
+        + '<button onclick="delProfile(\'' + escHtml(p.name) + '\')">✕</button></div>';
+    }).join('');
   });
 }
 
-async function loadProfiles() {
-  var r = await fetch('/api/enroll/profiles').then(function(r){return r.json();}).catch(function(){return{profiles:[]};});
-  var el = document.getElementById('plist');
-  if (!r.profiles || !r.profiles.length) {
-    el.innerHTML = '<span style="font-size:12px;color:rgba(226,232,248,0.28)">No voices enrolled yet.</span>';
-    return;
-  }
-  el.innerHTML = r.profiles.map(function(p) {
-    return '<div class="chip"><span>👤 '+esc(p.name)+'</span>'
-      +'<span style="color:rgba(226,232,248,0.3);font-size:10px;margin-left:2px">'+p.clips+' clip'+(p.clips!==1?'s':'')+'</span>'
-      +'<button onclick="delProfile(\''+esc(p.name)+'\')" title="Delete">&#x2715;</button></div>';
-  }).join('');
+function delProfile(name) {
+  if (!confirm('Delete profile for "' + name + '"?')) return;
+  xhr('DELETE', '/api/enroll/delete/' + encodeURIComponent(name), null, function() {
+    loadProfiles();
+  });
 }
 
-async function delProfile(name) {
-  if (!confirm('Delete profile for "'+name+'"?')) return;
-  await fetch('/api/enroll/delete/'+encodeURIComponent(name),{method:'DELETE'});
-  loadProfiles();
-}
+var enrolling = false, micIv = null;
 
-var enrolling=false, micIv;
-async function startEnroll() {
-  var name = document.getElementById('ename').value.trim();
-  if (!name) { document.getElementById('emsg').textContent='Enter a name first.'; return; }
+function startEnroll() {
+  var name = document.getElementById('ename').value.replace(/^\s+|\s+$/g, '');
+  if (!name) { document.getElementById('emsg').textContent = 'Enter a name first.'; return; }
   if (enrolling) return;
-  enrolling=true;
-  var btn=document.getElementById('ebtn');
-  btn.disabled=true; btn.textContent='&#9210; Recording…';
-  document.getElementById('emsg').textContent='Listening — speak naturally for 15 seconds…';
-  micIv=setInterval(async function(){
-    try{var d=await fetch('/api/enroll/level').then(function(r){return r.json();});
-      document.getElementById('mfill').style.width=Math.min(d.level*100,100)+'%';}catch(e){}
-  },80);
-  try {
-    var d=await fetch('/api/enroll/record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,seconds:15})}).then(function(r){return r.json();});
-    document.getElementById('emsg').textContent=d.ok
-      ?'✓ Enrolled as "'+d.name+'" — '+d.clips+' clip'+(d.clips!==1?'s':'')
-      :'✗ '+(d.error||'Failed');
-    if(d.ok){document.getElementById('ename').value='';loadProfiles();}
-  }catch(e){document.getElementById('emsg').textContent='✗ '+e.message;}
-  clearInterval(micIv);
-  document.getElementById('mfill').style.width='0%';
-  btn.disabled=false; btn.textContent='&#9210; Record 15s';
-  enrolling=false;
+  enrolling = true;
+  var btn = document.getElementById('ebtn');
+  btn.disabled = true; btn.textContent = 'Recording…';
+  document.getElementById('emsg').textContent = 'Listening — speak naturally for 15 seconds…';
+
+  micIv = setInterval(function() {
+    xhr('GET', '/api/enroll/level', null, function(err, d) {
+      if (d && d.level !== undefined) {
+        document.getElementById('mfill').style.width = Math.min(d.level * 100, 100) + '%';
+      }
+    });
+  }, 200);
+
+  xhr('POST', '/api/enroll/record', {name: name, seconds: 15}, function(err, d) {
+    clearInterval(micIv);
+    document.getElementById('mfill').style.width = '0%';
+    if (d && d.ok) {
+      document.getElementById('emsg').textContent =
+        '✓ Enrolled as "' + d.name + '" — ' + d.clips + ' clip' + (d.clips !== 1 ? 's' : '');
+      document.getElementById('ename').value = '';
+      loadProfiles();
+    } else {
+      document.getElementById('emsg').textContent = '✗ ' + ((d && d.error) || 'Failed');
+    }
+    btn.disabled = false; btn.textContent = 'Record 15s';
+    enrolling = false;
+  });
 }
 </script>
 </body>
