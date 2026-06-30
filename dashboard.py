@@ -491,7 +491,7 @@ def start(logger=None, port=DASHBOARD_PORT):
     t.start()
     print(f"[Dashboard] http://{DASHBOARD_HOST}:{port}")
 
-# ── HTML ──────────────────────────────────────────────────────────────────────
+# ── HTML ──────────────────────────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -506,248 +506,201 @@ HTML = r"""<!DOCTYPE html>
 
 html, body {
   height: 100%; width: 100%; overflow: hidden;
-  background: #05050e;
-  color: #dde3f4;
+  background: #05050d;
+  color: #dde4f5;
   font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   touch-action: manipulation;
 }
 
-/* subtle depth in background */
+/* subtle vignette */
 body::before {
   content: '';
+  position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 90% 55% at 50% 30%, #0d0d22 0%, transparent 70%);
+}
+
+/* ── Two full-screen views that crossfade ── */
+.view {
   position: fixed; inset: 0;
-  background: radial-gradient(ellipse 80% 60% at 50% 20%, #0c0c22 0%, transparent 70%);
-  pointer-events: none;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: max(32px,5vmin) max(24px,4vmin)
+           calc(max(32px,5vmin) + max(52px,10vmin) + max(12px,2vmin));
+           /* leave room for the fixed bottom bar */
+  transition: opacity 0.55s ease;
 }
 
-/* ── Main layout ── */
-#screen {
-  position: relative;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* top  middle  bottom */
-  padding: max(28px,4vmin) max(20px,3vmin) max(20px,3vmin);
-}
+/* clock view — visible by default */
+#clock-view  { opacity: 1; }
+#conv-view   { opacity: 0; pointer-events: none; }
 
-/* ── Clock ── */
-#clock-section {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  transition: flex-grow 0.55s cubic-bezier(.4,0,.2,1),
-              margin-bottom 0.55s cubic-bezier(.4,0,.2,1);
-}
+body.has-conv #clock-view { opacity: 0; pointer-events: none; }
+body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 
-/* when conversation is showing, clock shrinks upward */
-.has-conv #clock-section {
-  flex-grow: 0;
-  margin-bottom: 0;
-}
-
+/* ── CLOCK VIEW ── */
 #time-row {
-  display: flex;
-  align-items: flex-start;
-  line-height: 1;
+  display: flex; align-items: flex-start; line-height: 1;
 }
 
 #time {
-  font-size: clamp(64px, 22vmin, 152px);
+  font-size: clamp(80px, 30vmin, 240px);
   font-weight: 100;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
-  color: #e0e6f7;
+  color: #e2e8f8;
   line-height: 1;
-  transition: font-size 0.55s cubic-bezier(.4,0,.2,1);
-}
-
-.has-conv #time {
-  font-size: clamp(34px, 9vmin, 70px);
 }
 
 #ampm {
-  font-size: clamp(13px, 3.8vmin, 26px);
-  font-weight: 400;
+  font-size: clamp(16px, 5.5vmin, 42px);
+  font-weight: 300;
   color: #f59e0b;
-  margin-left: max(6px,1.2vmin);
-  margin-top: max(4px,0.6vmin);
+  margin-left: max(8px,1.5vmin);
+  margin-top: max(6px,1vmin);
   letter-spacing: 0.07em;
-  transition: font-size 0.55s cubic-bezier(.4,0,.2,1),
-              opacity 0.55s ease;
-}
-
-.has-conv #ampm {
-  font-size: clamp(9px, 2vmin, 16px);
-}
-
-#day-date {
-  text-align: center;
-  margin-top: max(6px,1.2vmin);
-  transition: opacity 0.4s ease, max-height 0.4s ease;
-  max-height: 80px;
-  overflow: hidden;
-}
-
-.has-conv #day-date {
-  opacity: 0;
-  max-height: 0;
-  margin-top: 0;
 }
 
 #day-name {
-  font-size: clamp(17px, 5vmin, 38px);
-  font-weight: 300;
-  color: rgba(224, 230, 247, 0.62);
-  letter-spacing: 0.03em;
+  font-size: clamp(20px, 5.5vmin, 44px);
+  font-weight: 200;
+  color: rgba(226, 232, 248, 0.55);
+  letter-spacing: 0.04em;
+  margin-top: max(10px,2vmin);
 }
 
 #date-str {
-  font-size: clamp(12px, 3.2vmin, 24px);
-  font-weight: 300;
-  color: rgba(224, 230, 247, 0.36);
-  margin-top: max(3px,0.5vmin);
-  letter-spacing: 0.04em;
+  font-size: clamp(14px, 3.8vmin, 30px);
+  font-weight: 200;
+  color: rgba(226, 232, 248, 0.32);
+  letter-spacing: 0.05em;
+  margin-top: max(4px,0.7vmin);
 }
 
-/* ── Conversation ── */
-#conv-section {
-  width: 100%;
-  max-width: 720px;
-  flex: 0 0 auto;
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transform: translateY(12px);
-  transition: max-height 0.5s cubic-bezier(.4,0,.2,1),
-              opacity 0.45s ease,
-              transform 0.45s ease;
-}
-
-.has-conv #conv-section {
-  max-height: 50vh;
-  opacity: 1;
-  transform: translateY(0);
+/* ── CONVERSATION VIEW ── */
+#conv-view {
+  justify-content: space-between;
+  padding-top: max(40px,7vmin);
 }
 
 #q-text {
-  font-size: clamp(13px, 3.5vmin, 24px);
-  font-weight: 300;
-  color: rgba(224, 230, 247, 0.4);
+  width: 100%;
+  font-size: clamp(16px, 4.5vmin, 36px);
+  font-weight: 200;
   font-style: italic;
+  color: rgba(226, 232, 248, 0.42);
   line-height: 1.45;
-  padding: 0 0 max(10px,2.2vmin);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  margin-bottom: max(12px,2.5vmin);
+  text-align: center;
+  padding-bottom: max(16px,3vmin);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 
 #r-text {
-  font-size: clamp(18px, 5.2vmin, 40px);
-  font-weight: 300;
-  color: #e0e6f7;
-  line-height: 1.55;
-}
-
-/* countdown bar */
-#cbar {
-  height: 2px;
-  background: rgba(255,255,255,0.07);
-  border-radius: 2px;
-  margin-top: max(14px,3vmin);
+  flex: 1;
+  width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(26px, 7.5vmin, 62px);
+  font-weight: 200;
+  color: #e2e8f8;
+  line-height: 1.5;
+  text-align: center;
+  padding: max(20px,4vmin) 0;
   overflow: hidden;
 }
 
+/* ── FIXED BOTTOM BAR — always on top of both views ── */
+#bottom-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center;
+  gap: max(8px,1.5vmin);
+  padding: 0 max(20px,3vmin) max(20px,env(safe-area-inset-bottom,0px));
+  z-index: 20;
+}
+
+/* countdown bar — only visible when has-conv */
+#cbar {
+  width: 100%;
+  max-width: 640px;
+  height: 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+body.has-conv #cbar { opacity: 1; }
 #cbar-fill {
   height: 100%;
   width: 100%;
-  background: rgba(224,230,247,0.22);
+  background: rgba(226,232,248,0.2);
   border-radius: 2px;
   transition: width linear;
 }
 
-/* ── Status ── */
-#status-section {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: max(16px,3vmin) 0 max(10px,2vmin);
-}
-
+/* status pill */
 #status-pill {
-  display: inline-flex;
-  align-items: center;
+  display: inline-flex; align-items: center;
   gap: max(7px,1.4vmin);
   padding: max(9px,1.8vmin) max(22px,4.5vmin);
   border-radius: 100px;
   border: 1px solid rgba(255,255,255,0.07);
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.025);
   transition: border-color 0.4s, background 0.4s;
 }
 
 #sdot {
-  width: max(10px,2vmin);
-  height: max(10px,2vmin);
+  width: max(10px,1.8vmin);
+  height: max(10px,1.8vmin);
   border-radius: 50%;
   flex-shrink: 0;
-  background: rgba(60,65,100,0.7);
+  background: rgba(50,55,90,0.8);
   transition: background 0.4s, box-shadow 0.4s;
 }
 
 #slabel {
-  font-size: clamp(12px, 2.8vmin, 20px);
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  color: rgba(224,230,247,0.32);
+  font-size: clamp(11px, 2.6vmin, 19px);
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  color: rgba(226,232,248,0.28);
   transition: color 0.4s;
 }
 
-/* state classes */
-body.s-awake #sdot     { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.18); }
-body.s-awake #slabel   { color: #22c55e; }
-body.s-awake #status-pill { border-color: rgba(34,197,94,0.2); }
-
-body.s-thinking #sdot  { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,0.2); animation: blink 0.85s ease-in-out infinite; }
+body.s-awake    #sdot  { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.2); }
+body.s-awake    #slabel { color: #22c55e; }
+body.s-awake    #status-pill { border-color: rgba(34,197,94,0.2); }
+body.s-thinking #sdot  { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,0.2); animation: blink 0.8s ease-in-out infinite; }
 body.s-thinking #slabel { color: #f59e0b; }
 body.s-thinking #status-pill { border-color: rgba(245,158,11,0.2); }
-
 body.s-speaking #sdot  { background: #818cf8; box-shadow: 0 0 0 4px rgba(129,140,248,0.2); animation: swell 1.7s ease-in-out infinite; }
 body.s-speaking #slabel { color: #818cf8; }
 body.s-speaking #status-pill { border-color: rgba(129,140,248,0.2); }
-
-body.s-muted #sdot     { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.14); }
-body.s-muted #slabel   { color: #f87171; }
-body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
+body.s-muted    #sdot  { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.15); }
+body.s-muted    #slabel { color: #f87171; }
+body.s-muted    #status-pill { border-color: rgba(248,113,113,0.2); }
 
 @keyframes blink {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.45; transform: scale(0.8); }
+  50%       { opacity: 0.4; transform: scale(0.78); }
 }
 @keyframes swell {
   0%, 100% { box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
-  50%       { box-shadow: 0 0 0 8px rgba(129,140,248,0.25); }
+  50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.25); }
 }
 
-/* ── Controls ── */
+/* control buttons */
 #controls {
-  flex-shrink: 0;
-  display: flex;
-  gap: max(8px,1.8vmin);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; gap: max(8px,1.8vmin);
 }
 
 .cb {
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.09);
-  color: rgba(224,230,247,0.38);
-  font-size: clamp(9px, 2vmin, 13px);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(226,232,248,0.32);
+  font-size: clamp(9px, 1.9vmin, 13px);
   font-weight: 700;
   letter-spacing: 0.1em;
-  padding: max(8px,1.5vmin) max(18px,3.5vmin);
+  padding: max(7px,1.4vmin) max(18px,3.5vmin);
   border-radius: 100px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -755,118 +708,83 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   font-family: inherit;
   white-space: nowrap;
 }
-.cb:active {
-  background: rgba(255,255,255,0.1);
-  color: rgba(224,230,247,0.85);
-  border-color: rgba(255,255,255,0.18);
-}
-.cb.on {
-  border-color: rgba(248,113,113,0.4);
-  color: rgba(248,113,113,0.75);
-}
+.cb:active { background: rgba(255,255,255,0.1); color: rgba(226,232,248,0.85); border-color: rgba(255,255,255,0.18); }
+.cb.on     { border-color: rgba(248,113,113,0.4); color: rgba(248,113,113,0.75); }
 
 /* ── Voices slide-up ── */
 #voices-overlay {
   position: fixed; inset: 0;
-  background: rgba(5,5,14,0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(5,5,13,0.85);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   display: flex; align-items: flex-end;
   opacity: 0; pointer-events: none;
-  transition: opacity 0.3s ease;
-  z-index: 50;
+  transition: opacity 0.3s ease; z-index: 50;
 }
 #voices-overlay.open { opacity: 1; pointer-events: auto; }
-
 #voices-panel {
   width: 100%;
-  background: #0b0b1c;
+  background: #0b0b1d;
   border-top: 1px solid rgba(255,255,255,0.08);
   border-radius: 20px 20px 0 0;
   padding: 24px 24px calc(32px + env(safe-area-inset-bottom,0px));
   transform: translateY(100%);
   transition: transform 0.4s cubic-bezier(.4,0,.2,1);
-  max-height: 80vh;
-  overflow-y: auto;
+  max-height: 80vh; overflow-y: auto;
 }
 #voices-overlay.open #voices-panel { transform: none; }
-
-#voices-panel h3 {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
-  color: rgba(224,230,247,0.4); margin-bottom: 18px;
-}
+#voices-panel h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; color: rgba(226,232,248,0.38); margin-bottom: 18px; }
 .erow { display: flex; gap: 8px; margin-bottom: 12px; }
 .erow input {
-  flex: 1; background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
-  color: #dde3f4; font-size: 15px; padding: 11px 14px;
+  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; color: #dde4f5; font-size: 15px; padding: 11px 14px;
   font-family: inherit; outline: none;
 }
-.erow input::placeholder { color: rgba(224,230,247,0.25); }
+.erow input::placeholder { color: rgba(226,232,248,0.25); }
 .erow input:focus { border-color: rgba(245,158,11,0.4); }
 .erow button {
-  background: rgba(245,158,11,0.12);
-  border: 1px solid rgba(245,158,11,0.28);
+  background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.28);
   color: #f59e0b; font-size: 13px; font-weight: 700;
-  padding: 11px 16px; border-radius: 10px; cursor: pointer;
-  font-family: inherit; white-space: nowrap;
+  padding: 11px 16px; border-radius: 10px; cursor: pointer; font-family: inherit; white-space: nowrap;
 }
 #mtrack { height: 3px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
 #mfill  { height: 100%; width: 0; background: #22c55e; border-radius: 3px; transition: width 0.08s; }
-#emsg   { font-size: 12px; color: rgba(224,230,247,0.38); min-height: 16px; margin-bottom: 14px; }
+#emsg   { font-size: 12px; color: rgba(226,232,248,0.38); min-height: 16px; margin-bottom: 14px; }
 #plist  { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip {
-  display: flex; align-items: center; gap: 4px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 20px; padding: 5px 8px 5px 12px;
-  font-size: 12px; color: rgba(224,230,247,0.65);
-}
-.chip button {
-  background: none; border: none; color: rgba(224,230,247,0.28);
-  font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1;
-}
+.chip { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 20px; padding: 5px 8px 5px 12px; font-size: 12px; color: rgba(226,232,248,0.62); }
+.chip button { background: none; border: none; color: rgba(226,232,248,0.28); font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1; }
 </style>
 </head>
 <body>
 
-<div id="screen">
-
-  <!-- clock -->
-  <div id="clock-section">
-    <div id="time-row">
-      <span id="time">12:00</span>
-      <span id="ampm">AM</span>
-    </div>
-    <div id="day-date">
-      <div id="day-name">Monday</div>
-      <div id="date-str">1 January</div>
-    </div>
+<!-- clock view -->
+<div class="view" id="clock-view">
+  <div id="time-row">
+    <span id="time">12:00</span>
+    <span id="ampm">AM</span>
   </div>
+  <div id="day-name">Monday</div>
+  <div id="date-str">1 January</div>
+</div>
 
-  <!-- conversation (hidden until spoken) -->
-  <div id="conv-section">
-    <div id="q-text"></div>
-    <div id="r-text"></div>
-    <div id="cbar"><div id="cbar-fill"></div></div>
+<!-- conversation view -->
+<div class="view" id="conv-view">
+  <div id="q-text"></div>
+  <div id="r-text"></div>
+</div>
+
+<!-- fixed bottom bar: countdown + status + controls -->
+<div id="bottom-bar">
+  <div id="cbar"><div id="cbar-fill"></div></div>
+  <div id="status-pill">
+    <div id="sdot"></div>
+    <span id="slabel">READY</span>
   </div>
-
-  <!-- status -->
-  <div id="status-section">
-    <div id="status-pill">
-      <div id="sdot"></div>
-      <span id="slabel">READY</span>
-    </div>
-  </div>
-
-  <!-- controls -->
   <div id="controls">
     <button class="cb" onclick="act('wake')">WAKE</button>
     <button class="cb" onclick="act('sleep')">SLEEP</button>
     <button class="cb" id="mute-btn" onclick="act('mute_toggle')">MUTE</button>
     <button class="cb" onclick="openVoices()">VOICES</button>
   </div>
-
 </div>
 
 <!-- voices overlay -->
@@ -884,20 +802,18 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 </div>
 
 <script>
-// ── Clock ────────────────────────────────────────────────────────────────────
+// ── Clock ─────────────────────────────────────────────────────────────────────
 var _lastMin = -1;
 var DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 var MONTHS = ['January','February','March','April','May','June','July',
               'August','September','October','November','December'];
-
 function tick() {
   var n = new Date(), h = n.getHours(), m = n.getMinutes();
   if (m === _lastMin) return;
   _lastMin = m;
-  var ap = h >= 12 ? 'PM' : 'AM';
+  document.getElementById('ampm').textContent = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   document.getElementById('time').textContent = h + ':' + (m < 10 ? '0' : '') + m;
-  document.getElementById('ampm').textContent = ap;
   document.getElementById('day-name').textContent = DAYS[n.getDay()];
   document.getElementById('date-str').textContent = n.getDate() + ' ' + MONTHS[n.getMonth()];
 }
@@ -905,17 +821,16 @@ tick();
 setInterval(tick, 4000);
 
 // ── Status ────────────────────────────────────────────────────────────────────
-var STATE_CLASS = { idle:'', awake:'s-awake', processing:'s-thinking', speaking:'s-speaking', muted:'s-muted' };
-var STATE_LABEL = { idle:'READY', awake:'LISTENING', processing:'THINKING', speaking:'SPEAKING', muted:'MUTED' };
-
 function setStatus(s) {
   var cls, lbl;
-  if (s.muted)                     { cls = 's-muted';   lbl = 'MUTED'; }
-  else if (s.speaking)             { cls = 's-speaking'; lbl = 'SPEAKING'; }
+  if (s.muted)                      { cls = 's-muted';   lbl = 'MUTED'; }
+  else if (s.speaking)              { cls = 's-speaking'; lbl = 'SPEAKING'; }
   else if (s.state === 'processing') { cls = 's-thinking'; lbl = 'THINKING'; }
   else if (s.state === 'awake')      { cls = 's-awake';   lbl = 'LISTENING'; }
-  else                              { cls = '';           lbl = 'READY'; }
-  document.body.className = cls;
+  else                               { cls = '';           lbl = 'READY'; }
+  // preserve voices-open class if set
+  var extra = document.body.className.indexOf('voices-open') >= 0 ? ' voices-open' : '';
+  document.body.className = cls + extra;
   document.getElementById('slabel').textContent = lbl;
   document.getElementById('mute-btn').classList.toggle('on', !!s.muted);
 }
@@ -928,14 +843,10 @@ function showConv(q, r) {
   if (!r && !q) return;
   if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
 
-  var qt = document.getElementById('q-text');
-  var rt = document.getElementById('r-text');
-  qt.textContent = q ? '“' + q + '”' : '';
-  rt.textContent = r || '';
+  document.getElementById('q-text').textContent = q ? '“' + q + '”' : '';
+  document.getElementById('r-text').textContent = r || '';
+  document.body.classList.add('has-conv');
 
-  document.getElementById('screen').classList.add('has-conv');
-
-  // restart countdown bar
   var fill = document.getElementById('cbar-fill');
   fill.style.transition = 'none';
   fill.style.width = '100%';
@@ -947,7 +858,7 @@ function showConv(q, r) {
   });
 
   _clearTimer = setTimeout(function() {
-    document.getElementById('screen').classList.remove('has-conv');
+    document.body.classList.remove('has-conv');
     _clearTimer = null;
   }, SHOW_MS);
 }
@@ -958,7 +869,7 @@ function connect() {
   es.onmessage = function(e) {
     try {
       var d = JSON.parse(e.data);
-      if (d.type === 'status') setStatus(d);
+      if (d.type === 'status')  setStatus(d);
       if (d.type === 'history') showConv(d.transcript, d.reply);
     } catch(err) {}
   };
@@ -968,11 +879,7 @@ connect();
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 function act(name) {
-  fetch('/api/action', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: name })
-  });
+  fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:name}) });
 }
 
 // ── Voices ────────────────────────────────────────────────────────────────────
@@ -981,64 +888,54 @@ function closeVoices() { document.getElementById('voices-overlay').classList.rem
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, function(c) {
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
   });
 }
 
 async function loadProfiles() {
-  var r = await fetch('/api/enroll/profiles').then(function(r){ return r.json(); }).catch(function(){ return { profiles:[] }; });
+  var r = await fetch('/api/enroll/profiles').then(function(r){return r.json();}).catch(function(){return{profiles:[]};});
   var el = document.getElementById('plist');
   if (!r.profiles || !r.profiles.length) {
-    el.innerHTML = '<span style="font-size:12px;color:rgba(224,230,247,0.28)">No voices enrolled yet.</span>';
+    el.innerHTML = '<span style="font-size:12px;color:rgba(226,232,248,0.28)">No voices enrolled yet.</span>';
     return;
   }
   el.innerHTML = r.profiles.map(function(p) {
-    return '<div class="chip"><span>👤 ' + esc(p.name) + '</span>'
-      + '<span style="color:rgba(224,230,247,0.3);font-size:10px;margin-left:2px">' + p.clips + ' clip' + (p.clips !== 1 ? 's' : '') + '</span>'
-      + '<button onclick="delProfile(\'' + esc(p.name) + '\')" title="Delete">&#x2715;</button></div>';
+    return '<div class="chip"><span>👤 '+esc(p.name)+'</span>'
+      +'<span style="color:rgba(226,232,248,0.3);font-size:10px;margin-left:2px">'+p.clips+' clip'+(p.clips!==1?'s':'')+'</span>'
+      +'<button onclick="delProfile(\''+esc(p.name)+'\')" title="Delete">&#x2715;</button></div>';
   }).join('');
 }
 
 async function delProfile(name) {
-  if (!confirm('Delete profile for "' + name + '"?')) return;
-  await fetch('/api/enroll/delete/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (!confirm('Delete profile for "'+name+'"?')) return;
+  await fetch('/api/enroll/delete/'+encodeURIComponent(name),{method:'DELETE'});
   loadProfiles();
 }
 
-var enrolling = false, micIv;
-
+var enrolling=false, micIv;
 async function startEnroll() {
   var name = document.getElementById('ename').value.trim();
-  if (!name) { document.getElementById('emsg').textContent = 'Enter a name first.'; return; }
+  if (!name) { document.getElementById('emsg').textContent='Enter a name first.'; return; }
   if (enrolling) return;
-  enrolling = true;
-  var btn = document.getElementById('ebtn');
-  btn.disabled = true; btn.textContent = '&#9210; Recording…';
-  document.getElementById('emsg').textContent = 'Listening — speak naturally for 15 seconds…';
-
-  micIv = setInterval(async function() {
-    try {
-      var d = await fetch('/api/enroll/level').then(function(r){ return r.json(); });
-      document.getElementById('mfill').style.width = Math.min(d.level * 100, 100) + '%';
-    } catch(e) {}
-  }, 80);
-
+  enrolling=true;
+  var btn=document.getElementById('ebtn');
+  btn.disabled=true; btn.textContent='&#9210; Recording…';
+  document.getElementById('emsg').textContent='Listening — speak naturally for 15 seconds…';
+  micIv=setInterval(async function(){
+    try{var d=await fetch('/api/enroll/level').then(function(r){return r.json();});
+      document.getElementById('mfill').style.width=Math.min(d.level*100,100)+'%';}catch(e){}
+  },80);
   try {
-    var d = await fetch('/api/enroll/record', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, seconds: 15 })
-    }).then(function(r){ return r.json(); });
-    document.getElementById('emsg').textContent = d.ok
-      ? '✓ Enrolled as “' + d.name + '” — ' + d.clips + ' clip' + (d.clips !== 1 ? 's' : '')
-      : '✗ ' + (d.error || 'Failed');
-    if (d.ok) { document.getElementById('ename').value = ''; loadProfiles(); }
-  } catch(e) {
-    document.getElementById('emsg').textContent = '✗ ' + e.message;
-  }
+    var d=await fetch('/api/enroll/record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,seconds:15})}).then(function(r){return r.json();});
+    document.getElementById('emsg').textContent=d.ok
+      ?'✓ Enrolled as "'+d.name+'" — '+d.clips+' clip'+(d.clips!==1?'s':'')
+      :'✗ '+(d.error||'Failed');
+    if(d.ok){document.getElementById('ename').value='';loadProfiles();}
+  }catch(e){document.getElementById('emsg').textContent='✗ '+e.message;}
   clearInterval(micIv);
-  document.getElementById('mfill').style.width = '0%';
-  btn.disabled = false; btn.textContent = '&#9210; Record 15s';
-  enrolling = false;
+  document.getElementById('mfill').style.width='0%';
+  btn.disabled=false; btn.textContent='&#9210; Record 15s';
+  enrolling=false;
 }
 </script>
 </body>
