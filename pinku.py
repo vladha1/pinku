@@ -1080,9 +1080,14 @@ def _voice_loop(recorder: stt.AudioRecorder):
                             _brief_mute(1.5)
                             continue   # wake-word-only — nothing to send to Gemini
                     elif _idle_transcript:
-                        # MLX produced text but missed the wake word — likely Hindi mangled
-                        # into English. Fall through to Gemini audio, which handles Hindi
-                        # natively and applies its own wake-word check (session_active=False).
+                        # Only retry with Gemini audio for short transcripts that could be
+                        # a genuine Hindi command misread by MLX.  Long transcripts (> 8 words)
+                        # are almost certainly TV dialogue or MLX hallucinations — don't retry.
+                        _idle_words = len(_idle_transcript.split())
+                        if _idle_words > 8:
+                            print(f'[STT] Idle — long MLX transcript ({_idle_words}w, no wake word) — discarding')
+                            dashboard.update_status(state="idle")
+                            continue
                         print(f'[STT] Idle — MLX no wake word ("{_idle_transcript}") — Gemini audio retry')
                     else:
                         dashboard.update_status(state="idle")
