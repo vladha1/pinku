@@ -957,17 +957,13 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: active session ─────────────────────────────────────────
             if _awake.is_set():
-                # Post-reply window: for N seconds after Pinku finishes speaking,
-                # loosen the speaker gate to UNCERTAIN so family/guests can follow
-                # up naturally without re-saying the wake word. Outside this window
-                # require a confirmed known speaker (>= ACCEPT).
-                _in_reply_window = (
-                    _last_pinku_spoke_at > 0 and
-                    time.time() - _last_pinku_spoke_at < config.SPEAKER_POST_REPLY_WINDOW
-                )
-                _gate_threshold = (config.SPEAKER_THRESHOLD_UNCERTAIN if _in_reply_window
-                                   else config.SPEAKER_THRESHOLD_ACCEPT)
-                if _current_speaker is None and _spk_score < _gate_threshold:
+                # In an active session, accept anyone who passed the initial speaker
+                # gate (score >= SPEAKER_THRESHOLD_UNCERTAIN = 0.65).  SPEAKER_THRESHOLD_ACCEPT
+                # (0.80) is used only for *identifying* the speaker by name, not for gating
+                # conversation.  Anyone who entered via wake word or while a known speaker
+                # is active has earned their place in the session — dropping uncertain voices
+                # here breaks multi-person conversations.
+                if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                     continue
 
                 dashboard.update_status(state="processing", speaker=_current_speaker)
