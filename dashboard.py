@@ -18,7 +18,7 @@ _start_time_str = time.strftime("%H:%M:%S")         # "07:16:42" — shown in he
 _status = {
     "state": "idle", "muted": False, "model": "",
     "last_transcript": "", "last_reply": "", "speaking": False,
-    "detections": [],
+    "detections": [], "speaker": None,
 }
 
 _clients_lock = threading.Lock()
@@ -741,6 +741,18 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 @-webkit-keyframes spin { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
 @keyframes         spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
+#think-label {
+  font-size: 5vmin;
+  font-weight: 200;
+  color: rgba(245,158,11,0.6);
+  letter-spacing: 0.1em;
+  margin-top: 6vmin;
+  text-align: center;
+  min-height: 7vmin;
+  -webkit-transition: opacity 0.3s;
+  transition: opacity 0.3s;
+}
+
 /* controls */
 #controls {
   display: -webkit-flex; display: flex;
@@ -857,6 +869,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 <!-- thinking (amber spinner, shown during processing) -->
 <div class="view" id="think-view">
   <div id="think-ring"></div>
+  <div id="think-label"></div>
 </div>
 
 <!-- conversation (crossfades over clock) -->
@@ -929,6 +942,9 @@ tick();
 setInterval(tick, 4000);
 
 // ── Status ────────────────────────────────────────────────────────────────────
+var _THINK_PHRASES = ['On it', 'Got it', 'One moment', 'Thinking'];
+var _prevProcessing = false;
+
 function setStatus(s) {
   var cls, lbl;
   if (s.muted)                       { cls = 's-muted';   lbl = 'MUTED'; }
@@ -943,6 +959,15 @@ function setStatus(s) {
   document.body.className = (cls + viewCls + hasConv).replace(/\s+/g,' ').trim();
   document.getElementById('slabel').textContent = lbl;
   document.getElementById('mute-btn').className = 'cb' + (s.muted ? ' on' : '');
+
+  // Update think label only on transition INTO processing to avoid phrase flicker
+  var nowProcessing = (s.state === 'processing');
+  if (nowProcessing && !_prevProcessing) {
+    var phrase = _THINK_PHRASES[Math.floor(Math.random() * _THINK_PHRASES.length)];
+    var label = s.speaker ? (phrase + ', ' + s.speaker) : (phrase + '…');
+    document.getElementById('think-label').textContent = label;
+  }
+  _prevProcessing = nowProcessing;
 }
 
 // ── Conversation ──────────────────────────────────────────────────────────────

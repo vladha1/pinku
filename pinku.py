@@ -767,7 +767,7 @@ def _handle_gemini_result(result: dict):
     _gemini_halluc_count = 0   # real speech confirmed — clear consecutive-hallucination tally
     tts.play_think()
 
-    dashboard.update_status(state="processing", last_transcript=transcript)
+    dashboard.update_status(state="processing", last_transcript=transcript, speaker=_current_speaker)
     _log("user", transcript)
 
     if reply:
@@ -832,7 +832,7 @@ def _fallback_process(pcm: bytes):
 
     _log("user",   text)
     _log("source", f"Whisper + Ollama fallback")
-    dashboard.update_status(state="processing", last_transcript=text)
+    dashboard.update_status(state="processing", last_transcript=text, speaker=_current_speaker)
     action = llm.route(text)
     act = action.get("action", "chat")
 
@@ -961,7 +961,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_ACCEPT:
                     continue
 
-                dashboard.update_status(state="processing")
+                dashboard.update_status(state="processing", speaker=_current_speaker)
 
                 # ── Fast path: local STT + local math + Gemini text ──────────
                 # Apple STT ~0.2s (when authorized) → mlx-whisper ~0.5s →
@@ -1041,7 +1041,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
             # Known speaker in idle mode.
             if _current_speaker is not None:
-                dashboard.update_status(state="processing")
+                dashboard.update_status(state="processing", speaker=_current_speaker)
 
                 if mlx_stt.is_ready():
                     # English first (~0.85s), Hindi retry only if wake word not found.
@@ -1144,7 +1144,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 continue
 
             # Wake word + inline command — send audio to Gemini for quality response
-            dashboard.update_status(state="processing")
+            dashboard.update_status(state="processing", speaker=_current_speaker)
             result = llm.transcribe_and_respond(pcm, history=_session_hist,
                                                 speaker=_current_speaker)
             if result is not None:
