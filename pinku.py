@@ -473,15 +473,22 @@ _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
-    r'|पिंकू|पिंकु|पिंको|पिंकी|पिंक्व'
+    r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु/पिंक्व = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
-    r'|पिंकू|पिंकु|पिंको|पिंकी|पिंक्व'
+    r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
+    _re.IGNORECASE,
+)
+# Pinky variant anywhere in text — used for Gemini fallback when local wake parse fails
+_PINKU_RE_CONTAINS = _re.compile(
+    r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
+    r'|पिकु|पिकू|पिखु|पिखू)\b',
     _re.IGNORECASE,
 )
 
@@ -631,8 +638,8 @@ def _handle_gemini_result(result: dict):
     _session_was_active = result.get("_session_active", True)   # injected below
     if not _session_was_active and not _awake.is_set():
         _WAKE_RE = _re.compile(
-            r'\b(pinku|pinky|pinko|pink|pingu|pinkoo|penku|penko'
-            r'|पिंकू|पिंकु|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)\b',
+            r'\b(pinku|pinky|pinki|pinko|pink|pingu|pinkoo|penku|penko'
+            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)\b',
             _re.IGNORECASE)
         if action != "ignore" and not _WAKE_RE.search(transcript):
             _log("info",
@@ -857,7 +864,7 @@ def _fallback_process(pcm: bytes):
     # prompt (including "nahi nahayegi" for shower etc.) can fire.
     act = action.get("action", "chat")
     if act == "ignore" and _re.search(
-            r'\b(pinku|pinky|pink|pinko|पिंकू|पिंकु|पिकु)\b', text, _re.IGNORECASE):
+            r'\b(pinku|pinky|pinki|pink|pinko|पिंकू|पिंकु|पिंकि|पिकु)\b', text, _re.IGNORECASE):
         _log("info", f"Fallback: overriding ignore→chat (wake word in transcript)")
         action["action"] = "chat"
         act = "chat"
@@ -1131,6 +1138,23 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _log("stt", text)
             triggered, command = _check_wake(text)
             if not triggered:
+                # If a Pinky variant is present but the local wake-word parser
+                # failed (wrong variant, wrong position, normalisation mismatch),
+                # let Gemini re-transcribe from raw audio before discarding.
+                if _PINKU_RE_CONTAINS.search(text) and len(text.split()) <= 14:
+                    print(f'[STT] Idle — Pinky in transcript but parse failed → Gemini verify: "{text}"')
+                    dashboard.update_status(state="processing", speaker=_current_speaker)
+                    _result = llm.transcribe_and_respond(
+                        pcm, history=_session_hist,
+                        session_active=False, speaker=_current_speaker)
+                    if _result is not None:
+                        _result["_session_active"] = False
+                        _result["_t_utterance"]    = _t_utterance
+                        _result["_t_spk"]          = _t_spk
+                        _handle_gemini_result(_result)
+                    else:
+                        dashboard.update_status(state="idle")
+                    continue
                 print(f'[STT] Idle — no wake word: "{text}"')
                 continue
 
