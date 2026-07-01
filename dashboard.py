@@ -535,10 +535,17 @@ html, body {
   transition: opacity 0.55s ease;
 }
 
-#clock-view { opacity: 1; }
-#conv-view  { opacity: 0; pointer-events: none; }
+#clock-view  { opacity: 1; }
+#think-view  { opacity: 0; pointer-events: none; }
+#conv-view   { opacity: 0; pointer-events: none; }
 
+/* thinking: hide clock, show ring */
+body.is-thinking #clock-view { opacity: 0; pointer-events: none; }
+body.is-thinking #think-view { opacity: 1; pointer-events: auto; }
+
+/* conversation: takes priority over both */
 body.has-conv #clock-view { opacity: 0; pointer-events: none; }
+body.has-conv #think-view { opacity: 0; pointer-events: none; }
 body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 
 /* ── Clock ── */
@@ -714,6 +721,26 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.28); }
 }
 
+/* ── Thinking ring ── */
+#think-view {
+  -webkit-justify-content: center; justify-content: center;
+  -webkit-align-items: center; align-items: center;
+}
+
+#think-ring {
+  width: 22vmin; height: 22vmin;
+  border-radius: 50%;
+  border-width: 0.6vmin;
+  border-style: solid;
+  border-color: rgba(245,158,11,0.12) rgba(245,158,11,0.12) rgba(245,158,11,0.12) rgba(245,158,11,0.85);
+  box-shadow: 0 0 8vmin rgba(245,158,11,0.06);
+  -webkit-animation: spin 1.1s linear infinite;
+  animation: spin 1.1s linear infinite;
+}
+
+@-webkit-keyframes spin { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
+@keyframes         spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
 /* controls */
 #controls {
   display: -webkit-flex; display: flex;
@@ -827,6 +854,11 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   <div id="date-str">1 January</div>
 </div>
 
+<!-- thinking (amber spinner, shown during processing) -->
+<div class="view" id="think-view">
+  <div id="think-ring"></div>
+</div>
+
 <!-- conversation (crossfades over clock) -->
 <div class="view" id="conv-view">
   <div id="q-text"></div>
@@ -904,7 +936,11 @@ function setStatus(s) {
   else if (s.state === 'processing') { cls = 's-thinking'; lbl = 'THINKING'; }
   else if (s.state === 'awake')      { cls = 's-awake';   lbl = 'LISTENING'; }
   else                               { cls = '';           lbl = 'READY'; }
-  document.body.className = cls;
+  // Add is-thinking view class only during processing
+  var viewCls = (s.state === 'processing') ? ' is-thinking' : '';
+  // Preserve has-conv — it is managed solely by showConv/clearTimer
+  var hasConv = (document.body.className.indexOf('has-conv') >= 0) ? ' has-conv' : '';
+  document.body.className = (cls + viewCls + hasConv).replace(/\s+/g,' ').trim();
   document.getElementById('slabel').textContent = lbl;
   document.getElementById('mute-btn').className = 'cb' + (s.muted ? ' on' : '');
 }
