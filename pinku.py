@@ -1051,12 +1051,32 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
 
-            # Known speaker in idle mode — go directly to Gemini audio.
-            # MLX large-v3-turbo is unreliable for Hindi/Hinglish and always
-            # fell through to Gemini anyway, wasting ~1.7s per utterance.
-            # Gemini transcribes, checks for the wake word, and responds in one call.
+            # Known speaker in idle mode.
+            # Apple STT + math shortcut first (~0.2s) — saves a 4s Gemini round-trip
+            # for simple arithmetic when the wake word is present.
+            # Fall through to Gemini audio for everything else.
             if _current_speaker is not None:
                 dashboard.update_status(state="processing", speaker=_current_speaker)
+                _idle_fast = apple_stt.transcribe(pcm)
+                if _idle_fast:
+                    _idle_triggered, _idle_cmd = _check_wake(_idle_fast)
+                    if _idle_triggered and _idle_cmd:
+                        _math_answer = math_handler.detect_and_compute(_idle_cmd)
+                        if _math_answer:
+                            _t_llm = time.time()
+                            _math_result = {
+                                "transcript": _idle_fast,
+                                "lang": "en",
+                                "action": "chat",
+                                "reply": _math_answer,
+                                "_session_active": False,
+                                "_t_utterance": _t_utterance,
+                                "_t_spk": _t_spk,
+                                "_t_llm": _t_llm,
+                            }
+                            print(f"[MATH] {_math_answer}")
+                            _handle_gemini_result(_math_result)
+                            continue
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist,
                     session_active=False, speaker=_current_speaker)
@@ -1092,10 +1112,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _result = llm.transcribe_and_respond(
                         pcm, history=_session_hist,
                         session_active=False, speaker=_current_speaker)
+                    _t_llm = time.time()
                     if _result is not None:
                         _result["_session_active"] = False
                         _result["_t_utterance"]    = _t_utterance
                         _result["_t_spk"]          = _t_spk
+                        _result["_t_llm"]          = _t_llm
                         _handle_gemini_result(_result)
                     else:
                         dashboard.update_status(state="idle")
@@ -1121,7 +1143,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
             dashboard.update_status(state="processing", speaker=_current_speaker)
             result = llm.transcribe_and_respond(pcm, history=_session_hist,
                                                 speaker=_current_speaker)
+            _t_llm = time.time()
             if result is not None:
+                result["_t_utterance"] = _t_utterance
+                result["_t_spk"]       = _t_spk
+                result["_t_llm"]       = _t_llm
                 _handle_gemini_result(result)
             else:
                 # Gemini unavailable → route the Whisper text we already have
