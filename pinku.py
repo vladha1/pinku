@@ -75,10 +75,11 @@ _stop_all      = threading.Event()
 _processing    = threading.Lock()    # held while handling an utterance end-to-end
 _session_hist: list[dict] = []       # [{role, content}] for LLM context
 
-_last_speech_at:  float = time.time()   # reset on every utterance / wake / gesture
-_settle_until:    float = 0.0           # voice loop blocked until this time (TTS + echo settle)
-_current_speaker: str | None = None    # name of identified speaker for this utterance
-_last_gate_at:    float = 0.0           # last time a PCM chunk passed the speaker gate
+_last_speech_at:     float = time.time()   # reset on every utterance / wake / gesture
+_settle_until:       float = 0.0           # voice loop blocked until this time (TTS + echo settle)
+_current_speaker:    str | None = None    # name of identified speaker for this utterance
+_last_gate_at:       float = 0.0           # last time a PCM chunk passed the speaker gate
+_last_pinku_spoke_at: float = 0.0         # when Pinku last finished speaking (post-reply window)
 
 # Consecutive Gemini wake-word-only / hallucination counter.
 # Gemini sometimes hallucinates "Pinku." from background noise.  Each such result
@@ -191,6 +192,8 @@ def _speak_reply(reply: str, is_hi: bool, _t_utterance: float = 0.0,
     # _voice_loop releases the lock after _speak_reply returns.
     actual_duration = tts.speak(reply, prefer_hi=is_hi, block=True)
     _last_speech_at = time.time()
+    global _last_pinku_spoke_at
+    _last_pinku_spoke_at = time.time()   # opens post-reply conversational window
     dashboard.update_status(speaking=False, state="awake" if _awake.is_set() else "idle")
 
     # Recalculate settle from actual measured duration (edge-tts returns exact
@@ -954,11 +957,17 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: active session ─────────────────────────────────────────
             if _awake.is_set():
-                # Drop voices that scored below the uncertain threshold.
-                # Voices in the uncertain band [UNCERTAIN, ACCEPT) are real people
-                # (family / guests) and pass as anonymous — only truly unknown scores
-                # are blocked here. All sub-UNCERTAIN voices are already dropped above.
-                if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_ACCEPT:
+                # Post-reply window: for N seconds after Pinku finishes speaking,
+                # loosen the speaker gate to UNCERTAIN so family/guests can follow
+                # up naturally without re-saying the wake word. Outside this window
+                # require a confirmed known speaker (>= ACCEPT).
+                _in_reply_window = (
+                    _last_pinku_spoke_at > 0 and
+                    time.time() - _last_pinku_spoke_at < config.SPEAKER_POST_REPLY_WINDOW
+                )
+                _gate_threshold = (config.SPEAKER_THRESHOLD_UNCERTAIN if _in_reply_window
+                                   else config.SPEAKER_THRESHOLD_ACCEPT)
+                if _current_speaker is None and _spk_score < _gate_threshold:
                     continue
 
                 dashboard.update_status(state="processing", speaker=_current_speaker)

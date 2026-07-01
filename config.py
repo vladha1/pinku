@@ -77,6 +77,10 @@ SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.
 # Prevents family-voice confusion where related speakers score similarly against
 # the same profile (e.g. parent 0.74, child 0.68 → margin 0.06 < 0.08 → anonymous).
 SPEAKER_ID_MARGIN           = float(os.getenv("SPEAKER_ID_MARGIN",           "0.08"))
+# Seconds after Pinku finishes speaking during which the speaker gate uses
+# SPEAKER_THRESHOLD_UNCERTAIN instead of SPEAKER_THRESHOLD_ACCEPT, making
+# it easier for family/guests to follow up naturally without the wake word.
+SPEAKER_POST_REPLY_WINDOW   = int(os.getenv("SPEAKER_POST_REPLY_WINDOW",   "12"))
 
 # ── Wake / session ────────────────────────────────────────────────────────────
 SESSION_TIMEOUT   = float(os.getenv("SESSION_TIMEOUT", "60.0"))  # seconds of silence before going idle (60 = enough time to think + respond)
