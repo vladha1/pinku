@@ -925,6 +925,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
         # Drop audio from unrecognised voices (TV, Pinky's TTS echo, guests) before
         # any expensive Whisper / Gemini call.  Falls back to open gate when no
         # profiles are enrolled so the system works out of the box.
+        _spk_score = 1.0   # default when speaker ID is off or no profiles
         if config.SPEAKER_ID_ENABLED and speaker_id.has_profiles():
             _spk_name, _spk_score = speaker_id.identify(pcm)
             if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
@@ -953,8 +954,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: active session ─────────────────────────────────────────
             if _awake.is_set():
-                # Drop uncertain/unknown speakers to block TV/background audio.
-                if _current_speaker is None:
+                # Drop voices that scored below the uncertain threshold.
+                # Voices in the uncertain band [UNCERTAIN, ACCEPT) are real people
+                # (family / guests) and pass as anonymous — only truly unknown scores
+                # are blocked here. All sub-UNCERTAIN voices are already dropped above.
+                if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_ACCEPT:
                     continue
 
                 dashboard.update_status(state="processing")
