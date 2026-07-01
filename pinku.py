@@ -1065,6 +1065,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     result["_session_active"] = False
                     result["_t_utterance"]    = _t_utterance
                     result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
                 else:
                     _fallback_process(pcm)
