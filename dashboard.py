@@ -975,7 +975,15 @@ function connect() {
   es.onmessage = function(evt) {
     try {
       var d = JSON.parse(evt.data);
-      if (d.type === 'status')  setStatus(d);
+      if (d.type === 'status') {
+        setStatus(d);
+        // Show Q&A as soon as speaking starts — covers time/weather/all Python-handled
+        // actions that call update_status() but not record_conversation().
+        // (chat path also sends a history event; calling showConv twice just resets timer)
+        if (d.speaking && d.last_transcript && d.last_reply) {
+          showConv(d.last_transcript, d.last_reply);
+        }
+      }
       if (d.type === 'history') showConv(d.transcript, d.reply);
     } catch(e) {}
   };
