@@ -25,6 +25,17 @@ jobs:
       - name: Wait for startup
         run: sleep 6
 
+      - name: Verify dashboard.py on disk
+        run: |
+          echo "=== dashboard.py date-str CSS ==="
+          grep -n "date-str\|day-name\|font-size\|color" ~/pinku/dashboard.py | head -20
+          echo ""
+          echo "=== dashboard.py HTML block ==="
+          grep -n "date-str\|day-name" ~/pinku/dashboard.py
+          echo ""
+          echo "=== Flask serving check ==="
+          curl -s http://localhost:5100/ | grep -o 'date-str[^<]*' | head -5 || echo "(curl failed)"
+
       - name: Capture logs
         run: |
           echo "=== PM2 status ==="
