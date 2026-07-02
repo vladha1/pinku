@@ -30,14 +30,9 @@ jobs:
           echo "=== What process holds port 5100 ==="
           lsof -i :5100 -n -P || echo "(lsof failed)"
           echo ""
-          echo "=== Python sees new HTML? ==="
-          /Users/vivekladha/pinku/.venv/bin/python3 -c "
-import sys; sys.path.insert(0, '/Users/vivekladha/pinku')
-import dashboard
-print('Has Mon:', ', Mon' in dashboard.HTML or ', Tue' in dashboard.HTML)
-print('Has slice:', 'slice(0,3)' in dashboard.HTML)
-print('date-str font-size:', [l.strip() for l in dashboard.HTML.split('\n') if 'font-size' in l and 'date' in l.lower() or ('577' in l)])
-" || echo "(python check failed)"
+          echo "=== dashboard.py has new code? ==="
+          grep -c "slice(0,3)" ~/pinku/dashboard.py && echo "YES new code" || echo "NO old code"
+          grep -c ", Mon" ~/pinku/dashboard.py && echo "YES has Mon" || echo "NO no Mon"
           echo ""
           echo "=== Flask serving check ==="
           curl -s http://localhost:5100/ | grep -o 'date-str[^<]*' | head -5 || echo "(curl failed)"
