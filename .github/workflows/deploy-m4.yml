@@ -1,0 +1,34 @@
+name: Deploy to M4
+
+on:
+  push:
+    branches:
+      - claude/pinky-sensitivity-responsiveness-ywYNp
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 5
+
+    steps:
+      - name: Pull latest code
+        run: |
+          cd ~/pinku
+          git fetch origin
+          git pull origin ${{ github.ref_name }}
+
+      - name: Restart Pinku via PM2
+        run: pm2 restart pinku
+
+      - name: Wait for startup
+        run: sleep 6
+
+      - name: Capture logs
+        run: |
+          echo "=== PM2 status ==="
+          pm2 list --no-color
+          echo ""
+          echo "=== Pinku logs (last 80 lines) ==="
+          pm2 logs pinku --lines 80 --nostream --no-color
