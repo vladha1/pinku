@@ -27,14 +27,17 @@ jobs:
 
       - name: Verify dashboard.py on disk
         run: |
-          echo "=== pm2 show pinku (script path + cwd) ==="
-          pm2 show pinku --no-color | grep -E "script|exec path|cwd|pm_cwd|root"
+          echo "=== What process holds port 5100 ==="
+          lsof -i :5100 -n -P || echo "(lsof failed)"
           echo ""
-          echo "=== Actual script being run ==="
-          pm2 show pinku --no-color | head -40
-          echo ""
-          echo "=== dashboard.py date-str on disk ==="
-          grep -n "date-str\|day-name" ~/pinku/dashboard.py
+          echo "=== Python sees new HTML? ==="
+          /Users/vivekladha/pinku/.venv/bin/python3 -c "
+import sys; sys.path.insert(0, '/Users/vivekladha/pinku')
+import dashboard
+print('Has Mon:', ', Mon' in dashboard.HTML or ', Tue' in dashboard.HTML)
+print('Has slice:', 'slice(0,3)' in dashboard.HTML)
+print('date-str font-size:', [l.strip() for l in dashboard.HTML.split('\n') if 'font-size' in l and 'date' in l.lower() or ('577' in l)])
+" || echo "(python check failed)"
           echo ""
           echo "=== Flask serving check ==="
           curl -s http://localhost:5100/ | grep -o 'date-str[^<]*' | head -5 || echo "(curl failed)"
