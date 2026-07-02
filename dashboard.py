@@ -575,20 +575,20 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 }
 
 #day-name {
-  font-size: 5.2vmin;
+  font-size: 10vmin;
   font-weight: 200;
-  color: rgba(226,232,248,0.55);
+  color: rgba(226,232,248,0.85);
   letter-spacing: 0.04em;
-  margin-top: 14px;
+  margin-top: 10px;
   text-align: center;
 }
 
 #date-str {
-  font-size: 3.8vmin;
+  font-size: 7vmin;
   font-weight: 200;
-  color: rgba(226,232,248,0.32);
+  color: rgba(226,232,248,0.65);
   letter-spacing: 0.05em;
-  margin-top: 5px;
+  margin-top: 4px;
   text-align: center;
 }
 
