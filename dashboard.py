@@ -763,22 +763,23 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 .cb {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
-  color: rgba(226,232,248,0.35);
-  font-size: 1.8vmin;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 8px 18px;
-  border-radius: 100px;
+  color: rgba(226,232,248,0.55);
+  font-size: 4.5vmin;
+  width: 12vmin;
+  height: 12vmin;
+  display: -webkit-inline-flex; display: inline-flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+  border-radius: 50%;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  -webkit-transition: background 0.18s, color 0.18s;
-  transition: background 0.18s, color 0.18s;
-  font-family: inherit;
-  margin-right: 10px;  /* gap replacement for iOS 9 */
+  -webkit-transition: background 0.18s, color 0.18s, border-color 0.18s;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+  margin-right: 6vmin;
 }
 .cb:last-child { margin-right: 0; }
-.cb:active { background: rgba(255,255,255,0.1); color: rgba(226,232,248,0.85); }
-.cb.on     { border-color: rgba(248,113,113,0.45); color: rgba(248,113,113,0.8); }
+.cb:active { background: rgba(255,255,255,0.12); color: rgba(226,232,248,0.9); }
+.cb.on     { border-color: rgba(248,113,113,0.5); color: rgba(248,113,113,0.85); }
 
 /* ── Voices slide-up ── */
 #voices-overlay {
@@ -888,10 +889,10 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
     <span id="slabel">READY</span>
   </div>
   <div id="controls">
-    <button class="cb" onclick="act('wake')">WAKE</button>
-    <button class="cb" onclick="act('sleep')">SLEEP</button>
-    <button class="cb" id="mute-btn" onclick="act('mute_toggle')">MUTE</button>
-    <button class="cb" onclick="openVoices()">VOICES</button>
+    <button class="cb" onclick="act('wake')">☀️</button>
+    <button class="cb" onclick="act('sleep')">🌙</button>
+    <button class="cb" id="mute-btn" onclick="act('mute_toggle')">🔊</button>
+    <button class="cb" onclick="openVoices()">🎙</button>
   </div>
 </div>
 
@@ -959,7 +960,9 @@ function setStatus(s) {
   var hasConv = (document.body.className.indexOf('has-conv') >= 0) ? ' has-conv' : '';
   document.body.className = (cls + viewCls + hasConv).replace(/\s+/g,' ').trim();
   document.getElementById('slabel').textContent = lbl;
-  document.getElementById('mute-btn').className = 'cb' + (s.muted ? ' on' : '');
+  var muteBtn = document.getElementById('mute-btn');
+  muteBtn.className = 'cb' + (s.muted ? ' on' : '');
+  muteBtn.textContent = s.muted ? '🔇' : '🔊';
 
   // Track speaker identity for conv-view attribution
   if (s.state === 'processing') {
