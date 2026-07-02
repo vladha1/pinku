@@ -27,10 +27,13 @@ jobs:
 
       - name: Verify dashboard.py on disk
         run: |
-          echo "=== dashboard.py date-str CSS ==="
-          grep -n "date-str\|day-name\|font-size\|color" ~/pinku/dashboard.py | head -20
+          echo "=== pm2 show pinku (script path + cwd) ==="
+          pm2 show pinku --no-color | grep -E "script|exec path|cwd|pm_cwd|root"
           echo ""
-          echo "=== dashboard.py HTML block ==="
+          echo "=== Actual script being run ==="
+          pm2 show pinku --no-color | head -40
+          echo ""
+          echo "=== dashboard.py date-str on disk ==="
           grep -n "date-str\|day-name" ~/pinku/dashboard.py
           echo ""
           echo "=== Flask serving check ==="
