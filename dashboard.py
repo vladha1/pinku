@@ -561,7 +561,7 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   font-weight: 100;
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
-  color: #e2e8f8;
+  color: #f472b6;
   line-height: 1;
 }
 
