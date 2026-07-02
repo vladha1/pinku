@@ -691,6 +691,17 @@ body.has-conv #cbar { opacity: 1; }
   transition: color 0.4s;
 }
 
+#sse-ping {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgba(74,222,128,0.8);
+  -webkit-flex-shrink: 0; flex-shrink: 0;
+  margin-left: 10px;
+  opacity: 0;
+  -webkit-transition: opacity 0.35s;
+  transition: opacity 0.35s;
+}
+
 /* status state classes on body */
 body.s-awake    #sdot  { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.2); }
 body.s-awake    #slabel { color: #22c55e; }
@@ -887,6 +898,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   <div id="status-pill">
     <div id="sdot"></div>
     <span id="slabel">READY</span>
+    <span id="sse-ping"></span>
   </div>
   <div id="controls">
     <button class="cb" onclick="act('wake')">☀️</button>
@@ -1014,30 +1026,41 @@ function showConv(q, r) {
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 var _serverTs = null;
+var _sseCount = 0;
+
+function _sseFlash() {
+  _sseCount++;
+  var p = document.getElementById('sse-ping');
+  if (!p) return;
+  p.style.opacity = '1';
+  setTimeout(function() { p.style.opacity = '0'; }, 350);
+}
 
 function connect() {
   var es = new EventSource('/api/stream');
   es.onmessage = function(evt) {
-    try {
-      var d = JSON.parse(evt.data);
-      if (d.type === 'status') {
-        // Auto-reload when server restarts after a deploy (start_ts changes)
-        if (_serverTs === null) {
-          _serverTs = d.start_ts;
-        } else if (d.start_ts !== _serverTs) {
-          location.reload();
-          return;
-        }
-        setStatus(d);
-        // Show Q&A as soon as speaking starts — covers time/weather/all Python-handled
-        // actions that call update_status() but not record_conversation().
-        // (chat path also sends a history event; calling showConv twice just resets timer)
-        if (d.speaking && d.last_transcript && d.last_reply) {
-          showConv(d.last_transcript, d.last_reply);
-        }
+    _sseFlash();
+    var d;
+    try { d = JSON.parse(evt.data); } catch(e) { return; }
+
+    if (d.type === 'status') {
+      // Auto-reload when server restarts after a deploy (start_ts changes)
+      if (_serverTs === null) {
+        _serverTs = d.start_ts;
+      } else if (d.start_ts !== _serverTs) {
+        location.reload();
+        return;
       }
-      if (d.type === 'history') showConv(d.transcript, d.reply);
-    } catch(e) {}
+      // Isolated try so a setStatus error never blocks showConv
+      try { setStatus(d); } catch(e) { if (window.console) console.error('Pinku setStatus:', e); }
+      // Show Q&A as soon as speaking starts
+      if (d.speaking && d.last_transcript && d.last_reply) {
+        try { showConv(d.last_transcript, d.last_reply); } catch(e) {}
+      }
+    }
+    if (d.type === 'history') {
+      try { showConv(d.transcript, d.reply); } catch(e) {}
+    }
   };
   es.onerror = function() {
     es.close();
