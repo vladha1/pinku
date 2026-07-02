@@ -78,6 +78,7 @@ _session_hist: list[dict] = []       # [{role, content}] for LLM context
 _last_speech_at:     float = time.time()   # reset on every utterance / wake / gesture
 _settle_until:       float = 0.0           # voice loop blocked until this time (TTS + echo settle)
 _current_speaker:    str | None = None    # name of identified speaker for this utterance
+_current_spk_score:  float = 0.0          # cosine similarity score for _current_speaker
 _last_gate_at:       float = 0.0           # last time a PCM chunk passed the speaker gate
 _last_pinku_spoke_at: float = 0.0         # when Pinku last finished speaking (post-reply window)
 
@@ -888,7 +889,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
     Fallback to Whisper + Ollama + Gemini if Gemini audio is unavailable.
     """
-    global _last_speech_at, _current_speaker, _last_gate_at
+    global _last_speech_at, _current_speaker, _current_spk_score, _last_gate_at
 
     while not _stop_all.is_set():
         if tts.is_speaking():
@@ -952,12 +953,14 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 continue
             _last_gate_at = _gate_now
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
+            _current_spk_score = _spk_score
             if _spk_name:
                 _log("info", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
             else:
                 _log("info", f"SpeakerID: uncertain ({_spk_score:.2f}) — passing anonymously")
         else:
             _current_speaker = None
+            _current_spk_score = 0.0
 
         _t_spk = time.time()   # after speaker ID (or skipped)
 
@@ -977,7 +980,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                     continue
 
-                dashboard.update_status(state="processing", speaker=_current_speaker)
+                dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
 
                 # ── Fast path: local STT + local math + Gemini text ──────────
                 # Apple STT ~0.2s (when authorized) → mlx-whisper ~0.5s →
@@ -1060,7 +1063,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             # for simple arithmetic when the wake word is present.
             # Fall through to Gemini audio for everything else.
             if _current_speaker is not None:
-                dashboard.update_status(state="processing", speaker=_current_speaker)
+                dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
                 _idle_fast = apple_stt.transcribe(pcm)
                 if _idle_fast:
                     _idle_triggered, _idle_cmd = _check_wake(_idle_fast)
@@ -1112,7 +1115,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # let Gemini re-transcribe from raw audio before discarding.
                 if _PINKU_RE_CONTAINS.search(text) and len(text.split()) <= 14:
                     print(f'[STT] Idle — Pinky in transcript but parse failed → Gemini verify: "{text}"')
-                    dashboard.update_status(state="processing", speaker=_current_speaker)
+                    dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
                     _result = llm.transcribe_and_respond(
                         pcm, history=_session_hist,
                         session_active=False, speaker=_current_speaker)

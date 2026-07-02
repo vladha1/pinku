@@ -18,7 +18,7 @@ _start_time_str = time.strftime("%H:%M:%S")         # "07:16:42" — shown in he
 _status = {
     "state": "idle", "muted": False, "model": "",
     "last_transcript": "", "last_reply": "", "speaking": False,
-    "detections": [], "speaker": None,
+    "detections": [], "speaker": None, "spk_score": 0.0,
 }
 
 _clients_lock = threading.Lock()
@@ -590,6 +590,17 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   padding-top: 40px;
 }
 
+#spk-label {
+  font-size: 2.5vmin;
+  font-weight: 300;
+  color: rgba(245,158,11,0.55);
+  letter-spacing: 0.06em;
+  text-align: right;
+  padding: 3px 2px 10px;
+  width: 100%;
+  min-height: 1em;
+}
+
 #q-text {
   width: 100%;
   font-size: 4.2vmin;
@@ -865,6 +876,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 <!-- conversation (crossfades over clock) -->
 <div class="view" id="conv-view">
   <div id="q-text"></div>
+  <div id="spk-label"></div>
   <div id="r-text"></div>
 </div>
 
@@ -949,6 +961,12 @@ function setStatus(s) {
   document.getElementById('slabel').textContent = lbl;
   document.getElementById('mute-btn').className = 'cb' + (s.muted ? ' on' : '');
 
+  // Track speaker identity for conv-view attribution
+  if (s.state === 'processing') {
+    if (s.speaker !== undefined) _lastSpeaker = s.speaker;
+    if (s.spk_score !== undefined && s.spk_score > 0) _lastSpkScore = s.spk_score;
+  }
+
   // Update think label only on transition INTO processing to avoid phrase flicker
   var nowProcessing = (s.state === 'processing');
   if (nowProcessing && !_prevProcessing) {
@@ -962,12 +980,20 @@ function setStatus(s) {
 // ── Conversation ──────────────────────────────────────────────────────────────
 var _clearTimer = null;
 var SHOW_MS = 13000;
+var _lastSpeaker = null;
+var _lastSpkScore = 0;
 
 function showConv(q, r) {
   if (!r && !q) return;
   if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
-  document.getElementById('q-text').textContent = q ? '“' + q + '”' : '';
+  document.getElementById('q-text').textContent = q ? '”' + q + '”' : '';
   document.getElementById('r-text').textContent = r || '';
+  var spkEl = document.getElementById('spk-label');
+  if (spkEl) {
+    var pct = _lastSpkScore > 0 ? Math.round(_lastSpkScore * 100) + '%' : '';
+    var name = _lastSpeaker ? _lastSpeaker : (_lastSpkScore > 0 ? '?' : '');
+    spkEl.textContent = (name && pct) ? name + ' · ' + pct : (name || pct);
+  }
   document.body.className = (document.body.className + ' has-conv').trim();
 
   var fill = document.getElementById('cbar-fill');
