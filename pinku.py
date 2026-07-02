@@ -474,29 +474,33 @@ _PINKU_RE_START = _re.compile(
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)\b[,\s।]*',                            # पिकु/पिखु/पिंक्व = Whisper mishearings
+    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)[,\s।]*',                         # पिकु/पिखु/पिंक्व = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)\b[\W]*$',
+    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)[\W]*$',
     _re.IGNORECASE,
 )
 # Pinky variant anywhere in text — used for Gemini fallback when local wake parse fails
+# Note: use (?!\w) not \b at end — Devanagari vowel signs (ि ी ु ू ो) are \W so \b
+# never fires after them (both sides of boundary are \W → no boundary).
 _PINKU_RE_CONTAINS = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)\b',
+    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)',
     _re.IGNORECASE,
 )
 
-_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते"}
+# "आई" = transliterated "Hi" that Whisper uses; "हाई" = "Hi" written in Devanagari
+_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते", "आई"}
 # Devanagari fuzzy: initial consonant (प/त/म/ब) + vowel (ि/ी/े) +
 # optional nasal/r + k-family consonant + optional ending vowel/cluster
+# Include ि (short i, U+093F) — "पिंकि" is Whisper's most common Devanagari transcription
 _DEVANAGARI_WAKE_RE = _re.compile(
-    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीो]|्[वय])?$'
+    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीिो]|्[वय])?$'
 )
 # Roman fuzzy targets — edit distance ≤ 2 catches pinkku, piku, minkoo, pinsky, etc.
 _FUZZY_TARGETS = ["pinku", "pinky", "pinki", "pinkoo", "penku"]
@@ -639,7 +643,7 @@ def _handle_gemini_result(result: dict):
     if not _session_was_active and not _awake.is_set():
         _WAKE_RE = _re.compile(
             r'\b(pinku|pinky|pinki|pinko|pink|pingu|pinkoo|penku|penko'
-            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)\b',
+            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)(?!\w)',
             _re.IGNORECASE)
         if action != "ignore" and not _WAKE_RE.search(transcript):
             _log("info",
@@ -864,7 +868,7 @@ def _fallback_process(pcm: bytes):
     # prompt (including "nahi nahayegi" for shower etc.) can fire.
     act = action.get("action", "chat")
     if act == "ignore" and _re.search(
-            r'\b(pinku|pinky|pinki|pink|pinko|पिंकू|पिंकु|पिंकि|पिकु)\b', text, _re.IGNORECASE):
+            r'\b(pinku|pinky|pinki|pink|pinko|पिंकू|पिंकु|पिंकि|पिकु)(?!\w)', text, _re.IGNORECASE):
         _log("info", f"Fallback: overriding ignore→chat (wake word in transcript)")
         action["action"] = "chat"
         act = "chat"
