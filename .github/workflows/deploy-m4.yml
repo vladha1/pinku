@@ -19,28 +19,33 @@ jobs:
           git fetch origin
           git pull origin ${{ github.ref_name }}
 
-      - name: Restart Pinku via PM2
-        run: pm2 restart pinku
+      - name: Stop Pinku and clear port 5100
+        run: |
+          pm2 stop pinku || true
+          sleep 5
+          lsof -ti :5100 | xargs kill -9 2>/dev/null || true
+
+      - name: Start Pinku via PM2
+        run: pm2 start pinku
 
       - name: Wait for startup
-        run: sleep 6
+        run: sleep 12
 
-      - name: Verify dashboard.py on disk
+      - name: Verify new code is serving
         run: |
           echo "=== What process holds port 5100 ==="
           lsof -i :5100 -n -P || echo "(lsof failed)"
           echo ""
           echo "=== dashboard.py has new code? ==="
           grep -c "slice(0,3)" ~/pinku/dashboard.py && echo "YES new code" || echo "NO old code"
-          grep -c ", Mon" ~/pinku/dashboard.py && echo "YES has Mon" || echo "NO no Mon"
           echo ""
           echo "=== Flask serving check ==="
-          curl -s http://localhost:5100/ | grep -o 'date-str[^<]*' | head -5 || echo "(curl failed)"
+          curl -s http://localhost:5100/ | grep -o ', Mon' | head -3 || echo "(curl failed or no Mon)"
 
       - name: Capture logs
         run: |
           echo "=== PM2 status ==="
           pm2 list --no-color
           echo ""
-          echo "=== Pinku logs (last 80 lines) ==="
-          pm2 logs pinku --lines 80 --nostream --no-color
+          echo "=== Pinku logs (last 50 lines) ==="
+          pm2 logs pinku --lines 50 --nostream --no-color
