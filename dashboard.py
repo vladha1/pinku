@@ -574,21 +574,12 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   letter-spacing: 0.07em;
 }
 
-#day-name {
-  font-size: 15vmin;
+#date-str {
+  font-size: 13vmin;
   font-weight: 100;
   color: #f59e0b;
   letter-spacing: 0.04em;
   margin-top: 6px;
-  text-align: center;
-}
-
-#date-str {
-  font-size: 11vmin;
-  font-weight: 200;
-  color: rgba(226,232,248,0.95);
-  letter-spacing: 0.05em;
-  margin-top: 2px;
   text-align: center;
 }
 
@@ -862,8 +853,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
     <span id="time">12:00</span>
     <span id="ampm">AM</span>
   </div>
-  <div id="day-name">Monday</div>
-  <div id="date-str">1 January</div>
+  <div id="date-str">1 January, Mon</div>
 </div>
 
 <!-- thinking (amber spinner, shown during processing) -->
@@ -935,8 +925,7 @@ function tick() {
   document.getElementById('ampm').textContent = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   document.getElementById('time').textContent = h + ':' + (m < 10 ? '0' : '') + m;
-  document.getElementById('day-name').textContent = DAYS[n.getDay()];
-  document.getElementById('date-str').textContent = n.getDate() + ' ' + MONTHS[n.getMonth()];
+  document.getElementById('date-str').textContent = n.getDate() + ' ' + MONTHS[n.getMonth()] + ', ' + DAYS[n.getDay()].slice(0,3);
 }
 tick();
 setInterval(tick, 4000);
