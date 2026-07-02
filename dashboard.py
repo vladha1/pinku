@@ -577,7 +577,7 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 #date-str {
   font-size: 13vmin;
   font-weight: 100;
-  color: #f59e0b;
+  color: #60a5fa;
   letter-spacing: 0.04em;
   margin-top: 6px;
   text-align: center;
