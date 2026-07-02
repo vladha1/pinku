@@ -1010,12 +1010,21 @@ function showConv(q, r) {
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
+var _serverTs = null;
+
 function connect() {
   var es = new EventSource('/api/stream');
   es.onmessage = function(evt) {
     try {
       var d = JSON.parse(evt.data);
       if (d.type === 'status') {
+        // Auto-reload when server restarts after a deploy (start_ts changes)
+        if (_serverTs === null) {
+          _serverTs = d.start_ts;
+        } else if (d.start_ts !== _serverTs) {
+          location.reload();
+          return;
+        }
         setStatus(d);
         // Show Q&A as soon as speaking starts — covers time/weather/all Python-handled
         // actions that call update_status() but not record_conversation().
