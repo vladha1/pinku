@@ -300,37 +300,46 @@ def _handle_time(action: dict):
             reply = f"Today is {now.strftime('%A, %d %B %Y')}. It's {now.strftime('%-I:%M %p')}."
 
     _log("source", "system clock")
-    dashboard.update_status(last_transcript=action.get("transcript",""), last_reply=reply)
+    tr = action.get("transcript", "")
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
+    dashboard.record_conversation(tr, reply, lang=lang, source="system clock")
     _speak_reply(reply, lang == "hi")
 
 
 def _handle_weather(action: dict):
     """Fetch weather from wttr.in — no API key needed."""
-    import urllib.request as _ur
+    import urllib.request as _ur, json as _json
     lang = action.get("lang", "en")
     tr   = action.get("transcript", "")
 
-    # Extract city from transcript — take the last capitalised word sequence
-    # e.g. "how is the weather in Kolkata today" → "Kolkata"
     import re as _re2
+    # English: "weather in Kolkata today"
     m = _re2.search(r'\bin\s+([A-Z][a-zA-Z\s]+?)(?:\s+today|\s+tomorrow|\?|$)', tr)
+    # Hindi transliteration: "Gurugram ka mausam" / "Delhi ki weather"
+    if not m:
+        m = _re2.search(r'([A-Z][a-zA-Z]+)\s+(?:ka|ki|ke)\s+(?:mausam|weather|mosam)', tr, _re2.IGNORECASE)
     city = m.group(1).strip() if m else "Gurugram"
 
     _log("source", f"wttr.in ({city})")
     try:
-        url = f"https://wttr.in/{city.replace(' ', '+')}?format=3"
+        url = f"https://wttr.in/{city.replace(' ', '+')}?format=j1"
         with _ur.urlopen(url, timeout=8) as r:
-            raw = r.read().decode().strip()
-        # raw looks like: "Kolkata: ⛅️  +32°C"
+            data = _json.loads(r.read().decode())
+        curr  = data["current_condition"][0]
+        temp  = curr["temp_C"]
+        desc  = curr["weatherDesc"][0]["value"]
+        today = data["weather"][0]
+        hi, lo = today["maxtempC"], today["mintempC"]
         if lang == "hi":
-            reply = f"{city} का मौसम: {raw.split(':', 1)[-1].strip()}"
+            reply = f"{city} का मौसम: {desc}, {temp}°C. आज High {hi}°C, Low {lo}°C."
         else:
-            reply = raw
+            reply = f"{city}: {desc}, {temp}°C. Today High {hi}°C / Low {lo}°C."
     except Exception as e:
         _log("warn", f"Weather fetch failed: {e}")
         reply = "Sorry, I couldn't get the weather right now."
 
     dashboard.update_status(last_transcript=tr, last_reply=reply)
+    dashboard.record_conversation(tr, reply, lang=lang, source=f"wttr.in ({city})")
     _speak_reply(reply, lang == "hi")
 
 
