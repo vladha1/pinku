@@ -868,6 +868,79 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   font-size: 11px; cursor: pointer;
   padding: 0 2px; line-height: 1; margin-left: 4px;
 }
+
+/* ── Log slide-up ── */
+#log-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(5,5,13,0.88);
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: flex-end; align-items: flex-end;
+  opacity: 0; pointer-events: none;
+  -webkit-transition: opacity 0.3s;
+  transition: opacity 0.3s;
+  z-index: 50;
+}
+#log-overlay.open { opacity: 1; pointer-events: auto; }
+
+#log-panel {
+  width: 100%;
+  background: #06060f;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-radius: 20px 20px 0 0;
+  padding: 0 0 34px;
+  -webkit-transform: translateY(100%);
+  transform: translateY(100%);
+  -webkit-transition: -webkit-transform 0.4s cubic-bezier(.4,0,.2,1);
+  transition: transform 0.4s cubic-bezier(.4,0,.2,1);
+  height: 68%;
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+}
+#log-overlay.open #log-panel {
+  -webkit-transform: none;
+  transform: none;
+}
+
+#log-header {
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: space-between; justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  -webkit-flex-shrink: 0; flex-shrink: 0;
+}
+#log-header h3 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  color: rgba(226,232,248,0.38); margin: 0;
+}
+#log-close {
+  background: none; border: none;
+  color: rgba(226,232,248,0.38); font-size: 20px;
+  cursor: pointer; padding: 2px 4px; line-height: 1;
+  font-family: inherit;
+}
+
+#log-list {
+  -webkit-flex: 1; flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px 16px 8px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-info   { color: rgba(226,232,248,0.35); }
+.log-stt    { color: rgba(226,232,248,0.35); }
+.log-tts    { color: rgba(226,232,248,0.35); }
+.log-llm    { color: rgba(226,232,248,0.35); }
+.log-source { color: rgba(134,239,172,0.6); }
+.log-wake   { color: #fbbf24; font-weight: 600; }
+.log-user   { color: #93c5fd; }
+.log-pinku  { color: #6ee7b7; }
+.log-warn   { color: #fb923c; }
+.log-error  { color: #f87171; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -907,6 +980,18 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
     <button class="cb" onclick="act('sleep')">🌙</button>
     <button class="cb" id="mute-btn" onclick="act('mute_toggle')">🔊</button>
     <button class="cb" onclick="openVoices()">🎙</button>
+    <button class="cb" onclick="openLog()">📋</button>
+  </div>
+</div>
+
+<!-- log panel -->
+<div id="log-overlay" onclick="if(event.target===this)closeLog()">
+  <div id="log-panel">
+    <div id="log-header">
+      <h3>LOGS</h3>
+      <button id="log-close" onclick="closeLog()">✕</button>
+    </div>
+    <div id="log-list"></div>
   </div>
 </div>
 
@@ -1086,6 +1171,9 @@ function connect() {
     if (d.type === 'history') {
       try { showConv(d.transcript, d.reply); } catch(e) { if (window.console) console.error('Pinku showConv (history):', e); }
     }
+    if (d.type === 'log') {
+      _pushLog(d);
+    }
   };
   es.onerror = function() {
     es.close();
@@ -1097,6 +1185,44 @@ connect();
 // ── Actions ───────────────────────────────────────────────────────────────────
 function act(name) {
   xhr('POST', '/api/action', {action: name}, null);
+}
+
+// ── Log panel ─────────────────────────────────────────────────────────────────
+var _logBuf = [];
+var _LOG_MAX = 120;
+var _logOpen = false;
+
+function _makeLogEl(e) {
+  var d = document.createElement('div');
+  d.className = 'log-line log-' + (e.level || 'info');
+  d.textContent = (e.ts || '') + ' [' + (e.level || '').toUpperCase() + '] ' + (e.msg || '');
+  return d;
+}
+
+function _pushLog(e) {
+  _logBuf.push(e);
+  if (_logBuf.length > _LOG_MAX) _logBuf.shift();
+  if (!_logOpen) return;
+  var list = document.getElementById('log-list');
+  if (!list) return;
+  var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  list.appendChild(_makeLogEl(e));
+  while (list.children.length > _LOG_MAX) list.removeChild(list.firstChild);
+  if (atBottom) list.scrollTop = list.scrollHeight;
+}
+
+function openLog() {
+  _logOpen = true;
+  document.getElementById('log-overlay').className = 'open';
+  var list = document.getElementById('log-list');
+  list.innerHTML = '';
+  for (var i = 0; i < _logBuf.length; i++) list.appendChild(_makeLogEl(_logBuf[i]));
+  list.scrollTop = list.scrollHeight;
+}
+
+function closeLog() {
+  _logOpen = false;
+  document.getElementById('log-overlay').className = '';
 }
 
 // ── Voices ────────────────────────────────────────────────────────────────────
