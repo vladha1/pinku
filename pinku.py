@@ -481,17 +481,17 @@ import re as _re
 # and Devanagari पिंकू (Hindi wake word).
 _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
-    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते)[,.\s]+)?'   # optional Hindi/English prefix
+    r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते|हलो|हैलो)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)[,\s।]*',                         # पिकु/पिखु/पिंक्व = Whisper mishearings
+    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)[,\s।]*',                   # पिकु/पिखु/पिंक्व/पिके = Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)[\W]*$',
+    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)[\W]*$',
     _re.IGNORECASE,
 )
 # Pinky variant anywhere in text — used for Gemini fallback when local wake parse fails
@@ -500,17 +500,17 @@ _PINKU_RE_ANY = _re.compile(
 _PINKU_RE_CONTAINS = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू)(?!\w)',
+    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)',
     _re.IGNORECASE,
 )
 
-# "आई" = transliterated "Hi" that Whisper uses; "हाई" = "Hi" written in Devanagari
-_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते", "आई"}
+# "आई" = transliterated "Hi" that Whisper uses; "हलो"/"हैलो" = Whisper's Devanagari for "Hello"
+_HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते", "आई", "हलो", "हैलो"}
 # Devanagari fuzzy: initial consonant (प/त/म/ब) + vowel (ि/ी/े) +
 # optional nasal/r + k-family consonant + optional ending vowel/cluster
-# Include ि (short i, U+093F) — "पिंकि" is Whisper's most common Devanagari transcription
+# Include ि (U+093F) and े (U+0947) — "पिंकि"/"पिके" are common Whisper transcriptions
 _DEVANAGARI_WAKE_RE = _re.compile(
-    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीिो]|्[वय])?$'
+    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीिेो]|्[वय])?$'
 )
 # Roman fuzzy targets — edit distance ≤ 2 catches pinkku, piku, minkoo, pinsky, etc.
 _FUZZY_TARGETS = ["pinku", "pinky", "pinki", "pinkoo", "penku"]
@@ -653,7 +653,7 @@ def _handle_gemini_result(result: dict):
     if not _session_was_active and not _awake.is_set():
         _WAKE_RE = _re.compile(
             r'\b(pinku|pinky|pinki|pinko|pink|pingu|pinkoo|penku|penko'
-            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू)(?!\w)',
+            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)',
             _re.IGNORECASE)
         if action != "ignore" and not _WAKE_RE.search(transcript):
             _log("info",
