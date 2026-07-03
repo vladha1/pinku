@@ -484,14 +484,14 @@ _PINKU_RE_START = _re.compile(
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते|हलो|हैलो)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)[,\s।]*',                   # पिकु/पिखु/पिंक्व/पिके = Whisper mishearings
+    r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[,\s।]*',   # Whisper mishearings
     _re.IGNORECASE,
 )
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)[\W]*$',
+    r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[\W]*$',
     _re.IGNORECASE,
 )
 # Pinky variant anywhere in text — used for Gemini fallback when local wake parse fails
@@ -500,7 +500,7 @@ _PINKU_RE_ANY = _re.compile(
 _PINKU_RE_CONTAINS = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
-    r'|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)',
+    r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)',
     _re.IGNORECASE,
 )
 
@@ -508,10 +508,24 @@ _PINKU_RE_CONTAINS = _re.compile(
 _HINDI_PRE = {"हाई", "है", "हे", "अरे", "ओए", "नमस्ते", "आई", "हलो", "हैलो"}
 # Devanagari fuzzy: initial consonant (प/त/म/ब) + vowel (ि/ी/े) +
 # optional nasal/r + k-family consonant + optional ending vowel/cluster
-# Include ि (U+093F) and े (U+0947) — "पिंकि"/"पिके" are common Whisper transcriptions
+# Include ि (U+093F), े (U+0947), ा (U+093E) — covers पिंकि/पिके/पिंका/पिका Whisper forms
 _DEVANAGARI_WAKE_RE = _re.compile(
-    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीिेो]|्[वय])?$'
+    r'^[पतमब][िीे]ं?र?[कखगर](?:[ूुीिेोा]|्[वय])?$'
 )
+def _devanagari_has_wake_shape(text: str) -> bool:
+    """True if any word in a Devanagari transcript fuzzy-matches the Pinky phonetic shape.
+
+    Used as a Gemini fallback trigger for utterances like "राई पिंका कैसे हो?" where
+    the explicit wake-word lists don't cover the variant but the phonetic shape is correct.
+    Only fires when the transcript already contains Devanagari script.
+    """
+    import unicodedata as _ucd
+    for w in text.split():
+        wn = _ucd.normalize("NFC", w.strip(",.!?।॥ '\""))
+        if _DEVANAGARI_WAKE_RE.match(wn):
+            return True
+    return False
+
 # Roman fuzzy targets — edit distance ≤ 2 catches pinkku, piku, minkoo, pinsky, etc.
 _FUZZY_TARGETS = ["pinku", "pinky", "pinki", "pinkoo", "penku"]
 _FUZZY_PREFIXES = set("pmbt")  # consonant substitutions seen in Whisper mishearings
@@ -653,7 +667,7 @@ def _handle_gemini_result(result: dict):
     if not _session_was_active and not _awake.is_set():
         _WAKE_RE = _re.compile(
             r'\b(pinku|pinky|pinki|pinko|pink|pingu|pinkoo|penku|penko'
-            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू|पिके)(?!\w)',
+            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)',
             _re.IGNORECASE)
         if action != "ignore" and not _WAKE_RE.search(transcript):
             _log("info",
@@ -1122,8 +1136,16 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # If a Pinky variant is present but the local wake-word parser
                 # failed (wrong variant, wrong position, normalisation mismatch),
                 # let Gemini re-transcribe from raw audio before discarding.
-                if _PINKU_RE_CONTAINS.search(text) and len(text.split()) <= 14:
-                    print(f'[STT] Idle — Pinky in transcript but parse failed → Gemini verify: "{text}"')
+                # Also fires when Devanagari text contains any word with the Pinky
+                # phonetic shape (e.g. पिंका, पेंकू) even if not in the explicit list.
+                _has_devanagari = bool(_re.search(r'[ऀ-ॿ]', text))
+                _gemini_verify = (
+                    (_PINKU_RE_CONTAINS.search(text) and len(text.split()) <= 14)
+                    or (_has_devanagari and len(text.split()) <= 8
+                        and _devanagari_has_wake_shape(text))
+                )
+                if _gemini_verify:
+                    print(f'[STT] Idle — Pinky shape detected → Gemini verify: "{text}"')
                     dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
                     _result = llm.transcribe_and_respond(
                         pcm, history=_session_hist,
