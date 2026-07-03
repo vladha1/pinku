@@ -966,7 +966,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
         _spk_score = 1.0   # default when speaker ID is off or no profiles
         if config.SPEAKER_ID_ENABLED and speaker_id.has_profiles():
             _spk_name, _spk_score = speaker_id.identify(pcm)
-            if _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
+            # Use a lower floor in idle mode — wake word is the real gate there,
+            # so we only need to reject clearly-foreign audio (TV, echoes).
+            # In an active session the tighter UNCERTAIN threshold applies.
+            _spk_floor = (config.SPEAKER_THRESHOLD_UNCERTAIN if _awake.is_set()
+                          else getattr(config, 'SPEAKER_THRESHOLD_IDLE', 0.50))
+            if _spk_score < _spk_floor:
                 _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
             # Inter-utterance cooldown: drop tail-audio reblips arriving within 3s
@@ -994,8 +999,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
         try:
             # ── Gate: active session ─────────────────────────────────────────
             if _awake.is_set():
-                # In an active session, accept anyone who passed the initial speaker
-                # gate (score >= SPEAKER_THRESHOLD_UNCERTAIN = 0.65).  SPEAKER_THRESHOLD_ACCEPT
+                # In an active session, accept anyone who passed the outer speaker
+                # gate (>= SPEAKER_THRESHOLD_UNCERTAIN).  SPEAKER_THRESHOLD_ACCEPT
                 # (0.80) is used only for *identifying* the speaker by name, not for gating
                 # conversation.  Anyone who entered via wake word or while a known speaker
                 # is active has earned their place in the session — dropping uncertain voices

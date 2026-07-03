@@ -73,6 +73,11 @@ SPEAKER_ID_ENABLED          = bool(int(os.getenv("SPEAKER_ID_ENABLED",          
 #   < UNCERTAIN  → clearly unknown — drop silently (TV, echo, guests, etc.)
 SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.80"))
 SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.65"))
+# In idle mode the wake word is the primary security gate, so the speaker ID
+# floor can be lower — voices at 0.50-0.65 still need to say "Pinky" to do
+# anything.  This prevents dropping the enrolled user's own voice when they
+# speak from farther away or at an angle (commonly scores 0.60-0.64).
+SPEAKER_THRESHOLD_IDLE      = float(os.getenv("SPEAKER_THRESHOLD_IDLE",      "0.50"))
 # Minimum margin by which the best-matching profile must beat the second-best.
 # Prevents family-voice confusion where related speakers score similarly against
 # the same profile (e.g. parent 0.74, child 0.68 → margin 0.06 < 0.08 → anonymous).

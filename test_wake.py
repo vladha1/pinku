@@ -38,6 +38,7 @@ _cfg = sys.modules['config']
 _cfg.SPEAKER_PROFILES_DIR        = '/tmp'
 _cfg.SPEAKER_THRESHOLD_UNCERTAIN = 0.65
 _cfg.SPEAKER_THRESHOLD_ACCEPT    = 0.80
+_cfg.SPEAKER_THRESHOLD_IDLE      = 0.50
 _cfg.SPEAKER_ID_MARGIN           = 0.08
 _cfg.SPEAKER_ID_ENABLED          = False
 _cfg.MIC_DEVICE_INDEX            = -1
