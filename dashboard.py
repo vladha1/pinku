@@ -4,8 +4,11 @@ Face expressions, animations, sleeping state all identical to Pinky's index.html
 http://<mac-mini-ip>:5100
 """
 
+import collections
 import json
 import os
+import re as _re
+import sys
 import time
 import threading
 from flask import Flask, Response, render_template_string
@@ -23,6 +26,11 @@ _status = {
 
 _clients_lock = threading.Lock()
 _clients: list = []
+
+# Server-side log ring-buffer — replayed to each new SSE client on connect
+# so the log panel is populated immediately even when opened mid-session.
+_log_ring: collections.deque = collections.deque(maxlen=150)
+_log_ring_lock = threading.Lock()
 
 # ── Conversation history ──────────────────────────────────────────────────────
 import os as _os
@@ -87,17 +95,62 @@ def _get_log_fh():
 def log_message(level: str, msg: str):
     """Stream a log line to all dashboard clients and append to daily log file."""
     ts = time.strftime("%H:%M:%S")
-    _broadcast({
-        "type":  "log",
-        "level": level,
-        "msg":   msg,
-        "ts":    ts,
-    })
+    entry = {"type": "log", "level": level, "msg": msg, "ts": ts}
+    with _log_ring_lock:
+        _log_ring.append(entry)
+    _broadcast(entry)
     with _log_file_lock:
         try:
             _get_log_fh().write(f"{time.strftime('%Y-%m-%d')} {ts} [{level.upper():8s}] {msg}\n")
         except Exception:
             pass
+
+
+_LEVEL_RE = _re.compile(r'^\[([A-Z]+)\]\s*(.*)', _re.DOTALL)
+
+class _StdoutTee:
+    """Forward every print() line to the dashboard log stream in addition to real stdout."""
+    def __init__(self, orig):
+        self._orig = orig
+        self._buf  = ""
+        self._active = False   # re-entrancy guard
+
+    def write(self, text: str):
+        self._orig.write(text)
+        if self._active:
+            return
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.strip()
+            if not line:
+                continue
+            self._active = True
+            try:
+                m = _LEVEL_RE.match(line)
+                if m:
+                    log_message(m.group(1).lower(), m.group(2).strip())
+                else:
+                    log_message("info", line)
+            except Exception:
+                pass
+            finally:
+                self._active = False
+
+    def flush(self):
+        self._orig.flush()
+
+    def fileno(self):
+        return self._orig.fileno()
+
+    def isatty(self):
+        return False
+
+
+def start_stdout_tee():
+    """Call once from pinku.py to forward all print() output to the log panel."""
+    if not isinstance(sys.stdout, _StdoutTee):
+        sys.stdout = _StdoutTee(sys.stdout)
 
 # ── Enrollment flag + live mic level during recording ─────────────────────────
 _enrolling   = False
@@ -130,6 +183,11 @@ def stream():
         try:
             init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
             yield f"data: {json.dumps(init)}\n\n"
+            # Replay recent log history so the log panel is populated on connect
+            with _log_ring_lock:
+                history = list(_log_ring)
+            for entry in history:
+                yield f"data: {json.dumps(entry)}\n\n"
             last_heartbeat = time.time()
             last_client_activity = time.time()
             while True:

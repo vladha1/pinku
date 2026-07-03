@@ -54,6 +54,7 @@ _dash.record_conversation  = lambda *a, **kw: None
 _dash.is_enrolling         = lambda: False
 _dash.log_message          = lambda *a: None
 _dash.start                = lambda *a, **kw: None
+_dash.start_stdout_tee     = lambda: None
 
 _tts = sys.modules['tts']
 _tts.speak          = lambda *a, **kw: 0.0

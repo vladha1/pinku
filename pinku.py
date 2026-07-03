@@ -1240,6 +1240,7 @@ def main():
     # ── Dashboard ─────────────────────────────────────────────────────────────
     if not args.no_dashboard:
         dashboard.start(port=args.port)
+        dashboard.start_stdout_tee()   # forward all print() to the log panel
         # Wire dashboard buttons → pinku actions
         dashboard.register_action("wake",             _extend_session)
         dashboard.register_action("sleep",            _handle_sleep)
