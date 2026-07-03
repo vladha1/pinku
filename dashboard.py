@@ -619,11 +619,13 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   display: -webkit-flex; display: flex;
   -webkit-align-items: center; align-items: center;
   -webkit-justify-content: center; justify-content: center;
-  font-size: 7.5vmin;
+  font-size: 4.8vmin;
   font-weight: 200;
   color: #e2e8f8;
-  line-height: 1.5;
+  line-height: 1.6;
   text-align: center;
+  white-space: pre-wrap;
+  overflow-y: auto;
   padding: 16px 0;
 }
 
@@ -994,9 +996,15 @@ function setStatus(s) {
 
 // ── Conversation ──────────────────────────────────────────────────────────────
 var _clearTimer = null;
-var SHOW_MS = 13000;
+var _isSpeaking = false;
+var AFTER_SPEECH_MS = 5000;   // linger after TTS ends before clearing
 var _lastSpeaker = null;
 var _lastSpkScore = 0;
+
+function _clearConv() {
+  _clearTimer = null;
+  document.body.className = document.body.className.replace(/\bhas-conv\b/g, '').replace(/\s+/g,' ').trim();
+}
 
 function showConv(q, r) {
   if (!r && !q) return;
@@ -1009,19 +1017,13 @@ function showConv(q, r) {
     var name = _lastSpeaker ? _lastSpeaker : (_lastSpkScore > 0 ? '?' : '');
     spkEl.textContent = (name && pct) ? name + ' · ' + pct : (name || pct);
   }
-  document.body.className = (document.body.className + ' has-conv').trim();
+  document.body.className = (document.body.className + ' has-conv').replace(/\s+/g,' ').trim();
 
   var fill = document.getElementById('cbar-fill');
-  fill.style.cssText = 'transition:none;width:100%';
-  setTimeout(function() {
-    fill.style.cssText = 'transition:width ' + (SHOW_MS/1000) + 's linear;width:0%';
-  }, 30);
-
-  _clearTimer = setTimeout(function() {
-    var c = document.body.className.replace(/\bhas-conv\b/g, '').trim();
-    document.body.className = c;
-    _clearTimer = null;
-  }, SHOW_MS);
+  if (fill) fill.style.cssText = 'transition:none;width:100%';
+  // Don't start drain animation here — it fires when speaking=False arrives.
+  // 90s safety-net clears if the server never sends speaking=False.
+  _clearTimer = setTimeout(_clearConv, 90000);
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -1051,15 +1053,38 @@ function connect() {
         location.reload();
         return;
       }
+      var wasSpeaking = _isSpeaking;
+      _isSpeaking = !!d.speaking;
       // Isolated try so a setStatus error never blocks showConv
       try { setStatus(d); } catch(e) { if (window.console) console.error('Pinku setStatus:', e); }
-      // Show Q&A as soon as speaking starts
+      // Show Q&A when speaking starts — cancel the 90s safety-net, keep visible
       if (d.speaking && d.last_transcript && d.last_reply) {
-        try { showConv(d.last_transcript, d.last_reply); } catch(e) {}
+        try {
+          showConv(d.last_transcript, d.last_reply);
+          if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+          var fillEl = document.getElementById('cbar-fill');
+          if (fillEl) fillEl.style.cssText = 'transition:none;width:100%';
+        } catch(e) { if (window.console) console.error('Pinku showConv:', e); }
+      }
+      // When TTS finishes, linger a few seconds then drain the progress bar and clear
+      if (wasSpeaking && !d.speaking) {
+        var hasConvNow = document.body.className.indexOf('has-conv') >= 0;
+        if (hasConvNow) {
+          if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+          (function() {
+            var f = document.getElementById('cbar-fill');
+            if (f) f.style.cssText = 'transition:none;width:100%';
+            setTimeout(function() {
+              var f2 = document.getElementById('cbar-fill');
+              if (f2) f2.style.cssText = 'transition:width ' + (AFTER_SPEECH_MS/1000) + 's linear;width:0%';
+            }, 30);
+          })();
+          _clearTimer = setTimeout(_clearConv, AFTER_SPEECH_MS);
+        }
       }
     }
     if (d.type === 'history') {
-      try { showConv(d.transcript, d.reply); } catch(e) {}
+      try { showConv(d.transcript, d.reply); } catch(e) { if (window.console) console.error('Pinku showConv (history):', e); }
     }
   };
   es.onerror = function() {
