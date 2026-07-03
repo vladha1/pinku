@@ -19,6 +19,11 @@ jobs:
           git fetch origin
           git pull origin ${{ github.ref_name }}
 
+      - name: Run wake word tests
+        run: |
+          cd ~/pinku
+          python3 test_wake.py -v
+
       - name: Stop Pinku and clear port 5100
         run: |
           pm2 stop pinku || true
