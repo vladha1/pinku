@@ -34,7 +34,7 @@ jobs:
         run: pm2 start pinku
 
       - name: Wait for startup
-        run: sleep 12
+        run: sleep 25
 
       - name: Verify new code is serving
         run: |
@@ -52,5 +52,8 @@ jobs:
           echo "=== PM2 status ==="
           pm2 list --no-color
           echo ""
-          echo "=== Pinku logs (last 50 lines) ==="
-          pm2 logs pinku --lines 50 --nostream --no-color
+          echo "=== Mic signal diagnostic (STT timeout lines) ==="
+          pm2 logs pinku --lines 200 --nostream --no-color 2>/dev/null | grep "\[STT\] timeout" | tail -5 || echo "(no timeout lines yet)"
+          echo ""
+          echo "=== Pinku logs (last 100 lines) ==="
+          pm2 logs pinku --lines 100 --nostream --no-color
