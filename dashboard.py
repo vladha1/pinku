@@ -113,19 +113,19 @@ class _StdoutTee:
     def __init__(self, orig):
         self._orig = orig
         self._buf  = ""
-        self._active = False   # re-entrancy guard
+        self._lock = threading.Lock()   # protects _buf against concurrent writers
 
     def write(self, text: str):
         self._orig.write(text)
-        if self._active:
-            return
-        self._buf += text
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            line = line.strip()
-            if not line:
-                continue
-            self._active = True
+        lines = []
+        with self._lock:
+            self._buf += text
+            while "\n" in self._buf:
+                line, self._buf = self._buf.split("\n", 1)
+                line = line.strip()
+                if line:
+                    lines.append(line)
+        for line in lines:
             try:
                 m = _LEVEL_RE.match(line)
                 if m:
@@ -134,8 +134,6 @@ class _StdoutTee:
                     log_message("info", line)
             except Exception:
                 pass
-            finally:
-                self._active = False
 
     def flush(self):
         self._orig.flush()

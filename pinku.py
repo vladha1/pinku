@@ -959,6 +959,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
         _t_utterance = time.time()   # ← latency clock starts when PCM is ready
 
+        # Diagnostic: log every captured utterance so the dashboard log shows
+        # whether the mic is picking up audio and the VAD is triggering.
+        _dur_sec = len(pcm) / (16000 * 2)
+        print(f"[STT] Captured {_dur_sec:.1f}s")
+
         # ── Speaker gate ──────────────────────────────────────────────────────────
         # Drop audio from unrecognised voices (TV, Pinky's TTS echo, guests) before
         # any expensive Whisper / Gemini call.  Falls back to open gate when no
@@ -974,10 +979,12 @@ def _voice_loop(recorder: stt.AudioRecorder):
             if _spk_score < _spk_floor:
                 _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
-            # Inter-utterance cooldown: drop tail-audio reblips arriving within 3s
+            # Inter-utterance cooldown: drop tail-audio reblips arriving within 1.5s
             # of the previous utterance that passed the gate (prevents duplicate processing).
+            # 1.5s is enough to catch TTS echoes (< 0.5s lag) while still letting
+            # the user retry quickly if Pinku didn't hear them.
             _gate_now = time.time()
-            if _gate_now - _last_gate_at < 3.0:
+            if _gate_now - _last_gate_at < 1.5:
                 continue
             _last_gate_at = _gate_now
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
