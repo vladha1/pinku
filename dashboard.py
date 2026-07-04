@@ -701,6 +701,35 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   z-index: 20;
 }
 
+/* ── Mic level bar (always visible above conversation-progress bar) ── */
+#mic-bar {
+  width: 100%;
+  height: 3px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  -webkit-flex-shrink: 0; flex-shrink: 0;
+}
+#mic-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.12);
+  -webkit-transition: width 0.13s linear, background 0.35s;
+  transition: width 0.13s linear, background 0.35s;
+}
+
+/* READY-state dot: green when mic active (volatile), orange when silent */
+body.mic-live:not(.s-awake):not(.s-thinking):not(.s-speaking):not(.s-muted) #sdot {
+  background: rgba(74,222,128,0.9);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.18);
+}
+body.mic-quiet:not(.s-awake):not(.s-thinking):not(.s-speaking):not(.s-muted) #sdot {
+  background: rgba(251,146,60,0.85);
+  box-shadow: 0 0 0 3px rgba(251,146,60,0.18);
+}
+
 #cbar {
   width: 100%;
   height: 2px;
@@ -1030,6 +1059,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 
 <!-- always-on-top bottom bar -->
 <div id="bottom-bar">
+  <div id="mic-bar"><div id="mic-fill"></div></div>
   <div id="cbar"><div id="cbar-fill"></div></div>
   <div id="status-pill">
     <div id="sdot"></div>
@@ -1116,9 +1146,12 @@ function setStatus(s) {
   else                               { cls = '';           lbl = 'READY'; }
   // Add is-thinking view class only during processing
   var viewCls = (s.state === 'processing') ? ' is-thinking' : '';
-  // Preserve has-conv — it is managed solely by showConv/clearTimer
-  var hasConv = (document.body.className.indexOf('has-conv') >= 0) ? ' has-conv' : '';
-  document.body.className = (cls + viewCls + hasConv).replace(/\s+/g,' ').trim();
+  // Preserve has-conv (showConv/clearTimer) and mic-live/mic-quiet (_pollMic)
+  var bc = document.body.className;
+  var hasConv  = bc.indexOf('has-conv')  >= 0 ? ' has-conv'  : '';
+  var micLive  = bc.indexOf('mic-live')  >= 0 ? ' mic-live'  : '';
+  var micQuiet = bc.indexOf('mic-quiet') >= 0 ? ' mic-quiet' : '';
+  document.body.className = (cls + viewCls + hasConv + micLive + micQuiet).replace(/\s+/g,' ').trim();
   document.getElementById('slabel').textContent = lbl;
   var muteBtn = document.getElementById('mute-btn');
   muteBtn.className = 'cb' + (s.muted ? ' on' : '');
@@ -1242,6 +1275,37 @@ function connect() {
   };
 }
 connect();
+
+// ── Mic level meter ───────────────────────────────────────────────────────────
+// Polls /api/mic_level every 150 ms (~6 fps).  Updates the thin bar and
+// flips body to mic-live (green dot) or mic-quiet (orange dot) in READY state.
+var _MIC_THRESHOLD = 0.08;  // 0–1 normalised; 0.08 ≈ quiet room at 2-3 m
+var _micLiveUntil  = 0;     // keep "live" for 2 s after last peak
+
+function _pollMic() {
+  xhr('GET', '/api/mic_level', null, function(err, r) {
+    var lvl = (r && typeof r.level === 'number') ? r.level : 0;
+    var fill = document.getElementById('mic-fill');
+    if (fill) {
+      fill.style.width = Math.min(100, Math.round(lvl * 100)) + '%';
+      fill.style.background = lvl >= _MIC_THRESHOLD
+        ? 'rgba(74,222,128,0.72)' : 'rgba(255,255,255,0.12)';
+    }
+    if (lvl >= _MIC_THRESHOLD) _micLiveUntil = Date.now() + 2000;
+    var isLive = Date.now() < _micLiveUntil;
+    var b = document.body;
+    var has = function(c) { return b.className.indexOf(c) >= 0; };
+    var set = function(add, rem) {
+      b.className = b.className.replace(new RegExp('\\b' + rem + '\\b', 'g'), '')
+                               .replace(/\s+/g,' ').trim();
+      if (!has(add)) b.className = (b.className + ' ' + add).replace(/\s+/g,' ').trim();
+    };
+    if (isLive) { set('mic-live',  'mic-quiet'); }
+    else        { set('mic-quiet', 'mic-live');  }
+  });
+  setTimeout(_pollMic, 150);
+}
+_pollMic();
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 function act(name) {
