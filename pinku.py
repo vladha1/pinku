@@ -1017,12 +1017,22 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
                 dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
 
-                # ── Math shortcut: try Apple STT first for instant arithmetic ─
-                # Apple STT (~0.2s) handles simple English math without any LLM call.
-                # All other speech goes directly to Gemini audio — one pass that
-                # handles Hindi, English, and mixed speech natively.
+                # ── Local STT: Apple STT → MLX Whisper large-v3 → Gemini text ──
+                # Apple STT (~0.2s, English) first — fast and free.
+                # MLX Whisper large-v3 (~1.5s, Neural Engine) for everything else.
+                # Gemini text routing (~1s, cheap) uses the local transcript.
+                # Gemini audio is kept as last-resort fallback only.
                 _fast_transcript = apple_stt.transcribe(pcm)
+                _stt_label = "AppleSTT"
+                if not _fast_transcript:
+                    _fast_transcript = mlx_stt.transcribe(pcm)
+                    _stt_label = "MLXWhisper"
+
                 if _fast_transcript:
+                    _t_stt = time.time()
+                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
+
+                    # Math shortcut — no LLM call at all
                     _math_answer = math_handler.detect_and_compute(_fast_transcript)
                     if _math_answer:
                         _t_llm = time.time()
@@ -1040,7 +1050,23 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         _handle_gemini_result(result)
                         continue
 
-                # Single Gemini audio call — transcribes + classifies + generates reply
+                    # Gemini text routing (transcript already known — no audio upload)
+                    result = llm.text_route_and_respond(
+                        _fast_transcript, history=_session_hist,
+                        session_active=True, speaker=_current_speaker)
+                    _t_llm = time.time()
+                    if result is not None and result.get("action") != "ignore":
+                        result["_session_active"] = True
+                        result["_t_utterance"]    = _t_utterance
+                        result["_t_spk"]          = _t_spk
+                        result["_t_llm"]          = _t_llm
+                        result["_stt_label"]      = _stt_label
+                        _handle_gemini_result(result)
+                        continue
+                    if result is not None:
+                        print(f"[STT] text-route ignored — falling back to Gemini audio")
+
+                # Gemini audio fallback — when local STT failed or text-route ignored
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
@@ -1051,9 +1077,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     result["_t_spk"]          = _t_spk
                     result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
-                # Gemini audio unavailable (rate-limit / error) — skip silently.
-                # MLX Whisper fallback is NOT used here: it produces garbled transcripts
-                # in session context that cause spurious responses.
                 continue
 
             # ── Gate: idle mode ───────────────────────────────────────────────

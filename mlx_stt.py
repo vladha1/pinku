@@ -1,9 +1,9 @@
 """
 Fast on-device Whisper STT for Apple Silicon via Apple MLX.
-Runs whisper-large-v3-turbo on the M4 Neural Engine — no permissions needed.
+Runs whisper-large-v3 on the M4 Neural Engine — no permissions needed.
 
 Install: pip install mlx-whisper
-First run downloads the model (~800 MB) from HuggingFace automatically.
+First run downloads the model (~1.5 GB) from HuggingFace automatically.
 
 All MLX calls are serialised onto a single worker thread because Metal GPU
 streams are per-thread; calling from multiple threads causes a runtime crash.
@@ -16,7 +16,7 @@ import time
 
 import numpy as np
 
-MODEL    = "mlx-community/whisper-large-v3-turbo"
+MODEL    = "mlx-community/whisper-large-v3"
 LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "auto")  # auto-detect; retries as Hindi if Spanish
 
 
