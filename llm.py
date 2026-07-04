@@ -258,10 +258,9 @@ RULES:
 - Hindi: Devanagari script in reply, no English unless user mixed it
 - Scripture: include original script verse if relevant, then meaning + one insight
 - Keep replies ≤40 words (scripture/knowledge: ≤70 words)
-- For EXPLICIT QUERIES asking for current data — "what's the score?", "who won?",
-  "what's in the news?", "latest result?" — set reply: "" (system will fetch fresh data).
-  If the person is SHARING information rather than ASKING for it ("Argentina won today",
-  "India lost the match"), reply conversationally — no data fetch needed.
+- You have real-time Google Search available. Use it for current events, live scores,
+  today's news, or any question needing fresh data — answer directly and completely in reply.
+  No citation markers, no "[1]" footnotes, no reference numbers — spoken audio only.
 """
 
 # Wake rule injected into STEP 2 depending on session state
@@ -389,8 +388,8 @@ def transcribe_and_respond(
 
     system = _make_transcribe_system(session_active, speaker=speaker)
     try:
-        raw = _gemini_call(contents, temperature=0.0, max_tokens=700,
-                           system=system)
+        raw = _gemini_call(contents, temperature=0.0, max_tokens=800,
+                           system=system, use_search=True)
         print(f"[LLM] Gemini audio raw: {raw[:140]!r}")
     except Exception as e:
         err = str(e)
