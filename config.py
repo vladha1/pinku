@@ -79,7 +79,7 @@ SPEAKER_ID_ENABLED          = bool(int(os.getenv("SPEAKER_ID_ENABLED",          
 #   >= ACCEPT    → confident match — attach speaker name to LLM context
 #   [UNCERTAIN, ACCEPT) → marginal — pass through as anonymous, no name attached
 #   < UNCERTAIN  → clearly unknown — drop silently (TV, echo, guests, etc.)
-SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.80"))
+SPEAKER_THRESHOLD_ACCEPT    = float(os.getenv("SPEAKER_THRESHOLD_ACCEPT",    "0.75"))
 SPEAKER_THRESHOLD_UNCERTAIN = float(os.getenv("SPEAKER_THRESHOLD_UNCERTAIN", "0.65"))
 # In idle mode the wake word is the primary security gate, so the speaker ID
 # floor can be lower — voices at 0.50-0.65 still need to say "Pinky" to do
