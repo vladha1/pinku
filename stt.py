@@ -21,6 +21,7 @@ import numpy as np
 from config import (
     WHISPER_MODEL, WHISPER_DEVICE, WHISPER_LANGUAGE,
     MIC_SAMPLE_RATE, MIC_CHUNK_MS, VAD_SILENCE_SEC, VAD_MIN_SPEECH_MS,
+    VAD_DETECT_GAIN, VAD_MIN_SPEECH_DET,
 )
 
 # ── lazy imports (heavy libs loaded once on first use) ────────────────────────
@@ -128,7 +129,7 @@ class AudioRecorder:
         self._running = True
         self._stream.start_stream()
         dev = f" (device {MIC_DEVICE_INDEX})" if MIC_DEVICE_INDEX >= 0 else " (system default)"
-        print(f"[STT] Mic open{dev}")
+        print(f"[STT] Mic open{dev} — gain={VAD_DETECT_GAIN} min_det={VAD_MIN_SPEECH_DET}")
 
     def stop(self):
         self._running = False
@@ -191,7 +192,7 @@ class AudioRecorder:
         #   • After calibration, adapts slowly (1 % per frame) during silence only.
         #   • If speech stays "on" for > MAX_SPEECH_SEC it's background noise;
         #     floor is nudged up and the capture is reset.
-        DETECT_GAIN        = 8.0
+        DETECT_GAIN        = VAD_DETECT_GAIN     # configurable via config.py / VAD_DETECT_GAIN env var
         CALIBRATION_FRAMES = 15      # 450 ms fast-settle at start of each call
         CAL_ALPHA          = 0.35    # fast floor adaptation during calibration
         noise_floor        = 0.10    # starts HIGH — drops to ambient during calibration
@@ -199,10 +200,8 @@ class AudioRecorder:
         speech_mult        = 2.5     # speech must be 2.5× floor
         MAX_SPEECH_SEC     = 3.5     # if "speech" runs this long, assume background noise
         # Hard minimum: regardless of how quiet the room is, never trigger on
-        # anything below this det value.  In a silent room the floor drops to
-        # ~0.017 and thr falls to 0.043 — fan vibration / distant noise at
-        # det=0.08-0.11 then false-triggers.  Real speech at 3m = det 0.14+.
-        MIN_SPEECH_DET     = 0.12
+        # anything below this det value.  Configurable via VAD_MIN_SPEECH_DET env var.
+        MIN_SPEECH_DET     = VAD_MIN_SPEECH_DET
 
         max_speech_frames = int(MAX_SPEECH_SEC * 1000 / frame_ms)
 

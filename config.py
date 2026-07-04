@@ -29,6 +29,14 @@ VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "150"))  # ignore clips
 # VAD aggressiveness 0-3: 0=breaks silence detection (everything=speech, never ends)
 # 1 = permissive enough for distance, still detects silence gaps properly
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "1"))
+# Energy-based VAD sensitivity knobs.
+# DETECT_GAIN amplifies the raw RMS before comparing to the threshold — raise it
+# if the mic is quiet (distant speaker, external USB mic with low preamp gain).
+# MIN_SPEECH_DET is the hard floor: even in a dead-silent room the amplified RMS
+# must exceed this to count as speech.  Lower it if speech is never detected;
+# raise it if background noise (fan, TV) keeps triggering false utterances.
+VAD_DETECT_GAIN    = float(os.getenv("VAD_DETECT_GAIN",    "12.0"))  # was 8.0 — M4 external mic needs more gain
+VAD_MIN_SPEECH_DET = float(os.getenv("VAD_MIN_SPEECH_DET", "0.09"))  # was 0.12 — lower to catch quiet/distant speech
 MIC_SAMPLE_RATE   = 16000
 MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
 # Explicit mic device index — avoids grabbing iPhone/Bluetooth mics that lock PortAudio.
