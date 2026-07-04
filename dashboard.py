@@ -95,7 +95,7 @@ def _get_log_fh():
 def log_message(level: str, msg: str):
     """Stream a log line to all dashboard clients and append to daily log file."""
     ts = time.strftime("%H:%M:%S")
-    entry = {"type": "log", "level": level, "msg": msg, "ts": ts}
+    entry = {"type": "log", "level": level, "msg": msg, "ts": ts, "_t": time.time()}
     with _log_ring_lock:
         _log_ring.append(entry)
     _broadcast(entry)
@@ -183,9 +183,11 @@ def stream():
         try:
             init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
             yield f"data: {json.dumps(init)}\n\n"
-            # Replay recent log history so the log panel is populated on connect
+            # Replay log entries from the last 3 minutes so the panel is useful
+            # without dumping the full session history on connect.
+            cutoff = time.time() - 180
             with _log_ring_lock:
-                history = list(_log_ring)
+                history = [e for e in _log_ring if e.get("_t", 0) >= cutoff]
             for entry in history:
                 yield f"data: {json.dumps(entry)}\n\n"
             last_heartbeat = time.time()
