@@ -1133,75 +1133,26 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _fallback_process(pcm)
                 continue
 
-            try:
-                text = stt.transcribe(pcm)
-            except Exception as e:
-                _log("error", f"STT error: {e}")
-                continue
-            if not text:
-                print(f"[STT] Idle — no speech ({dur:.1f}s)")
-                continue
-
-            _log("stt", text)
-            triggered, command = _check_wake(text)
-            if not triggered:
-                # If a Pinky variant is present but the local wake-word parser
-                # failed (wrong variant, wrong position, normalisation mismatch),
-                # let Gemini re-transcribe from raw audio before discarding.
-                # Also fires when Devanagari text contains any word with the Pinky
-                # phonetic shape (e.g. पिंका, पेंकू) even if not in the explicit list.
-                _has_devanagari = bool(_re.search(r'[ऀ-ॿ]', text))
-                _gemini_verify = (
-                    (_PINKU_RE_CONTAINS.search(text) and len(text.split()) <= 14)
-                    or (_has_devanagari and len(text.split()) <= 8
-                        and _devanagari_has_wake_shape(text))
-                )
-                if _gemini_verify:
-                    print(f'[STT] Idle — Pinky shape detected → Gemini verify: "{text}"')
-                    dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
-                    _result = llm.transcribe_and_respond(
-                        pcm, history=_session_hist,
-                        session_active=False, speaker=_current_speaker)
-                    _t_llm = time.time()
-                    if _result is not None:
-                        _result["_session_active"] = False
-                        _result["_t_utterance"]    = _t_utterance
-                        _result["_t_spk"]          = _t_spk
-                        _result["_t_llm"]          = _t_llm
-                        _handle_gemini_result(_result)
-                    else:
-                        dashboard.update_status(state="idle")
-                    continue
-                print(f'[STT] Idle — no wake word: "{text}"')
-                continue
-
-            # Wake word confirmed — update question cloud immediately
-            if command:
-                dashboard.update_status(last_transcript=command)
-            _awake.set()
-            _last_speech_at = time.time()
-            _log("wake", f'🔤 Wake word → "{text.split()[0]}"')
-
-            if not command:
-                # Wake word only — play beep so user knows Pinku heard them.
-                tts.play_beep()
-                dashboard.update_status(state="awake")
-                _brief_mute(1.5)   # was 0.6s — longer pause prevents double-fire & beep echo re-capture
-                continue
-
-            # Wake word + inline command — send audio to Gemini for quality response
-            dashboard.update_status(state="processing", speaker=_current_speaker)
-            result = llm.transcribe_and_respond(pcm, history=_session_hist,
-                                                speaker=_current_speaker)
+            # Uncertain/unknown speaker — single Gemini pass.
+            # Gemini's idle prompt requires the wake word; it returns action:"ignore"
+            # for any audio that doesn't contain "Pinky/Pinku".  No local Whisper
+            # transcription needed — one call handles detection + response.
+            dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
+            result = llm.transcribe_and_respond(
+                pcm, history=_session_hist,
+                session_active=False, speaker=_current_speaker)
             _t_llm = time.time()
-            if result is not None:
-                result["_t_utterance"] = _t_utterance
-                result["_t_spk"]       = _t_spk
-                result["_t_llm"]       = _t_llm
-                _handle_gemini_result(result)
-            else:
-                # Gemini unavailable → route the Whisper text we already have
-                _fallback_process(pcm)
+            if result is None:
+                dashboard.update_status(state="idle")
+                continue
+            if result.get("action") == "ignore":
+                dashboard.update_status(state="idle")
+                continue
+            result["_session_active"] = False
+            result["_t_utterance"]    = _t_utterance
+            result["_t_spk"]          = _t_spk
+            result["_t_llm"]          = _t_llm
+            _handle_gemini_result(result)
 
         finally:
             # _speak_reply releases early; for actions that don't speak
