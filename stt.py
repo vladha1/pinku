@@ -312,6 +312,12 @@ class AudioRecorder:
                                 speech_buf = []
                                 ring.clear()
 
+        # Timeout — log what we saw so we can diagnose if the mic got any signal.
+        # peak_rms_det=0.0 → pure silence / wrong device / macOS mic permission denied
+        # peak_rms_det > 0 but < MIN_SPEECH_DET → receiving audio but VAD threshold too high
+        thr = noise_floor * speech_mult
+        _stt_log(f"[STT] timeout — frames={total_frames} peak_det={peak_rms_det:.4f} "
+                 f"floor={noise_floor:.4f} thr={thr:.4f} min={MIN_SPEECH_DET:.4f}")
         return None
 
 
