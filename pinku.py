@@ -222,8 +222,7 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("source", f"Gemini + Google Search ({llm.GEMINI_MODEL})")
-    spk_ctx = (f"The person speaking is {_current_speaker}. Do not address them by name in your reply."
-               if _current_speaker else "")
+    spk_ctx = ""   # name omitted — passing it causes Gemini to address the person by name
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi, system_extra=spk_ctx)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
@@ -1086,32 +1085,62 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 print(f"[STT] Idle — skipped long audio ({dur:.1f}s)")
                 continue
 
-            # Known speaker in idle mode.
-            # Apple STT + math shortcut first (~0.2s) — saves a 4s Gemini round-trip
-            # for simple arithmetic when the wake word is present.
-            # Fall through to Gemini audio for everything else.
+            # Known speaker in idle mode — local-first: Apple STT → MLX Whisper → Gemini text.
+            # Wake word must be present; Gemini audio is only a last-resort fallback.
             if _current_speaker is not None:
                 dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
-                _idle_fast = apple_stt.transcribe(pcm)
-                if _idle_fast:
-                    _idle_triggered, _idle_cmd = _check_wake(_idle_fast)
-                    if _idle_triggered and _idle_cmd:
-                        _math_answer = math_handler.detect_and_compute(_idle_cmd)
-                        if _math_answer:
-                            _t_llm = time.time()
-                            _math_result = {
-                                "transcript": _idle_fast,
-                                "lang": "en",
-                                "action": "chat",
-                                "reply": _math_answer,
-                                "_session_active": False,
-                                "_t_utterance": _t_utterance,
-                                "_t_spk": _t_spk,
-                                "_t_llm": _t_llm,
-                            }
-                            print(f"[MATH] {_math_answer}")
-                            _handle_gemini_result(_math_result)
-                            continue
+
+                # Apple STT (~0.2s) handles English wake words
+                _idle_tr     = apple_stt.transcribe(pcm)
+                _idle_label  = "AppleSTT"
+                _idle_trig, _idle_cmd = False, ""
+                if _idle_tr:
+                    _idle_trig, _idle_cmd = _check_wake(_idle_tr)
+
+                # MLX Whisper for Hindi or if Apple STT returned nothing
+                if not _idle_tr or not _idle_trig:
+                    _mlx_tr = mlx_stt.transcribe(pcm)
+                    if _mlx_tr:
+                        _mlx_trig, _mlx_cmd = _check_wake(_mlx_tr)
+                        if _mlx_trig or not _idle_tr:
+                            _idle_tr, _idle_label = _mlx_tr, "MLXWhisper"
+                            _idle_trig, _idle_cmd = _mlx_trig, _mlx_cmd
+
+                if not _idle_trig:
+                    if _idle_tr:
+                        print(f'[STT] Idle — no wake word: "{_idle_tr}"')
+                    dashboard.update_status(state="idle")
+                    continue
+
+                # Wake word confirmed — math shortcut
+                if _idle_cmd:
+                    _math_answer = math_handler.detect_and_compute(_idle_cmd)
+                    if _math_answer:
+                        _t_llm = time.time()
+                        _handle_gemini_result({
+                            "transcript": _idle_tr, "lang": "en",
+                            "action": "chat", "reply": _math_answer,
+                            "_session_active": False,
+                            "_t_utterance": _t_utterance,
+                            "_t_spk": _t_spk, "_t_llm": _t_llm,
+                        })
+                        continue
+
+                # Gemini text routing — transcript already known, no audio upload
+                result = llm.text_route_and_respond(
+                    _idle_tr, history=_session_hist,
+                    session_active=False, speaker=_current_speaker)
+                _t_llm = time.time()
+                if result is not None and result.get("action") != "ignore":
+                    result["_session_active"] = False
+                    result["_t_utterance"]    = _t_utterance
+                    result["_t_spk"]          = _t_spk
+                    result["_t_llm"]          = _t_llm
+                    result["_stt_label"]      = _idle_label
+                    _handle_gemini_result(result)
+                    continue
+
+                # Last resort: Gemini audio (local STT failed or text-route ignored)
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist,
                     session_active=False, speaker=_current_speaker)
@@ -1122,8 +1151,6 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     result["_t_spk"]          = _t_spk
                     result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
-                else:
-                    _fallback_process(pcm)
                 continue
 
             # Uncertain/unknown speaker — Apple STT wake-word gate first.
