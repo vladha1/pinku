@@ -1051,8 +1051,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     result["_t_spk"]          = _t_spk
                     result["_t_llm"]          = _t_llm
                     _handle_gemini_result(result)
-                else:
-                    _fallback_process(pcm)
+                # Gemini audio unavailable (rate-limit / error) — skip silently.
+                # MLX Whisper fallback is NOT used here: it produces garbled transcripts
+                # in session context that cause spurious responses.
                 continue
 
             # ── Gate: idle mode ───────────────────────────────────────────────

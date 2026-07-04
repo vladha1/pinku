@@ -275,21 +275,22 @@ REMINDER: if your transcript does not contain one of Pinky/Pinku/Pink/Pingu, you
 
 _WAKE_RULE_SESSION = """\
 You are in an ACTIVE CONVERSATION SESSION — the person is talking TO YOU.
-No wake word is required. Respond to anything clearly spoken by the person directly in the room.
+No wake word is required. Respond when a person is clearly continuing the conversation WITH YOU.
 
 IGNORE (set action:"ignore", transcript:"") when the audio is:
-- TV sports commentary (play-by-play, announcer, crowd noise, stadium echo) — ignore.
-  A person directly telling you a result ("Argentina won today", "India lost the match") is chat.
+- A side-conversation between people in the room not directed at you — someone talking to a family
+  member, on a phone call, giving instructions to someone else, etc.
+- TV sports commentary (play-by-play, announcer, crowd noise, stadium echo).
+  Exception: a person directly sharing a result with you ("Argentina won today") is chat.
 - TV show dialogue, movie scene, news anchor, ads, background music/songs.
-- Any speech that sounds broadcast/narrated rather than a conversational voice directed at you.
-- A voice with crowd noise, stadium echo, commentary-style delivery, or formal broadcast tone.
+- Any speech that sounds broadcast/narrated rather than conversational.
 - Silence, room echo, or unintelligible audio.
 
 RESPOND when:
-- A person in the room speaks to you in a natural conversational tone.
-- The speech is clearly directed at you (not at a TV screen or into a phone call).
+- Speech clearly follows from or refers to the current conversation with you.
+- The person is directly addressing you or asking you something.
 
-If you cannot clearly tell whether audio is from a real person or background media → "ignore"."""
+If unclear whether speech is directed at you or at someone else → "ignore"."""
 
 def _make_transcribe_system(session_active: bool, speaker: str | None = None) -> str:
     from datetime import datetime as _dt
