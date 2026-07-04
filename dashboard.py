@@ -183,11 +183,12 @@ def stream():
         try:
             init = {"type": "status", **_status, "start_ts": _start_time, "start_time_str": _start_time_str}
             yield f"data: {json.dumps(init)}\n\n"
-            # Replay log entries from the last 3 minutes so the panel is useful
-            # without dumping the full session history on connect.
-            cutoff = time.time() - 180
+            # Replay: last 5 minutes OR last 30 entries, whichever gives more context.
+            cutoff = time.time() - 300
             with _log_ring_lock:
-                history = [e for e in _log_ring if e.get("_t", 0) >= cutoff]
+                buf = list(_log_ring)
+            recent = [e for e in buf if e.get("_t", 0) >= cutoff]
+            history = recent if len(recent) >= 30 else buf[-30:]
             for entry in history:
                 yield f"data: {json.dumps(entry)}\n\n"
             last_heartbeat = time.time()
