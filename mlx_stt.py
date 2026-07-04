@@ -118,9 +118,17 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         audio  = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         result = _send(audio, None)   # auto-detect
         detected = result.get("language", "")
-        if detected in ("es", "ur"):
+        # Languages Whisper commonly confuses with Hindi (similar prosody / phonetics):
+        # pl=Polish, ur=Urdu, es=Spanish, pt=Portuguese, tr=Turkish
+        _HINDI_CONFUSED = {"es", "ur", "pl", "pt", "tr"}
+        if detected in _HINDI_CONFUSED:
             result = _send(audio, "hi", temperature=0.3)
             print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
+            detected = result.get("language", "")
+        # Hard drop: if still not English or Hindi, discard rather than hallucinate
+        if detected and detected not in ("en", "hi", ""):
+            print(f"[MLXWhisper] dropped — language={detected!r} (only en/hi accepted)")
+            return ""
         text = result.get("text", "").strip()
         if _is_hallucination(text):
             print(f"[MLXWhisper] hallucination detected ({len(text.split())} words) — dropping")

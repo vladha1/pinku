@@ -24,7 +24,7 @@ VAD_SILENCE_SEC   = float(os.getenv("VAD_SILENCE_SEC",   "0.7"))  # silence need
 # Minimum echo-settle after TTS before mic reopens.
 # Short replies (< 6s TTS) use this floor; longer replies scale with duration.
 # 1.5 s is enough for a quiet room; raise to 2.5–3.0 if echo/false-triggers return.
-TTS_SETTLE_MIN    = float(os.getenv("TTS_SETTLE_MIN", "0.4"))
+TTS_SETTLE_MIN    = float(os.getenv("TTS_SETTLE_MIN", "2.0"))
 VAD_MIN_SPEECH_MS = int(os.getenv("VAD_MIN_SPEECH_MS",   "150"))  # ignore clips shorter than this
 # VAD aggressiveness 0-3: 0=breaks silence detection (everything=speech, never ends)
 # 1 = permissive enough for distance, still detects silence gaps properly
