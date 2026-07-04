@@ -1101,10 +1101,20 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _fallback_process(pcm)
                 continue
 
-            # Uncertain/unknown speaker — single Gemini pass.
-            # Gemini's idle prompt requires the wake word; it returns action:"ignore"
-            # for any audio that doesn't contain "Pinky/Pinku".  No local Whisper
-            # transcription needed — one call handles detection + response.
+            # Uncertain/unknown speaker — Apple STT wake-word gate first.
+            # Apple STT is local, ~0.2s, free.  Only send to Gemini if the
+            # wake word is found, saving a call for every TV snippet or
+            # background conversation that passes speaker ID.
+            # If Apple STT is unavailable (returns None) fall through to Gemini.
+            _unc_fast = apple_stt.transcribe(pcm)
+            if _unc_fast is not None:
+                if not _unc_fast:
+                    continue   # silence / noise
+                _unc_triggered, _unc_cmd = _check_wake(_unc_fast)
+                if not _unc_triggered:
+                    print(f'[STT] Idle — no wake word: "{_unc_fast}"')
+                    continue
+
             dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
             result = llm.transcribe_and_respond(
                 pcm, history=_session_hist,
