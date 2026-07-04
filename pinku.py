@@ -222,7 +222,8 @@ def _handle_chat(action: dict):
     lang  = action.get("lang", "en")
     is_hi = lang == "hi"
     _log("source", f"Gemini + Google Search ({llm.GEMINI_MODEL})")
-    spk_ctx = f"The person speaking is {_current_speaker}." if _current_speaker else ""
+    spk_ctx = (f"The person speaking is {_current_speaker}. Do not address them by name in your reply."
+               if _current_speaker else "")
     reply = llm.chat(tr, history=_session_hist, is_hi=is_hi, system_extra=spk_ctx)
     _session_hist.append({"role": "user",      "content": tr})
     _session_hist.append({"role": "assistant", "content": reply})
