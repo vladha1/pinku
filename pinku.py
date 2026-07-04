@@ -1017,62 +1017,30 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
                 dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
 
-                # ── Fast path: local STT + local math + Gemini text ──────────
-                # Apple STT ~0.2s (when authorized) → mlx-whisper ~0.5s →
-                # Gemini text routing ~1.0s.  Total ~1.0–1.5s vs ~3.5s audio.
+                # ── Math shortcut: try Apple STT first for instant arithmetic ─
+                # Apple STT (~0.2s) handles simple English math without any LLM call.
+                # All other speech goes directly to Gemini audio — one pass that
+                # handles Hindi, English, and mixed speech natively.
                 _fast_transcript = apple_stt.transcribe(pcm)
-                _stt_label = "AppleSTT"
-                if not _fast_transcript:
-                    _fast_transcript = mlx_stt.transcribe(pcm)
-                    _stt_label = "MLXWhisper"
-
                 if _fast_transcript:
-                    _t_stt = time.time()
-                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
-
-                    # MLX mangles Devanagari Hindi — bypass text routing, use Gemini audio.
-                    # Transliterated Hindi (Roman script) still goes through text routing fine.
-                    _has_devanagari = bool(_re.search(r'[ऀ-ॿ]', _fast_transcript))
-                    if not _has_devanagari:
-                        # Math shortcut — no LLM call at all
-                        _math_answer = math_handler.detect_and_compute(_fast_transcript)
-                        if _math_answer:
-                            _t_llm = time.time()
-                            result = {
-                                "transcript": _fast_transcript,
-                                "lang": "en",
-                                "action": "chat",
-                                "reply": _math_answer,
-                                "_session_active": True,
-                                "_t_utterance": _t_utterance,
-                                "_t_spk": _t_spk,
-                                "_t_llm": _t_llm,
-                            }
-                            print(f"[MATH] {_math_answer}")
-                            _handle_gemini_result(result)
-                            continue
-
-                        # Gemini text routing (no audio upload)
-                        result = llm.text_route_and_respond(
-                            _fast_transcript, history=_session_hist,
-                            session_active=True, speaker=_current_speaker)
+                    _math_answer = math_handler.detect_and_compute(_fast_transcript)
+                    if _math_answer:
                         _t_llm = time.time()
-                        # Only accept if Gemini understood the transcript.
-                        # "ignore" in active session usually means MLX mangled Hindi
-                        # into English gibberish — fall through to Gemini audio which
-                        # re-transcribes from raw PCM and handles Hindi natively.
-                        if result is not None and result.get("action") != "ignore":
-                            result["_session_active"] = True
-                            result["_t_utterance"]    = _t_utterance
-                            result["_t_spk"]          = _t_spk
-                            result["_t_llm"]          = _t_llm
-                            result["_stt_label"]      = _stt_label
-                            _handle_gemini_result(result)
-                            continue
-                        if result is not None:
-                            print(f"[STT] Text-route ignored active-session speech — retrying via Gemini audio")
+                        result = {
+                            "transcript": _fast_transcript,
+                            "lang": "en",
+                            "action": "chat",
+                            "reply": _math_answer,
+                            "_session_active": True,
+                            "_t_utterance": _t_utterance,
+                            "_t_spk": _t_spk,
+                            "_t_llm": _t_llm,
+                        }
+                        print(f"[MATH] {_math_answer}")
+                        _handle_gemini_result(result)
+                        continue
 
-                # Devanagari Hindi, text-route ignored, STT failed, or routing failed — Gemini audio
+                # Single Gemini audio call — transcribes + classifies + generates reply
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
