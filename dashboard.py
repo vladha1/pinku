@@ -92,8 +92,19 @@ def _get_log_fh():
     return _log_fh
 
 
+_last_log_key: tuple = ("", "")   # (level, normalised-msg) — consecutive-dedup
+
+def _log_norm(msg: str) -> str:
+    """Normalise numbers so repeated diagnostic lines with different values compare equal."""
+    return _re.sub(r'[\d.]+', '#', msg[:80])
+
 def log_message(level: str, msg: str):
     """Stream a log line to all dashboard clients and append to daily log file."""
+    global _last_log_key
+    key = (level, _log_norm(msg))
+    if key == _last_log_key:
+        return
+    _last_log_key = key
     ts = time.strftime("%H:%M:%S")
     entry = {"type": "log", "level": level, "msg": msg, "ts": ts, "_t": time.time()}
     with _log_ring_lock:
