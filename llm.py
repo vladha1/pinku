@@ -468,13 +468,20 @@ RULES:
   no personality intro. Just the fact. Reserve warmth and personality for questions about yourself or casual chat.
 - Never address the speaker by name in your reply.
 - Keep replies ≤40 words (scripture: ≤70 words). Plain conversational sentences, no markdown.
-- For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS → reply: ""
+- You have real-time Google Search. For current events, live scores, or any question needing
+  fresh data — answer directly and completely. No citation markers or footnotes.
 - Be precise with facts and numbers.
 """
 
 _WAKE_RULE_TEXT_SESSION = """\
-You are in an ACTIVE CONVERSATION — the person is talking directly to you. No wake word required.
-Respond to anything clearly spoken by the person. Ignore obvious TV/background audio descriptions."""
+You are in an ACTIVE CONVERSATION — respond when the person is clearly continuing the conversation WITH YOU.
+
+IGNORE (action:"ignore", reply:"") when the transcript:
+- Sounds like a side-conversation between people in the room not directed at you.
+- Is addressed to another person or mentions someone else by name in a way that excludes you.
+- Is clearly background TV, narration, or not directed at you.
+
+RESPOND when speech clearly follows from or refers to the current conversation with you."""
 
 _WAKE_RULE_TEXT_IDLE = """\
 MANDATORY: The transcript must contain the wake word (Pinky / Pinku / Pink / Pingu).
@@ -509,8 +516,8 @@ def text_route_and_respond(
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        raw = _gemini_call(contents, temperature=0.0, max_tokens=300,
-                           system=system, use_search=False)
+        raw = _gemini_call(contents, temperature=0.0, max_tokens=500,
+                           system=system, use_search=True)
         print(f"[LLM] text-route raw: {raw[:140]!r}")
     except Exception as e:
         print(f"[LLM] text_route_and_respond error: {e}")
