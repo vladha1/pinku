@@ -131,6 +131,22 @@ class AudioRecorder:
         dev = f" (device {MIC_DEVICE_INDEX})" if MIC_DEVICE_INDEX >= 0 else " (system default)"
         print(f"[STT] Mic open{dev} — gain={VAD_DETECT_GAIN} min_det={VAD_MIN_SPEECH_DET}")
 
+        # macOS mic-permission check: read one chunk synchronously and check RMS.
+        # If macOS has not granted mic access to this process, the stream opens
+        # without error but returns all-zero PCM — detect and warn immediately.
+        import time as _time
+        _time.sleep(0.1)   # let the callback queue one frame
+        with self._buf_lock:
+            _check_frames = list(self._frames)
+        if _check_frames:
+            _check_audio = np.frombuffer(_check_frames[-1], dtype=np.int16).astype(np.float32)
+            _check_rms   = float(np.sqrt(np.mean(_check_audio ** 2))) / 32768.0
+            if _check_rms < 1e-9:
+                print("[STT] WARNING: mic stream returning silence (rms≈0) — "
+                      "macOS may have denied microphone permission. "
+                      "Fix: System Settings → Privacy & Security → Microphone → "
+                      "enable python3 (or relaunch from Terminal to trigger the permission prompt).")
+
     def stop(self):
         self._running = False
         if self._stream:
