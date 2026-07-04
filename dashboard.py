@@ -119,6 +119,17 @@ def log_message(level: str, msg: str):
 
 _LEVEL_RE = _re.compile(r'^\[([A-Z]+)\]\s*(.*)', _re.DOTALL)
 
+# Lines to suppress from the dashboard (still printed to the terminal).
+# These are internal timing / raw-response lines that clutter the log panel.
+_SUPPRESS_DASHBOARD = _re.compile(
+    r'^\[LLM\] Gemini HTTP:'
+    r'|^\[LLM\] Gemini audio raw:'
+    r'|^\[LLM\] text.route raw:'
+    r'|^\[LLM\] Gemini reply:'
+    r'|^\[TTS\] known='
+    r'|100%\|'                   # tqdm progress bars from mlx-whisper
+)
+
 class _StdoutTee:
     """Forward every print() line to the dashboard log stream in addition to real stdout."""
     def __init__(self, orig):
@@ -137,6 +148,8 @@ class _StdoutTee:
                 if line:
                     lines.append(line)
         for line in lines:
+            if _SUPPRESS_DASHBOARD.match(line):
+                continue   # terminal already has it; keep dashboard clean
             try:
                 m = _LEVEL_RE.match(line)
                 if m:

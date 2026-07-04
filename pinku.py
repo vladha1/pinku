@@ -1023,14 +1023,14 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 # Gemini text routing (~1s, cheap) uses the local transcript.
                 # Gemini audio is kept as last-resort fallback only.
                 _fast_transcript = apple_stt.transcribe(pcm)
-                _stt_label = "AppleSTT"
+                _stt_label = "Apple"
                 if not _fast_transcript:
                     _fast_transcript = mlx_stt.transcribe(pcm)
-                    _stt_label = "MLXWhisper"
+                    _stt_label = "MLX"
 
                 if _fast_transcript:
                     _t_stt = time.time()
-                    print(f"[{_stt_label}] {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
+                    print(f"[STT] {_stt_label}: {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
 
                     # Math shortcut — no LLM call at all
                     _math_answer = math_handler.detect_and_compute(_fast_transcript)
@@ -1092,7 +1092,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
 
                 # Apple STT (~0.2s) handles English wake words
                 _idle_tr     = apple_stt.transcribe(pcm)
-                _idle_label  = "AppleSTT"
+                _idle_label  = "Apple"
                 _idle_trig, _idle_cmd = False, ""
                 if _idle_tr:
                     _idle_trig, _idle_cmd = _check_wake(_idle_tr)
@@ -1103,8 +1103,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     if _mlx_tr:
                         _mlx_trig, _mlx_cmd = _check_wake(_mlx_tr)
                         if _mlx_trig or not _idle_tr:
-                            _idle_tr, _idle_label = _mlx_tr, "MLXWhisper"
+                            _idle_tr, _idle_label = _mlx_tr, "MLX"
                             _idle_trig, _idle_cmd = _mlx_trig, _mlx_cmd
+
+                if _idle_tr:
+                    print(f"[STT] {_idle_label}: {_idle_tr!r}")
 
                 if not _idle_trig:
                     if _idle_tr:

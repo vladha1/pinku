@@ -44,7 +44,7 @@ def _try_import() -> bool:
         import mlx_whisper   # noqa
         _AVAILABLE = True
     except ImportError:
-        print("[MLXWhisper] mlx-whisper not installed — "
+        print("[STT] mlx-whisper not installed — "
               "run: pip install mlx-whisper")
     return _AVAILABLE
 
@@ -54,12 +54,12 @@ def _worker() -> None:
     import mlx_whisper
 
     # Warm up: compile the model on this thread's Metal stream
-    print(f"[MLXWhisper] Loading {MODEL} …")
+    print(f"[STT] Loading {MODEL} …")
     t0 = time.time()
     silence = np.zeros(1600, dtype=np.float32)
     _transcribe_once(mlx_whisper, silence, "en")   # warm-up always in English
     _ready.set()
-    print(f"[MLXWhisper] Ready ({time.time() - t0:.1f}s)")
+    print(f"[STT] Ready ({time.time() - t0:.1f}s)")
 
     while True:
         task = _q.get()
@@ -69,7 +69,7 @@ def _worker() -> None:
         try:
             result_box.append(_transcribe_once(mlx_whisper, audio, lang, temperature))
         except Exception as e:
-            print(f"[MLXWhisper] worker error: {e}")
+            print(f"[STT] worker error: {e}")
             result_box.append({"text": "", "language": ""})
         finally:
             done.set()
@@ -123,19 +123,19 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         _HINDI_CONFUSED = {"es", "ur", "pl", "pt", "tr"}
         if detected in _HINDI_CONFUSED:
             result = _send(audio, "hi", temperature=0.3)
-            print(f"[MLXWhisper] re-ran as Hindi temp=0.3 (was {detected})")
+            print(f"[STT] re-ran as Hindi temp=0.3 (was {detected})")
             detected = result.get("language", "")
         # Hard drop: if still not English or Hindi, discard rather than hallucinate
         if detected and detected not in ("en", "hi", ""):
-            print(f"[MLXWhisper] dropped — language={detected!r} (only en/hi accepted)")
+            print(f"[STT] dropped — language={detected!r} (only en/hi accepted)")
             return ""
         text = result.get("text", "").strip()
         if _is_hallucination(text):
-            print(f"[MLXWhisper] hallucination detected ({len(text.split())} words) — dropping")
+            print(f"[STT] hallucination detected ({len(text.split())} words) — dropping")
             return ""
         return text
     except Exception as e:
-        print(f"[MLXWhisper] error: {e}")
+        print(f"[STT] error: {e}")
         return ""
 
 
@@ -185,7 +185,7 @@ def transcribe_with_fallback(
 
         return en_text or hi_text, False, ""
     except Exception as e:
-        print(f"[MLXWhisper] error: {e}")
+        print(f"[STT] error: {e}")
         return "", False, ""
 
 

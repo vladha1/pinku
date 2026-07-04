@@ -420,7 +420,7 @@ def transcribe_and_respond(
     result.setdefault("lang", "en")
     result.setdefault("action", "ignore")
     result.setdefault("reply", "")
-    print(f"[LLM] transcribed: {result['transcript']!r} → {result['action']}")
+    print(f"[Gemini] {result['transcript']!r} → {result['action']}")
     return result
 
 
@@ -530,7 +530,7 @@ def text_route_and_respond(
         # Guard: if it starts with '{' it's truncated JSON, not prose — don't speak it.
         stripped = raw.strip()
         if stripped and not stripped.startswith('{'):
-            print(f"[LLM] text_route_and_respond: no JSON — using raw prose as reply")
+            print(f"[Route] no JSON from Gemini — using prose reply")
             has_devanagari = bool(re.search(r'[ऀ-ॿ]', stripped))
             return {
                 "transcript": transcript,
@@ -548,7 +548,7 @@ def text_route_and_respond(
     result.setdefault("lang",   "en")
     result.setdefault("action", "ignore")
     result.setdefault("reply",  "")
-    print(f"[LLM] text-routed: {transcript!r} → {result['action']}")
+    print(f"[Route] {transcript!r} → {result['action']}")
     return result
 
 
