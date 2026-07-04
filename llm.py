@@ -196,7 +196,9 @@ The speaker may use:
 
 IMPORTANT — DO NOT transcribe background audio sources:
 - TV / radio / streaming audio playing in the room → set transcript: "" and action: "ignore"
-- Sports commentary (cricket, IPL, football, etc.) → ALWAYS "ignore" even if words are clear
+- TV sports commentary (play-by-play, crowd noise, stadium echo, announcer tone) → "ignore"
+  NOTE: a person directly saying "Pinky, Argentina won today" or "who won the match?" is NOT
+  commentary — treat that as "chat".
 - News anchors, movie/show dialogue, music lyrics → "ignore"
 - A voice that sounds like a broadcast (formal narration tone, crowd noise behind it,
   play-by-play commentary) → "ignore"
@@ -273,7 +275,8 @@ You are in an ACTIVE CONVERSATION SESSION — the person is talking TO YOU.
 No wake word is required. Respond to anything clearly spoken by the person directly in the room.
 
 IGNORE (set action:"ignore", transcript:"") when the audio is:
-- Sports commentary: cricket, IPL, football, any sport play-by-play — ALWAYS ignore.
+- TV sports commentary (play-by-play, announcer, crowd noise, stadium echo) — ignore.
+  A person directly telling you a result ("Argentina won today", "India lost the match") is chat.
 - TV show dialogue, movie scene, news anchor, ads, background music/songs.
 - Any speech that sounds broadcast/narrated rather than a conversational voice directed at you.
 - A voice with crowd noise, stadium echo, commentary-style delivery, or formal broadcast tone.
