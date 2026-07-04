@@ -258,8 +258,10 @@ RULES:
 - Hindi: Devanagari script in reply, no English unless user mixed it
 - Scripture: include original script verse if relevant, then meaning + one insight
 - Keep replies ≤40 words (scripture/knowledge: ≤70 words)
-- For questions about CURRENT EVENTS, LIVE SCORES, TODAY'S NEWS, LATEST RESULTS,
-  or anything requiring real-time information → set reply: "" (system will fetch fresh data)
+- For EXPLICIT QUERIES asking for current data — "what's the score?", "who won?",
+  "what's in the news?", "latest result?" — set reply: "" (system will fetch fresh data).
+  If the person is SHARING information rather than ASKING for it ("Argentina won today",
+  "India lost the match"), reply conversationally — no data fetch needed.
 """
 
 # Wake rule injected into STEP 2 depending on session state
