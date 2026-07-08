@@ -343,6 +343,59 @@ def _handle_weather(action: dict):
     _speak_reply(reply, lang == "hi")
 
 
+def _handle_fishtank(action: dict):
+    """Change the projected fish-tank / wall scene via its local Flask server."""
+    import urllib.request as _ur, json as _json
+    lang  = action.get("lang", "en")
+    tr    = action.get("transcript", "")
+    scene = str(action.get("scene", "")).strip().lower()
+
+    base  = "http://localhost:5050"
+    valid = ("fish", "flowers", "pacman", "driving", "paint", "constellation")
+    # spoken variants people are likely to say -> real scene names
+    aliases = {
+        "fishes": "fish", "aquarium": "fish", "tank": "fish",
+        "flower": "flowers", "garden": "flowers",
+        "pac man": "pacman", "pac-man": "pacman", "game": "pacman",
+        "car": "driving", "drive": "driving", "cars": "driving",
+        "painting": "paint", "graffiti": "paint", "draw": "paint", "drawing": "paint",
+        "star": "constellation", "stars": "constellation", "constellations": "constellation",
+    }
+
+    try:
+        target = None
+        if scene in ("next", "previous", "prev", "back"):
+            with _ur.urlopen(f"{base}/api/scenes", timeout=4) as r:
+                scenes = _json.loads(r.read().decode())
+            with _ur.urlopen(f"{base}/api/scene", timeout=4) as r:
+                current = _json.loads(r.read().decode()).get("scene")
+            if scenes:
+                idx = scenes.index(current) if current in scenes else 0
+                step = 1 if scene == "next" else -1
+                target = scenes[(idx + step) % len(scenes)]
+        else:
+            target = scene if scene in valid else aliases.get(scene)
+
+        if not target:
+            reply = "Sorry, I don't know that wall scene."
+        else:
+            body = _json.dumps({"scene": target}).encode()
+            req  = _ur.Request(f"{base}/api/scene", data=body,
+                               headers={"Content-Type": "application/json"}, method="POST")
+            with _ur.urlopen(req, timeout=4) as r:
+                _json.loads(r.read().decode())
+            reply = (f"{target} पर बदल रहा हूँ।" if lang == "hi"
+                     else f"Switching the wall to {target}.")
+    except Exception as e:
+        _log("warn", f"Fish-tank scene change failed: {e}")
+        reply = "Sorry, I couldn't reach the fish tank."
+
+    _log("source", "fish-tank (localhost:5050)")
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
+    dashboard.record_conversation(tr, reply, lang=lang, source="fish-tank")
+    _speak_reply(reply, lang == "hi")
+
+
 def _handle_scripture(action: dict):
     """Route all knowledge topics (scripture, yoga, history, music, etc.) via knowledge.py."""
     knowledge.handle(
@@ -636,6 +689,8 @@ def _dispatch_action(action: dict):
         _handle_scripture(action)
     elif act == "weather":
         _handle_weather(action)
+    elif act == "fishtank":
+        _handle_fishtank(action)
     elif act in ("lights_on", "lights_off"):
         _log("warn", f'Action "{act}" not yet implemented')
         tts.speak(f"Sorry, lights control isn't set up yet.")
@@ -761,7 +816,7 @@ def _handle_gemini_result(result: dict):
     # Actions that Python handles — discard any Gemini-supplied reply (it ignores our
     # system prompt instruction to leave reply:"" and generates text anyway).
     _PYTHON_ACTIONS = {
-        "time", "weather", "mute", "unmute",
+        "time", "weather", "fishtank", "mute", "unmute",
         "lights_on", "lights_off",
     }
     # weather is handled by Python (_handle_weather fetches from wttr.in)

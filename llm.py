@@ -92,6 +92,9 @@ Actions:
                   (NOT panchang/calendar queries like Ekadashi/tithi/nakshatra → those are "chat")
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
+- "fishtank"    → change the wall / fish-tank / projector / screen scene; include a
+                  "scene" field: fish, flowers, pacman, driving, paint, constellation,
+                  next, or previous
 - "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
                   unintelligible speech, or speech not clearly addressed to Pinku
 
@@ -105,6 +108,8 @@ Examples:
 {"action":"chat","transcript":"what is the capital of France","lang":"en"}
 {"action":"time","transcript":"what time is it","lang":"en"}
 {"action":"scripture","topic":"gita","transcript":"what does the Gita say about fear","lang":"en"}
+{"action":"fishtank","scene":"paint","transcript":"switch the wall to paint","lang":"en"}
+{"action":"fishtank","scene":"next","transcript":"next scene on the fish tank","lang":"en"}
 {"action":"ignore","transcript":"","lang":"en"}
 {"action":"ignore","transcript":"give her to me give her to me","lang":"en"}
 {"action":"ignore","transcript":"yeh dil maange more","lang":"en"}
@@ -233,6 +238,7 @@ ACTION LIST (pick exactly one):
 "unmute"     → told Pinky to wake / start / listen → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
+"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, driving, paint, constellation, next, or previous
 
 RULES:
 - LANGUAGE (strict — overrides all other considerations):
@@ -460,6 +466,7 @@ ACTION LIST (pick exactly one):
 "unmute"     → told Pinky to wake / start / listen → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
+"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, driving, paint, constellation, next, or previous
 
 RULES:
 - Reply in EXACTLY the language the person spoke. English dominant → English only. Hindi dominant → Hindi (Devanagari).
