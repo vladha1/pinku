@@ -867,6 +867,7 @@ def _handle_gemini_result(result: dict):
 
     if reply:
         # Gemini already generated the reply (chat / scripture)
+        reply = llm._trim_reply(reply, max_words=55)   # enforce spoken word cap
         _stt = result.get("_stt_label")
         src = (f"{_stt} + Gemini text ({llm.GEMINI_MODEL})" if _stt
                else f"Gemini audio ({llm.GEMINI_MODEL})")
