@@ -1080,6 +1080,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _fast_transcript = apple_stt.transcribe(pcm)
                 _stt_label = "Apple"
                 if not _fast_transcript:
+                    print("[STT] Apple: empty — trying MLX")
                     _fast_transcript = mlx_stt.transcribe(pcm)
                     _stt_label = "MLX"
 
@@ -1122,6 +1123,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         print(f"[STT] text-route ignored — falling back to Gemini audio")
 
                 # Gemini audio fallback — when local STT failed or text-route ignored
+                if not _fast_transcript:
+                    print("[STT] Apple+MLX both empty — Gemini audio")
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist, session_active=True,
                     speaker=_current_speaker)
@@ -1151,22 +1154,27 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 _idle_trig, _idle_cmd = False, ""
                 if _idle_tr:
                     _idle_trig, _idle_cmd = _check_wake(_idle_tr)
+                    print(f"[STT] Apple: {_idle_tr!r}{' (wake)' if _idle_trig else ''}")
+                else:
+                    print("[STT] Apple: empty")
 
-                # MLX Whisper for Hindi or if Apple STT returned nothing
+                # MLX Whisper for Hindi or if Apple STT returned nothing / no wake word
                 if not _idle_tr or not _idle_trig:
                     _mlx_tr = mlx_stt.transcribe(pcm)
                     if _mlx_tr:
                         _mlx_trig, _mlx_cmd = _check_wake(_mlx_tr)
+                        print(f"[STT] MLX: {_mlx_tr!r}{' (wake)' if _mlx_trig else ''}")
                         if _mlx_trig or not _idle_tr:
                             _idle_tr, _idle_label = _mlx_tr, "MLX"
                             _idle_trig, _idle_cmd = _mlx_trig, _mlx_cmd
-
-                if _idle_tr:
-                    print(f"[STT] {_idle_label}: {_idle_tr!r}")
+                    else:
+                        print("[STT] MLX: empty")
 
                 if not _idle_trig:
                     if _idle_tr:
-                        print(f'[STT] Idle — no wake word: "{_idle_tr}"')
+                        print(f'[STT] Idle — no wake word in "{_idle_tr}" — dropped')
+                    else:
+                        print("[STT] Idle — no speech — dropped")
                     dashboard.update_status(state="idle")
                     continue
 
@@ -1198,7 +1206,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     _handle_gemini_result(result)
                     continue
 
-                # Last resort: Gemini audio (local STT failed or text-route ignored)
+                # Last resort: Gemini audio (text-route returned ignore)
+                print("[STT] text-route ignored — Gemini audio fallback")
                 result = llm.transcribe_and_respond(
                     pcm, history=_session_hist,
                     session_active=False, speaker=_current_speaker)
