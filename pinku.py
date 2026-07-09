@@ -516,6 +516,9 @@ _WAKE_PHRASES = [
     "hey piky", "hi piky", "piky",                # Pinky with dropped n
     "hey pingu", "pingu",
     "hey pintu", "hi pintu", "pintu",
+    "hey becky", "hi becky", "becky",               # MLX mishearing of "Pinky" (b/p bilabial swap)
+    "hey bicky", "hi bicky", "bicky",               # variant
+    "hey binky", "hi binky", "binky",               # b instead of p
 ]
 
 # End-session phrases — only checked when already in session AND utterance
@@ -536,6 +539,7 @@ _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते|हलो|हैलो)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|becky|bicky|binky'                                           # MLX mishearings (b/p bilabial swap)
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[,\s।]*',   # Whisper mishearings
     _re.IGNORECASE,
@@ -543,6 +547,7 @@ _PINKU_RE_START = _re.compile(
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|becky|bicky|binky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[\W]*$',
     _re.IGNORECASE,
@@ -552,6 +557,7 @@ _PINKU_RE_ANY = _re.compile(
 # never fires after them (both sides of boundary are \W → no boundary).
 _PINKU_RE_CONTAINS = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
+    r'|becky|bicky|binky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)',
     _re.IGNORECASE,
