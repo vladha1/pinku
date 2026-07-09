@@ -51,13 +51,21 @@ def _try_import() -> bool:
 
 def _worker() -> None:
     """Persistent worker — owns the Metal GPU stream for all transcriptions."""
+    global _AVAILABLE
     import mlx_whisper
 
     # Warm up: compile the model on this thread's Metal stream
     print(f"[STT] Loading {MODEL} …")
     t0 = time.time()
     silence = np.zeros(1600, dtype=np.float32)
-    _transcribe_once(mlx_whisper, silence, "en")   # warm-up always in English
+    try:
+        _transcribe_once(mlx_whisper, silence, "en")   # warm-up always in English
+    except Exception as e:
+        print(f"[STT] MLX warm-up failed: {e}")
+        print("[STT] MLX disabled — Apple STT + Gemini audio remain active")
+        _AVAILABLE = False
+        _ready.set()   # unblock any is_ready() waiters
+        return
     _ready.set()
     print(f"[STT] Ready ({time.time() - t0:.1f}s)")
 

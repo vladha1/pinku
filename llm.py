@@ -426,7 +426,9 @@ def transcribe_and_respond(
     result.setdefault("lang", "en")
     result.setdefault("action", "ignore")
     result.setdefault("reply", "")
-    print(f"[Gemini] {result['transcript']!r} → {result['action']}")
+    _rp = result['reply'][:60] + "…" if len(result.get('reply','')) > 60 else result.get('reply','')
+    print(f"[Gemini] {result['transcript']!r} → {result['action']}"
+          + (f"  reply: {_rp!r}" if _rp else ""))
     return result
 
 
@@ -555,7 +557,9 @@ def text_route_and_respond(
     result.setdefault("lang",   "en")
     result.setdefault("action", "ignore")
     result.setdefault("reply",  "")
-    print(f"[Route] {transcript!r} → {result['action']}")
+    _rp = result['reply'][:60] + "…" if len(result.get('reply','')) > 60 else result.get('reply','')
+    print(f"[Route] {transcript!r} → {result['action']}"
+          + (f"  reply: {_rp!r}" if _rp else ""))
     return result
 
 
