@@ -545,7 +545,7 @@ def text_route_and_respond(
                 "transcript": transcript,
                 "lang":       "hi" if has_devanagari else "en",
                 "action":     "chat",
-                "reply":      stripped,
+                "reply":      _trim_reply(stripped, max_words=55),
             }
         return None
     try:
