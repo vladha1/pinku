@@ -856,6 +856,22 @@ def _handle_gemini_result(result: dict):
         dashboard.update_status(state="idle", last_transcript=transcript, last_reply="")
         return
 
+    # Soft close: bare acknowledgment phrases close the session silently.
+    # "Thank you" is often directed at someone else in the room, not Pinku.
+    # No speech, no sleep sound — just close quietly.
+    _SOFT_CLOSE = {
+        "thank you", "thanks", "thank you so much", "thank you very much",
+        "thanks a lot", "thanks so much", "thank you thank you",
+        "dhanyavaad", "shukriya",
+    }
+    _tr_clean = transcript.lower().strip().rstrip(".,!?।")
+    if _awake.is_set() and _tr_clean in _SOFT_CLOSE:
+        _awake.clear()
+        _session_hist.clear()
+        _log("info", f"Soft close — acknowledgment phrase: {transcript!r}")
+        dashboard.update_status(state="idle", last_transcript=transcript, last_reply="")
+        return
+
     # ── Confirmed real command — reset hallucination counter, play think tick ──
     # Fires only here, after all ignore/hallucination/wake-word-only paths have
     # returned early. This means beep = "I heard a real command, working on it."
