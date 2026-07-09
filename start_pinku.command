@@ -12,6 +12,10 @@ for pid in $(pgrep -f "start_pinku.command" 2>/dev/null); do
 done
 sleep 0.3   # let sibling scripts die before we start killing pinku.py
 
+# ── Stop PM2-managed Pinku (prevents dual-instance with Terminal run) ─────────
+pm2 stop pinku   2>/dev/null || true
+pm2 delete pinku 2>/dev/null || true
+
 # ── Kill existing Pinku + Music processes ─────────────────────────────────────
 pkill -f "python.*pinku\.py"     2>/dev/null && echo "Stopped previous Pinku."     || true
 pkill -f "python.*music_app\.py" 2>/dev/null && echo "Stopped previous Music app." || true

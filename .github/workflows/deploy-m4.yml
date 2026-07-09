@@ -24,36 +24,26 @@ jobs:
           cd ~/pinku
           python3 test_wake.py -v
 
-      - name: Stop Pinku and clear port 5100
+      - name: Restart Pinku with new code
         run: |
-          pm2 stop pinku || true
-          sleep 5
+          # Kill pinku.py — start_pinku.command's while-loop restarts it
+          # automatically with the freshly-pulled code after a 5s pause.
+          # Do NOT use PM2 here; the user runs Pinku from Terminal for mic permissions.
+          pkill -TERM -f "python.*pinku\.py" 2>/dev/null || true
+          sleep 3
+          pkill -9 -f "python.*pinku\.py" 2>/dev/null || true
           lsof -ti :5100 | xargs kill -9 2>/dev/null || true
 
-      - name: Start Pinku via PM2
-        run: pm2 start pinku
+      - name: Wait for auto-restart
+        run: sleep 20
 
-      - name: Wait for startup
-        run: sleep 25
-
-      - name: Verify new code is serving
+      - name: Verify new code is running
         run: |
-          echo "=== What process holds port 5100 ==="
-          lsof -i :5100 -n -P || echo "(lsof failed)"
-          echo ""
-          echo "=== dashboard.py has new code? ==="
-          grep -c "slice(0,3)" ~/pinku/dashboard.py && echo "YES new code" || echo "NO old code"
+          echo "=== Pinku process ==="
+          pgrep -a -f "python.*pinku\.py" || echo "(not running)"
           echo ""
           echo "=== Flask serving check ==="
-          curl -s http://localhost:5100/ | grep -o ', Mon' | head -3 || echo "(curl failed or no Mon)"
-
-      - name: Capture logs
-        run: |
-          echo "=== PM2 status ==="
-          pm2 list --no-color
+          curl -s http://localhost:5100/ | head -5 || echo "(curl failed)"
           echo ""
-          echo "=== Mic signal diagnostic (STT timeout lines) ==="
-          pm2 logs pinku --lines 200 --nostream --no-color 2>/dev/null | grep "\[STT\] timeout" | tail -5 || echo "(no timeout lines yet)"
-          echo ""
-          echo "=== Pinku logs (last 100 lines) ==="
-          pm2 logs pinku --lines 100 --nostream --no-color
+          echo "=== Recent Pinku logs ==="
+          tail -20 ~/pinku/logs/pinku_$(date +%Y-%m-%d).log 2>/dev/null || echo "(no log yet)"
