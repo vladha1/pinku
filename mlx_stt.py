@@ -16,7 +16,7 @@ import time
 
 import numpy as np
 
-MODEL    = "mlx-community/whisper-large-v3"
+MODEL    = "mlx-community/whisper-large-v3-turbo"
 LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "auto")  # auto-detect; retries as Hindi if Spanish
 
 
