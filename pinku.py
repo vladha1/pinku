@@ -726,11 +726,7 @@ def _handle_gemini_result(result: dict):
     # even though the idle prompt explicitly requires the wake word.
     _session_was_active = result.get("_session_active", True)   # injected below
     if not _session_was_active and not _awake.is_set():
-        _WAKE_RE = _re.compile(
-            r'\b(pinku|pinky|pinki|pinko|pink|pingu|pinkoo|penku|penko'
-            r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)',
-            _re.IGNORECASE)
-        if action != "ignore" and not _WAKE_RE.search(transcript):
+        if action != "ignore" and not _PINKU_RE_CONTAINS.search(transcript):
             _log("info",
                  f'Idle hallucination suppressed — no wake word in: "{transcript[:60]}"')
             _brief_mute(1.5)
