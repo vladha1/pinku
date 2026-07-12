@@ -1340,8 +1340,9 @@ function _pollMic() {
     var fill = document.getElementById('mic-fill');
     if (fill) {
       fill.style.width = Math.min(100, Math.round(lvl * 100)) + '%';
-      fill.style.background = lvl >= _MIC_THRESHOLD
-        ? 'rgba(74,222,128,0.72)' : 'rgba(255,255,255,0.12)';
+      // Neutral white — level indicator only, no green/red semantic.
+      // Music keeps the bar at high level all day, so green here is misleading.
+      fill.style.background = 'rgba(255,255,255,' + (0.08 + Math.min(lvl, 1) * 0.30) + ')';
     }
     if (lvl >= _MIC_THRESHOLD) _micLiveUntil = Date.now() + 2000;
     var isLive = Date.now() < _micLiveUntil;
@@ -1444,11 +1445,11 @@ function delProfile(name) {
 
 // ── Activity strip (always-on, auto-refreshes every 60s) ──────────────────────
 function drawActivityChart(timestamps) {
-  var canvas = document.getElementById('act-canvas');
-  if (!canvas || !canvas.getContext) return;
   var strip = document.getElementById('act-strip');
+  var canvas = document.getElementById('act-canvas');
+  if (!strip || !canvas || !canvas.getContext) return;
   var dpr = window.devicePixelRatio || 1;
-  var cssW = strip.clientWidth - 32;   // 16px padding each side
+  var cssW = Math.max(strip.clientWidth - 32, 100);
   var cssH = 72;
   canvas.style.width  = cssW + 'px';
   canvas.style.height = cssH + 'px';
@@ -1458,9 +1459,14 @@ function drawActivityChart(timestamps) {
   ctx.scale(dpr, dpr);
   var W = cssW, H = cssH;
 
-  ctx.clearRect(0, 0, W, H);
+  var labelH = 15;
+  var chartH = H - labelH;
 
-  // Bin timestamps into 48 half-hour buckets (local midnight → midnight)
+  // Dark background so the chart area is clearly defined
+  ctx.fillStyle = 'rgba(8,8,20,0.85)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Bin timestamps into 48 half-hour buckets
   var NUM = 48;
   var counts = [];
   var i;
@@ -1477,60 +1483,72 @@ function drawActivityChart(timestamps) {
     if (b >= 0 && b < NUM) counts[b]++;
   }
 
-  // Normalize by max count (floor at 4 so sparse days still show shape)
+  // Normalize (floor at 4 so sparse days still show relative shape)
   var maxC = 4;
   for (i = 0; i < NUM; i++) if (counts[i] > maxC) maxC = counts[i];
 
-  var labelH = 14;
-  var chartH = H - labelH;
   var barW = W / NUM;
 
+  // Ghost slots — show all 48 positions even when empty
+  ctx.fillStyle = 'rgba(255,255,255,0.04)';
   for (i = 0; i < NUM; i++) {
+    ctx.fillRect(Math.floor(i * barW) + 1, chartH - 2,
+                 Math.max(Math.ceil(barW) - 2, 1), 2);
+  }
+
+  // Activity bars
+  for (i = 0; i < NUM; i++) {
+    if (!counts[i]) continue;
     var norm = counts[i] / maxC;
-    var barH = norm > 0 ? Math.max(norm * chartH, 2) : 0;
+    var barH = Math.max(norm * chartH, 3);
     var x = i * barW;
     var y = chartH - barH;
-
-    // Color: near-black → dark green → amber
     var r, g, b2;
     if (norm < 0.35) {
       var t = norm / 0.35;
-      r = Math.round(14 + t * 16);
-      g = Math.round(16 + t * 60);
-      b2 = Math.round(30 + t * 8);
+      r = Math.round(20 + t * 20);
+      g = Math.round(90 + t * 80);
+      b2 = Math.round(40 + t * 5);
     } else {
       var t = (norm - 0.35) / 0.65;
-      r = Math.round(30 + t * 215);
-      g = Math.round(76 + t * 82);
-      b2 = Math.round(38 - t * 31);
+      r = Math.round(40 + t * 205);
+      g = Math.round(170 - t * 12);
+      b2 = Math.round(45 - t * 38);
     }
     ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b2 + ')';
-    ctx.fillRect(Math.floor(x), Math.floor(y),
-                 Math.max(Math.ceil(barW) - 1, 1), Math.ceil(barH));
+    ctx.fillRect(Math.floor(x) + 1, Math.floor(y),
+                 Math.max(Math.ceil(barW) - 2, 1), Math.ceil(barH));
   }
 
-  // Faint gridlines every 3 hours
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  // Baseline
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(0, chartH, W, 1);
+
+  // Gridlines every 3 hours
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 1;
-  for (var h = 0; h <= 24; h += 3) {
+  for (var h = 3; h < 24; h += 3) {
     var lx = Math.round((h / 24) * W) + 0.5;
     ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, chartH); ctx.stroke();
   }
 
-  // Current time marker (amber)
+  // Current-time marker (amber)
   var nowOff = (now.getTime() / 1000) - midTs;
-  var mx = Math.round((nowOff / 86400) * W) + 0.5;
-  ctx.strokeStyle = 'rgba(251,191,36,0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, chartH); ctx.stroke();
+  if (nowOff >= 0 && nowOff < 86400) {
+    var mx = Math.round((nowOff / 86400) * W) + 0.5;
+    ctx.strokeStyle = 'rgba(251,191,36,0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, chartH); ctx.stroke();
+  }
 
-  // Hour labels: 12a 3 6 9 12p 3 6 9 12a
-  ctx.fillStyle = 'rgba(226,232,248,0.20)';
-  ctx.font = '8px -apple-system, sans-serif';
+  // Hour labels — clearly visible
+  ctx.fillStyle = 'rgba(226,232,248,0.50)';
+  ctx.font = '9px -apple-system, sans-serif';
   ctx.textAlign = 'center';
-  var lbls = ['12a','3','6','9','12p','3','6','9','12a'];
+  var lbls = ['12a','3a','6a','9a','12p','3p','6p','9p','12a'];
   for (var hi = 0; hi <= 8; hi++) {
-    ctx.fillText(lbls[hi], Math.round((hi * 3 / 24) * W), H - 2);
+    var lxl = Math.round((hi * 3 / 24) * W);
+    ctx.fillText(lbls[hi], lxl, H - 2);
   }
 }
 
@@ -1539,8 +1557,10 @@ function _refreshActivity() {
     if (r && r.data) drawActivityChart(r.data);
   });
 }
-_refreshActivity();
+// Defer first render until layout is settled, then refresh every minute
+setTimeout(_refreshActivity, 300);
 setInterval(_refreshActivity, 60000);
+window.addEventListener('resize', function() { setTimeout(_refreshActivity, 150); });
 
 var enrolling = false, micIv = null;
 
