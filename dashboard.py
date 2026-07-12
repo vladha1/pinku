@@ -290,6 +290,15 @@ def mic_level_api():
         level = 0.0
     return json.dumps({"level": round(level, 3)})
 
+@_app.route("/api/sound_activity")
+def api_sound_activity():
+    """Return per-minute ambient sound peaks for the activity heatmap."""
+    try:
+        import stt as _stt
+        return json.dumps({"data": _stt.get_sound_activity()})
+    except Exception:
+        return json.dumps({"data": []})
+
 @_app.route("/restart")
 def restart_page():
     """Simple tap-to-restart page — works from any browser including iPad Safari."""
@@ -1053,6 +1062,71 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 .log-pinku  { color: #6ee7b7; }
 .log-warn   { color: #fb923c; }
 .log-error  { color: #f87171; font-weight: 600; }
+
+/* ── Activity heatmap panel ── */
+#act-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(5,5,13,0.88);
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: flex-end; align-items: flex-end;
+  opacity: 0; pointer-events: none;
+  -webkit-transition: opacity 0.3s;
+  transition: opacity 0.3s;
+  z-index: 50;
+}
+#act-overlay.open { opacity: 1; pointer-events: auto; }
+#act-panel {
+  width: 100%;
+  background: #06060f;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-radius: 20px 20px 0 0;
+  padding: 0 0 34px;
+  -webkit-transform: translateY(100%);
+  transform: translateY(100%);
+  -webkit-transition: -webkit-transform 0.4s cubic-bezier(.4,0,.2,1);
+  transition: transform 0.4s cubic-bezier(.4,0,.2,1);
+}
+#act-overlay.open #act-panel {
+  -webkit-transform: none;
+  transform: none;
+}
+#act-header {
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: space-between; justify-content: space-between;
+  padding: 16px 20px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+#act-header h3 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  color: rgba(226,232,248,0.38); margin: 0;
+}
+#act-close {
+  background: none; border: none;
+  color: rgba(226,232,248,0.38); font-size: 20px;
+  cursor: pointer; padding: 2px 4px; line-height: 1;
+  font-family: inherit;
+}
+#act-sub {
+  font-size: 10px; color: rgba(226,232,248,0.22);
+  padding: 8px 20px 0;
+}
+#act-canvas-wrap {
+  padding: 12px 16px 0;
+  position: relative;
+}
+#act-canvas {
+  width: 100%; height: 110px;
+  display: block;
+}
+#act-empty {
+  text-align: center;
+  color: rgba(226,232,248,0.2);
+  font-size: 12px;
+  padding: 28px 0 20px;
+  display: none;
+}
 </style>
 </head>
 <body>
@@ -1093,7 +1167,23 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
     <button class="cb" onclick="act('sleep')">🌙</button>
     <button class="cb" id="mute-btn" onclick="act('mute_toggle')">🔊</button>
     <button class="cb" onclick="openVoices()">🎙</button>
+    <button class="cb" onclick="openActivity()">📊</button>
     <button class="cb" onclick="openLog()">📋</button>
+  </div>
+</div>
+
+<!-- activity heatmap panel -->
+<div id="act-overlay" onclick="if(event.target===this)closeActivity()">
+  <div id="act-panel">
+    <div id="act-header">
+      <h3>TODAY'S ACTIVITY</h3>
+      <button id="act-close" onclick="closeActivity()">✕</button>
+    </div>
+    <div id="act-sub">Ambient sound levels — mic peaks per minute</div>
+    <div id="act-canvas-wrap">
+      <canvas id="act-canvas"></canvas>
+      <div id="act-empty">No data yet — will fill in as the day progresses.</div>
+    </div>
   </div>
 </div>
 
@@ -1410,6 +1500,113 @@ function delProfile(name) {
   xhr('DELETE', '/api/enroll/delete/' + encodeURIComponent(name), null, function() {
     loadProfiles();
   });
+}
+
+// ── Activity heatmap ──────────────────────────────────────────────────────────
+function openActivity() {
+  document.getElementById('act-overlay').className = 'open';
+  loadActivity();
+}
+function closeActivity() {
+  document.getElementById('act-overlay').className = '';
+}
+
+function loadActivity() {
+  xhr('GET', '/api/sound_activity', null, function(err, r) {
+    var data = (r && r.data) ? r.data : [];
+    document.getElementById('act-empty').style.display = data.length ? 'none' : 'block';
+    drawActivityChart(data);
+  });
+}
+
+function drawActivityChart(data) {
+  var canvas = document.getElementById('act-canvas');
+  if (!canvas || !canvas.getContext) return;
+  var dpr = window.devicePixelRatio || 1;
+  var wrap = document.getElementById('act-canvas-wrap');
+  var cssW = wrap.clientWidth - 32;  // account for 16px padding each side
+  var cssH = 110;
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width  = cssW * dpr;
+  canvas.height = cssH * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  var W = cssW, H = cssH;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#06060f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Build 48 half-hour buckets from midnight to midnight (local time)
+  var NUM = 48;
+  var buckets = [];
+  var i;
+  for (i = 0; i < NUM; i++) buckets[i] = 0;
+
+  var now = new Date();
+  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  var midnightTs = midnight.getTime() / 1000;
+
+  for (i = 0; i < data.length; i++) {
+    var offset = data[i].t - midnightTs;
+    if (offset < 0 || offset >= 86400) continue;
+    var b = Math.floor(offset / 1800);
+    if (b >= 0 && b < NUM && data[i].peak > buckets[b]) buckets[b] = data[i].peak;
+  }
+
+  var labelH = 16;
+  var chartH = H - labelH;
+  var barW = W / NUM;
+  var MAX_RMS = 0.04;  // raw RMS at which bar is full height
+
+  for (i = 0; i < NUM; i++) {
+    var norm = Math.min(buckets[i] / MAX_RMS, 1.0);
+    var barH = norm > 0.02 ? Math.max(norm * chartH, 2) : 0;
+    var x = i * barW;
+    var y = chartH - barH;
+
+    // Color: near-black → dark green → amber
+    var r, g, b;
+    if (norm < 0.35) {
+      var t = norm / 0.35;
+      r = Math.round(14 + t * 16);
+      g = Math.round(16 + t * 62);
+      b = Math.round(32 + t * 8);
+    } else {
+      var t = (norm - 0.35) / 0.65;
+      r = Math.round(30 + t * 215);
+      g = Math.round(78 + t * 80);
+      b = Math.round(40 - t * 33);
+    }
+    ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+    ctx.fillRect(Math.floor(x), Math.floor(y), Math.max(Math.ceil(barW) - 1, 1), Math.ceil(barH));
+  }
+
+  // Gridlines at every 3 hours
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (var h = 0; h <= 24; h += 3) {
+    var lx = Math.round((h / 24) * W) + 0.5;
+    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, chartH); ctx.stroke();
+  }
+
+  // Current time marker
+  var nowOffset = (now.getTime() / 1000) - midnightTs;
+  var mx = Math.round((nowOffset / 86400) * W) + 0.5;
+  ctx.strokeStyle = 'rgba(251,191,36,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, chartH); ctx.stroke();
+
+  // Hour labels
+  ctx.fillStyle = 'rgba(226,232,248,0.22)';
+  ctx.font = '9px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  var lbls = ['12a','3','6','9','12p','3','6','9','12a'];
+  for (var hi = 0; hi <= 8; hi++) {
+    var lxl = Math.round((hi * 3 / 24) * W);
+    ctx.fillText(lbls[hi], lxl, H - 3);
+  }
 }
 
 var enrolling = false, micIv = null;

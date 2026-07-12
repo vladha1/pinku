@@ -39,6 +39,17 @@ def get_mic_level() -> float:
     """
     return min(_mic_rms * 20.0, 1.0)
 
+# ── Sound activity log (per-minute ambient peaks) ─────────────────────────────
+# Stores the peak raw RMS observed each minute so the dashboard can show a
+# 24-hour activity heatmap.  maxlen=1440 = one full day at 1-min resolution.
+_sound_activity: collections.deque = collections.deque(maxlen=1440)
+_sound_minute_peak: float = 0.0   # peak raw RMS in the current minute
+_sound_current_min: int   = -1    # current minute as int(time() // 60)
+
+def get_sound_activity() -> list:
+    """Return list of {t, peak} dicts for today's ambient sound data."""
+    return list(_sound_activity)
+
 # Optional external log callback — set by pinku.py to route STT diagnostics
 # into the dashboard log.  Signature: (level: str, msg: str) -> None
 _log_cb = None
@@ -157,7 +168,7 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
-        global _mic_rms
+        global _mic_rms, _sound_minute_peak, _sound_current_min
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
@@ -166,6 +177,16 @@ class AudioRecorder:
             audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
             rms = float(np.sqrt(np.mean(audio ** 2)))
             _mic_rms = _mic_rms * 0.6 + rms * 0.4   # 40% weight → reacts quickly
+            # Per-minute peak for activity timeline
+            m = int(time.time() // 60)
+            if m != _sound_current_min:
+                if _sound_current_min >= 0:
+                    _sound_activity.append({"t": _sound_current_min * 60,
+                                            "peak": round(_sound_minute_peak, 5)})
+                _sound_current_min = m
+                _sound_minute_peak = rms
+            elif rms > _sound_minute_peak:
+                _sound_minute_peak = rms
         except Exception:
             pass
         return (None, pyaudio.paContinue)
