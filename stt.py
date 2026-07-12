@@ -29,15 +29,24 @@ _whisper_model  = None
 _whisper_lock   = threading.Lock()
 
 # ── Mic level meter (updated in _callback, read by dashboard) ─────────────────
-_mic_rms: float = 0.0   # smoothed RMS updated every 30 ms in the PyAudio callback
+_mic_rms: float = 0.0    # fast EWA — reacts in ~100 ms
+_mic_avg: float = 0.003  # slow EWA — adapts to ambient over ~30 s
 
 def get_mic_level() -> float:
     """
-    Return normalised mic level for the dashboard meter (0.0 – 1.0).
-    Scale factor of 20× — at 3m distance rms is ~0.01-0.03, giving 0.2-0.6
-    which maps to clearly visible bars.  8× was too subtle (2-3 px change).
+    Return mic activity *above the adaptive baseline* (0.0 – 1.0).
+
+    Using a ratio (_mic_rms / _mic_avg) rather than raw RMS means sustained
+    background noise (music, TV, AC) raises the baseline so the bar stays
+    calm; only transients above the baseline (speech, someone entering the
+    room) push the bar up.
+
+    Mapping: 1× baseline → 0 %,  2× → 50 %,  3× → 100 %
     """
-    return min(_mic_rms * 20.0, 1.0)
+    if _mic_avg < 0.001:
+        return 0.0
+    ratio = _mic_rms / _mic_avg
+    return max(0.0, min((ratio - 1.0) / 2.0, 1.0))
 
 # ── Sound activity log (utterance events) ─────────────────────────────────────
 # Records a Unix timestamp for each utterance the VAD successfully detects.
@@ -173,15 +182,15 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
-        global _mic_rms
+        global _mic_rms, _mic_avg
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
-        # Track smoothed RMS for the dashboard mic meter (fast EWA, no blocking)
         try:
             audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
             rms = float(np.sqrt(np.mean(audio ** 2)))
-            _mic_rms = _mic_rms * 0.6 + rms * 0.4   # 40% weight → reacts quickly
+            _mic_rms = _mic_rms * 0.6 + rms * 0.4   # fast  (~100 ms)
+            _mic_avg = _mic_avg * 0.997 + rms * 0.003  # slow (~30 s baseline)
         except Exception:
             pass
         return (None, pyaudio.paContinue)

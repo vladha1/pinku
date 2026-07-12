@@ -1340,9 +1340,8 @@ function _pollMic() {
     var fill = document.getElementById('mic-fill');
     if (fill) {
       fill.style.width = Math.min(100, Math.round(lvl * 100)) + '%';
-      // Neutral white — level indicator only, no green/red semantic.
-      // Music keeps the bar at high level all day, so green here is misleading.
-      fill.style.background = 'rgba(255,255,255,' + (0.08 + Math.min(lvl, 1) * 0.30) + ')';
+      fill.style.background = lvl >= _MIC_THRESHOLD
+        ? 'rgba(74,222,128,0.72)' : 'rgba(255,255,255,0.12)';
     }
     if (lvl >= _MIC_THRESHOLD) _micLiveUntil = Date.now() + 2000;
     var isLive = Date.now() < _micLiveUntil;
