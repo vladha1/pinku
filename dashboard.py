@@ -1465,40 +1465,42 @@ function drawActivityChart(timestamps) {
   ctx.fillStyle = 'rgba(8,8,20,0.85)';
   ctx.fillRect(0, 0, W, H);
 
-  // Bin timestamps into 48 half-hour buckets
+  // Bin per-minute {t, peak} records into 48 half-hour buckets.
+  // Scale is FIXED (not relative): MAX_RMS = full bar, so quiet hours
+  // are clearly short and active/music hours are clearly taller.
   var NUM = 48;
-  var counts = [];
+  var peaks = [];
   var i;
-  for (i = 0; i < NUM; i++) counts[i] = 0;
+  for (i = 0; i < NUM; i++) peaks[i] = 0;
 
   var now = new Date();
   var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   var midTs = midnight.getTime() / 1000;
+  var MAX_RMS = 0.04;  // raw RMS at which bar reaches full height
 
   for (i = 0; i < timestamps.length; i++) {
-    var off = timestamps[i] - midTs;
+    var entry = timestamps[i];
+    var ts = (typeof entry === 'object') ? entry.t : entry;
+    var pk = (typeof entry === 'object') ? entry.peak : 0;
+    var off = ts - midTs;
     if (off < 0 || off >= 86400) continue;
     var b = Math.floor(off / 1800);
-    if (b >= 0 && b < NUM) counts[b]++;
+    if (b >= 0 && b < NUM && pk > peaks[b]) peaks[b] = pk;
   }
-
-  // Normalize (floor at 4 so sparse days still show relative shape)
-  var maxC = 4;
-  for (i = 0; i < NUM; i++) if (counts[i] > maxC) maxC = counts[i];
 
   var barW = W / NUM;
 
-  // Ghost slots — show all 48 positions even when empty
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
+  // Ghost slots — faint tick at baseline for every slot
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
   for (i = 0; i < NUM; i++) {
     ctx.fillRect(Math.floor(i * barW) + 1, chartH - 2,
                  Math.max(Math.ceil(barW) - 2, 1), 2);
   }
 
-  // Activity bars
+  // Activity bars — absolute scale
   for (i = 0; i < NUM; i++) {
-    if (!counts[i]) continue;
-    var norm = counts[i] / maxC;
+    if (!peaks[i]) continue;
+    var norm = Math.min(peaks[i] / MAX_RMS, 1.0);
     var barH = Math.max(norm * chartH, 3);
     var x = i * barW;
     var y = chartH - barH;

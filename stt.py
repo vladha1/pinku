@@ -48,21 +48,21 @@ def get_mic_level() -> float:
     ratio = _mic_rms / _mic_avg
     return max(0.0, min((ratio - 1.0) / 2.0, 1.0))
 
-# ── Sound activity log (utterance events) ─────────────────────────────────────
-# Records a Unix timestamp for each utterance the VAD successfully detects.
-# Utterance counts are a better "was someone home?" signal than raw RMS:
-# continuous music raises the noise floor so it stops triggering the VAD
-# after ~1 min; real speech creates discrete on/off events.  maxlen=3000
-# covers roughly 48h of activity at typical household rates.
-_sound_events: collections.deque = collections.deque(maxlen=3000)
+# ── Sound activity log (per-minute RMS peaks) ────────────────────────────────
+# Records the peak raw RMS every minute so the dashboard chart can show an
+# absolute timeline: quiet periods → short bars, music/activity → taller bars.
+# maxlen=1440 = 24 hours at 1-min resolution.
+_sound_activity: collections.deque = collections.deque(maxlen=1440)
+_sound_minute_peak: float = 0.0
+_sound_current_min: int   = -1
 
 def get_sound_activity() -> list:
-    """Return list of utterance-event timestamps (float Unix seconds)."""
-    return list(_sound_events)
+    """Return list of {t, peak} per-minute dicts for today's sound timeline."""
+    return list(_sound_activity)
 
 def _record_utterance():
-    """Call when the VAD detects a complete utterance."""
-    _sound_events.append(time.time())
+    """Call when the VAD detects a complete utterance (kept for future use)."""
+    pass
 
 # Optional external log callback — set by pinku.py to route STT diagnostics
 # into the dashboard log.  Signature: (level: str, msg: str) -> None
@@ -182,15 +182,25 @@ class AudioRecorder:
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudio
-        global _mic_rms, _mic_avg
+        global _mic_rms, _mic_avg, _sound_minute_peak, _sound_current_min
         with self._buf_lock:
             self._frames.append(in_data)
         self._new_audio.set()
         try:
             audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
             rms = float(np.sqrt(np.mean(audio ** 2)))
-            _mic_rms = _mic_rms * 0.6 + rms * 0.4   # fast  (~100 ms)
-            _mic_avg = _mic_avg * 0.997 + rms * 0.003  # slow (~30 s baseline)
+            _mic_rms = _mic_rms * 0.6 + rms * 0.4     # fast  (~100 ms)
+            _mic_avg = _mic_avg * 0.997 + rms * 0.003  # slow  (~30 s baseline)
+            # Per-minute peak for activity timeline
+            m = int(time.time() // 60)
+            if m != _sound_current_min:
+                if _sound_current_min >= 0:
+                    _sound_activity.append({"t": _sound_current_min * 60,
+                                            "peak": round(_sound_minute_peak, 5)})
+                _sound_current_min = m
+                _sound_minute_peak = rms
+            elif rms > _sound_minute_peak:
+                _sound_minute_peak = rms
         except Exception:
             pass
         return (None, pyaudio.paContinue)
