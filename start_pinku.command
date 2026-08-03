@@ -57,6 +57,10 @@ export GRPC_VERBOSITY=ERROR
 # ── Music app — background with auto-restart ──────────────────────────────────
 (
   while true; do
+    # Free port 5101 BEFORE launching — evicts any stray/duplicate music_app
+    # (e.g. left over from a prior run) that would otherwise cause an endless
+    # "Address already in use" crash-loop.
+    kill -9 $(lsof -ti :5101) 2>/dev/null || true
     echo "$(date '+%H:%M:%S')  [Music] Starting..."
     .venv/bin/python3 music_app.py
     EXIT=$?
