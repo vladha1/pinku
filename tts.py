@@ -137,6 +137,62 @@ def _play(path: str):
     )
 
 
+# ── Output device selection ───────────────────────────────────────────────────
+# afplay always plays to the macOS default output device, so to route Pinky's
+# voice + music to the Bose we set the default output to it at startup.
+# Uses SwitchAudioSource (brew install switchaudio-osx); a name substring match
+# so it works regardless of the exact device string (e.g. "Bose QC35 II").
+
+def set_output_device(name_substr: str) -> bool:
+    """
+    Force the macOS default output device to the first one whose name contains
+    `name_substr` (case-insensitive). Returns True on success.
+    No-op (returns False) if name_substr is empty, SwitchAudioSource is missing,
+    or no matching device is currently connected.
+    """
+    if not name_substr:
+        return False
+    try:
+        listing = subprocess.check_output(
+            ["SwitchAudioSource", "-a", "-t", "output"],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode()
+    except FileNotFoundError:
+        print("[TTS] SwitchAudioSource not installed — "
+              "run: brew install switchaudio-osx (audio uses system default)")
+        return False
+    except Exception as e:
+        print(f"[TTS] Could not list output devices: {e}")
+        return False
+
+    target = None
+    needle = name_substr.lower()
+    for line in listing.splitlines():
+        # SwitchAudioSource -a lines look like "Bose QC35 II (current)"
+        name = line.rstrip()
+        if name.endswith(" (current)"):
+            name = name[: -len(" (current)")]
+        if needle in name.lower():
+            target = name
+            break
+
+    if target is None:
+        print(f"[TTS] Output device matching {name_substr!r} not found — "
+              f"using system default")
+        return False
+
+    try:
+        subprocess.run(
+            ["SwitchAudioSource", "-t", "output", "-s", target],
+            capture_output=True, timeout=5,
+        )
+        print(f"[TTS] Default output device → {target!r}")
+        return True
+    except Exception as e:
+        print(f"[TTS] Could not switch output to {target!r}: {e}")
+        return False
+
+
 # ── TTS ───────────────────────────────────────────────────────────────────────
 
 def known_duration(text: str) -> float:

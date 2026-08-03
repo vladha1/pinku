@@ -44,6 +44,15 @@ MIC_CHUNK_MS      = 30     # VAD chunk size (ms) — must be 10, 20, or 30
 # [print(i, p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
 MIC_DEVICE_INDEX  = int(os.getenv("MIC_DEVICE_INDEX", "-1"))
 
+# ── Audio output device ───────────────────────────────────────────────────────
+# afplay (used by tts.py and music.py) always plays to the macOS *default* output
+# device.  At startup Pinku forces the default output to the speaker whose name
+# contains OUTPUT_DEVICE (case-insensitive substring), so audio reliably comes
+# from the Bose rather than the Mac Mini's built-in speaker or an HDMI display.
+# Requires SwitchAudioSource:  brew install switchaudio-osx
+# Set OUTPUT_DEVICE="" to disable and use whatever the system default already is.
+OUTPUT_DEVICE     = os.getenv("OUTPUT_DEVICE", "Bose")
+
 # ── Music generation ──────────────────────────────────────────────────────────
 # Backend: "musicgen" (local Meta AudioCraft) or "abc" (Ollama → MIDI, lightweight)
 MUSIC_BACKEND     = os.getenv("MUSIC_BACKEND",  "musicgen")

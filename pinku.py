@@ -1324,6 +1324,11 @@ def main():
         dashboard.register_action("stop",             _handle_pause)   # alias
         dashboard.register_action("mute_toggle",      lambda: _handle_unmute() if _user_muted.is_set() else _handle_mute())
 
+    # ── Audio output ──────────────────────────────────────────────────────────
+    # Route Pinky's voice + music to the Bose (afplay follows the system default).
+    if config.OUTPUT_DEVICE:
+        tts.set_output_device(config.OUTPUT_DEVICE)
+
     # ── Mic ───────────────────────────────────────────────────────────────────
     # Boost macOS input volume to maximum so distant speech reaches the mic pipeline
     try:
