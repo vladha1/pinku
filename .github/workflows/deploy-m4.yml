@@ -17,7 +17,9 @@ jobs:
         run: |
           cd ~/pinku
           git fetch origin
-          git pull origin ${{ github.ref_name }}
+          # Hard sync to the pushed branch — never aborts on stray local edits
+          # in ~/pinku (which would block a normal `git pull` and fail the deploy).
+          git reset --hard origin/${{ github.ref_name }}
 
       - name: Run wake word tests
         run: |
