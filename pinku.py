@@ -806,12 +806,12 @@ def _handle_gemini_result(result: dict):
                  f'🔤 Wake word ({_gemini_halluc_count}/{_HALLUC_MAX}) — waiting for command')
             _brief_mute(3.0)
             return
-        _log("info", f'Hallucinated wake word only: "{transcript}" — ignored')
+        _log("stt", f'Hallucinated wake word only: "{transcript}" — ignored')
         _brief_mute(3.0)   # was 1.0 s
         return
 
     if action == "ignore":
-        _log("info", f'Ignored: "{transcript}"')
+        _log("stt", f'Ignored: "{transcript}"')
         _brief_mute(1.0)
         return
 
@@ -1051,7 +1051,7 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _spk_floor = (config.SPEAKER_THRESHOLD_UNCERTAIN if _awake.is_set()
                           else getattr(config, 'SPEAKER_THRESHOLD_IDLE', 0.50))
             if _spk_score < _spk_floor:
-                _log("info", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
+                _log("spk", f"SpeakerID: unknown ({_spk_score:.2f}) — dropped")
                 continue
             # Inter-utterance cooldown: drop tail-audio reblips arriving within 1.5s
             # of the previous utterance that passed the gate (prevents duplicate processing).
@@ -1064,9 +1064,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
             _current_speaker = _spk_name   # None if uncertain, name if >= ACCEPT
             _current_spk_score = _spk_score
             if _spk_name:
-                _log("info", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
+                _log("spk", f"SpeakerID: {_spk_name} ({_spk_score:.2f})")
             else:
-                _log("info", f"SpeakerID: uncertain ({_spk_score:.2f}) — passing anonymously")
+                _log("spk", f"SpeakerID: uncertain ({_spk_score:.2f}) — passing anonymously")
         else:
             _current_speaker = None
             _current_spk_score = 0.0

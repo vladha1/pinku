@@ -290,15 +290,6 @@ def mic_level_api():
         level = 0.0
     return json.dumps({"level": round(level, 3)})
 
-@_app.route("/api/sound_activity")
-def api_sound_activity():
-    """Return per-minute ambient sound peaks for the activity heatmap."""
-    try:
-        import stt as _stt
-        return json.dumps({"data": _stt.get_sound_activity()})
-    except Exception:
-        return json.dumps({"data": []})
-
 @_app.route("/restart")
 def restart_page():
     """Simple tap-to-restart page — works from any browser including iPad Safari."""
@@ -1063,21 +1054,45 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 .log-warn   { color: #fb923c; }
 .log-error  { color: #f87171; font-weight: 600; }
 
-/* ── Activity strip (inline, above bottom bar) ── */
-#act-strip {
+/* ── Detection feed (inline, above bottom bar) ──
+   Live "what did the mic hear and how was it handled" stream: raw transcripts
+   and pre-processing verdicts (dropped / no wake word / wake / unknown voice). */
+#feed {
   position: fixed;
   left: 0; right: 0;
-  bottom: 126px;
-  height: 72px;
+  bottom: 122px;
+  max-height: 168px;
   z-index: 15;
   pointer-events: none;
   padding: 0 16px;
+  display: -webkit-flex; display: flex;
+  -webkit-flex-direction: column; flex-direction: column;
+  -webkit-justify-content: flex-end; justify-content: flex-end;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
 }
-#act-strip canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+.fd {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', Consolas, monospace;
+  font-size: 12px; line-height: 1.5;
+  padding: 2px 10px; margin-top: 3px;
+  border-radius: 7px;
+  background: rgba(10,12,24,0.55);
+  border-left: 2px solid rgba(148,163,184,0.35);
+  color: rgba(226,232,248,0.62);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-animation: fdin 0.22s ease-out; animation: fdin 0.22s ease-out;
 }
+@-webkit-keyframes fdin { from { opacity: 0; -webkit-transform: translateY(6px);} to { opacity: 1; -webkit-transform: none;} }
+@keyframes fdin { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
+.fd .fq { color: rgba(226,232,248,0.92); }   /* the transcript text itself */
+.fd .fv { opacity: 0.75; }                    /* verdict / how-handled clause */
+/* verdict-coloured left border + accent */
+.fd-heard { border-left-color: rgba(147,197,253,0.75); }   /* transcript captured */
+.fd-wake  { border-left-color: #fbbf24; color: rgba(251,191,36,0.9); }
+.fd-drop  { border-left-color: rgba(148,163,184,0.4); color: rgba(226,232,248,0.4); }
+.fd-act   { border-left-color: rgba(110,231,183,0.8); color: rgba(167,243,208,0.85); }
+.fd-spk   { border-left-color: rgba(196,181,253,0.7); }
 </style>
 </head>
 <body>
@@ -1122,10 +1137,8 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   </div>
 </div>
 
-<!-- activity strip — always visible above bottom bar -->
-<div id="act-strip">
-  <canvas id="act-canvas"></canvas>
-</div>
+<!-- detection feed — live transcripts + how each was handled -->
+<div id="feed"></div>
 
 <!-- log panel -->
 <div id="log-overlay" onclick="if(event.target===this)closeLog()">
@@ -1319,6 +1332,7 @@ function connect() {
     }
     if (d.type === 'log') {
       _pushLog(d);
+      try { _feedFromLog(d); } catch(e) { if (window.console) console.error('Pinku feed:', e); }
     }
   };
   es.onerror = function() {
@@ -1442,126 +1456,93 @@ function delProfile(name) {
   });
 }
 
-// ── Activity strip (always-on, auto-refreshes every 60s) ──────────────────────
-function drawActivityChart(timestamps) {
-  var strip = document.getElementById('act-strip');
-  var canvas = document.getElementById('act-canvas');
-  if (!strip || !canvas || !canvas.getContext) return;
-  var dpr = window.devicePixelRatio || 1;
-  var cssW = Math.max(strip.clientWidth - 32, 100);
-  var cssH = 72;
-  canvas.style.width  = cssW + 'px';
-  canvas.style.height = cssH + 'px';
-  canvas.width  = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  var ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  var W = cssW, H = cssH;
+// ── Detection feed ────────────────────────────────────────────────────────────
+// Live view of what the mic picked up and how the pipeline handled it — raw
+// transcripts plus every pre-processing verdict (unknown voice, no wake word,
+// wake confirmed, routed, handled).  Fed straight off the SSE log stream so it
+// mirrors exactly what the system is doing, in order.
+var _FEED_MAX = 8;
 
-  var labelH = 15;
-  var chartH = H - labelH;
+function _esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-  // Dark background so the chart area is clearly defined
-  ctx.fillStyle = 'rgba(8,8,20,0.85)';
-  ctx.fillRect(0, 0, W, H);
+// Pull the first quoted span out of a message — the transcript text.
+function _firstQuote(s) {
+  var m = s.match(/["'“](.*?)["'”]/);
+  return m ? m[1] : null;
+}
 
-  // Bin per-minute {t, peak} records into 48 half-hour buckets.
-  // Scale is FIXED (not relative): MAX_RMS = full bar, so quiet hours
-  // are clearly short and active/music hours are clearly taller.
-  var NUM = 48;
-  var peaks = [];
-  var i;
-  for (i = 0; i < NUM; i++) peaks[i] = 0;
+// Turn a raw log line into {kind, html} for the feed, or null to skip it.
+function _parseDetect(level, msg) {
+  var tr = _firstQuote(msg);
+  var q  = tr ? '<span class="fq">' + _esc(tr) + '</span>' : '';
 
-  var now = new Date();
-  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  var midTs = midnight.getTime() / 1000;
-  var MAX_RMS = 0.04;  // raw RMS at which bar reaches full height
-
-  for (i = 0; i < timestamps.length; i++) {
-    var entry = timestamps[i];
-    var ts = (typeof entry === 'object') ? entry.t : entry;
-    var pk = (typeof entry === 'object') ? entry.peak : 0;
-    var off = ts - midTs;
-    if (off < 0 || off >= 86400) continue;
-    var b = Math.floor(off / 1800);
-    if (b >= 0 && b < NUM && pk > peaks[b]) peaks[b] = pk;
+  // Speaker gate
+  if (level === 'spk') {
+    var sm = msg.match(/\(([\d.]+)\)/);
+    var sc = sm ? ' <span style="opacity:.5">' + sm[1] + '</span>' : '';
+    if (/unknown|dropped/i.test(msg))
+      return {kind:'drop', html:'unrecognised voice — dropped' + sc};
+    if (/uncertain|anonymously/i.test(msg))
+      return {kind:'spk', html:'unidentified voice — passed' + sc};
+    var nm = msg.match(/SpeakerID:\s*([^\(]+?)\s*\(/);
+    return {kind:'spk', html:'<span class="fq">' + _esc(nm?nm[1]:'known') + '</span> recognised' + sc};
   }
 
-  var barW = W / NUM;
+  // Wake / session
+  if (level === 'wake')
+    return {kind:'wake', html:'wake word — session open'};
 
-  // Ghost slots — faint tick at baseline for every slot
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  for (i = 0; i < NUM; i++) {
-    ctx.fillRect(Math.floor(i * barW) + 1, chartH - 2,
-                 Math.max(Math.ceil(barW) - 2, 1), 2);
-  }
+  // How it was ultimately handled
+  if (level === 'source')
+    return {kind:'act', html:'→ handled <span class="fv">via ' + _esc(msg) + '</span>'};
 
-  // Activity bars — absolute scale
-  for (i = 0; i < NUM; i++) {
-    if (!peaks[i]) continue;
-    var norm = Math.min(peaks[i] / MAX_RMS, 1.0);
-    var barH = Math.max(norm * chartH, 3);
-    var x = i * barW;
-    var y = chartH - barH;
-    var r, g, b2;
-    if (norm < 0.35) {
-      var t = norm / 0.35;
-      r = Math.round(20 + t * 20);
-      g = Math.round(90 + t * 80);
-      b2 = Math.round(40 + t * 5);
-    } else {
-      var t = (norm - 0.35) / 0.65;
-      r = Math.round(40 + t * 205);
-      g = Math.round(170 - t * 12);
-      b2 = Math.round(45 - t * 38);
+  // STT stream (level 'stt') — the [STT] prints
+  if (level === 'stt') {
+    var cap = msg.match(/^Captured ([\d.]+)s/);
+    if (cap) return {kind:'drop', html:'heard <b>' + cap[1] + 's</b> of audio'};
+
+    var eng = msg.match(/^(Apple|MLX):\s*(.*)$/);
+    if (eng) {
+      var rest = eng[2];
+      if (/^empty/i.test(rest)) return null;          // no text — skip the noise
+      var isWake = /\(wake\)/i.test(rest);
+      return {kind: isWake ? 'wake' : 'heard',
+              html: '<span style="opacity:.5">' + eng[1] + '</span> ' +
+                    (q || _esc(rest)) + (isWake ? ' <span class="fv">wake ✓</span>' : '')};
     }
-    ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b2 + ')';
-    ctx.fillRect(Math.floor(x) + 1, Math.floor(y),
-                 Math.max(Math.ceil(barW) - 2, 1), Math.ceil(barH));
+    if (/no wake word/i.test(msg))
+      return {kind:'drop', html:(q ? q + ' ' : '') + '<span class="fv">no wake word — dropped</span>'};
+    if (/no speech/i.test(msg))
+      return {kind:'drop', html:'<span class="fv">no speech — dropped</span>'};
+    if (/skipped long audio/i.test(msg))
+      return {kind:'drop', html:'<span class="fv">too long — skipped</span>'};
+    if (/text.route ignored|both empty|Gemini audio/i.test(msg))
+      return {kind:'drop', html:'<span class="fv">routed to cloud</span>'};
+    if (/hallucinat/i.test(msg))
+      return {kind:'drop', html:(q ? q + ' ' : '') + '<span class="fv">phantom wake word — ignored</span>'};
+    if (/^Ignored/i.test(msg))
+      return {kind:'drop', html:(q ? q + ' ' : '') + '<span class="fv">not for me — ignored</span>'};
+    return null;   // other stt chatter — keep the feed clean
   }
-
-  // Baseline
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
-  ctx.fillRect(0, chartH, W, 1);
-
-  // Gridlines every 3 hours
-  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx.lineWidth = 1;
-  for (var h = 3; h < 24; h += 3) {
-    var lx = Math.round((h / 24) * W) + 0.5;
-    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, chartH); ctx.stroke();
-  }
-
-  // Current-time marker (amber)
-  var nowOff = (now.getTime() / 1000) - midTs;
-  if (nowOff >= 0 && nowOff < 86400) {
-    var mx = Math.round((nowOff / 86400) * W) + 0.5;
-    ctx.strokeStyle = 'rgba(251,191,36,0.75)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, chartH); ctx.stroke();
-  }
-
-  // Hour labels — clearly visible
-  ctx.fillStyle = 'rgba(226,232,248,0.50)';
-  ctx.font = '9px -apple-system, sans-serif';
-  ctx.textAlign = 'center';
-  var lbls = ['12a','3a','6a','9a','12p','3p','6p','9p','12a'];
-  for (var hi = 0; hi <= 8; hi++) {
-    var lxl = Math.round((hi * 3 / 24) * W);
-    ctx.fillText(lbls[hi], lxl, H - 2);
-  }
+  return null;
 }
 
-function _refreshActivity() {
-  xhr('GET', '/api/sound_activity', null, function(err, r) {
-    if (r && r.data) drawActivityChart(r.data);
-  });
+function _feedFromLog(e) {
+  var lvl = e.level || '';
+  if (lvl !== 'stt' && lvl !== 'spk' && lvl !== 'wake' && lvl !== 'source') return;
+  var p;
+  try { p = _parseDetect(lvl, e.msg || ''); } catch (err) { p = null; }
+  if (!p) return;
+  var feed = document.getElementById('feed');
+  if (!feed) return;
+  var row = document.createElement('div');
+  row.className = 'fd fd-' + p.kind;
+  row.innerHTML = (e.ts ? '<span style="opacity:.35">' + e.ts + '</span> ' : '') + p.html;
+  feed.appendChild(row);
+  while (feed.children.length > _FEED_MAX) feed.removeChild(feed.firstChild);
 }
-// Defer first render until layout is settled, then refresh every minute
-setTimeout(_refreshActivity, 300);
-setInterval(_refreshActivity, 60000);
-window.addEventListener('resize', function() { setTimeout(_refreshActivity, 150); });
 
 var enrolling = false, micIv = null;
 
