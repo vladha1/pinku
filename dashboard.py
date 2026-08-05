@@ -1076,7 +1076,7 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   left: 0; right: 0;
   /* Sit clear above the whole bottom bar (controls are 12vmin tall). */
   bottom: calc(12vmin + 66px);
-  max-height: 132px;
+  max-height: 92px;
   z-index: 15;
   pointer-events: none;
   padding: 0 16px;
@@ -1488,7 +1488,7 @@ function delProfile(name) {
 // transcripts plus every pre-processing verdict (unknown voice, no wake word,
 // wake confirmed, routed, handled).  Fed straight off the SSE log stream so it
 // mirrors exactly what the system is doing, in order.
-var _FEED_MAX = 5;
+var _FEED_MAX = 3;
 
 function _esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
