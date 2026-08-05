@@ -1074,8 +1074,9 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
 #feed {
   position: fixed;
   left: 0; right: 0;
-  bottom: 122px;
-  max-height: 168px;
+  /* Sit clear above the whole bottom bar (controls are 12vmin tall). */
+  bottom: calc(12vmin + 66px);
+  max-height: 132px;
   z-index: 15;
   pointer-events: none;
   padding: 0 16px;
@@ -1083,13 +1084,13 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   -webkit-flex-direction: column; flex-direction: column;
   -webkit-justify-content: flex-end; justify-content: flex-end;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
-          mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 30px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 30px);
 }
 .fd {
   font-family: 'SF Mono', 'Menlo', 'Monaco', Consolas, monospace;
-  font-size: 12px; line-height: 1.5;
-  padding: 2px 10px; margin-top: 3px;
+  font-size: 13px; line-height: 1.5;
+  padding: 3px 11px; margin-top: 4px;
   border-radius: 7px;
   background: rgba(10,12,24,0.55);
   border-left: 2px solid rgba(148,163,184,0.35);
@@ -1487,7 +1488,7 @@ function delProfile(name) {
 // transcripts plus every pre-processing verdict (unknown voice, no wake word,
 // wake confirmed, routed, handled).  Fed straight off the SSE log stream so it
 // mirrors exactly what the system is doing, in order.
-var _FEED_MAX = 8;
+var _FEED_MAX = 5;
 
 function _esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1504,14 +1505,13 @@ function _parseDetect(level, msg) {
   var tr = _firstQuote(msg);
   var q  = tr ? '<span class="fq">' + _esc(tr) + '</span>' : '';
 
-  // Speaker gate
+  // Speaker gate — only surface named recognition; drop the anonymous
+  // "unidentified voice — passed" and bare "unrecognised — dropped" chatter
+  // that carries no transcript (pure ambient noise, floods the feed).
   if (level === 'spk') {
+    if (/uncertain|anonymously|unknown|dropped/i.test(msg)) return null;
     var sm = msg.match(/\(([\d.]+)\)/);
     var sc = sm ? ' <span style="opacity:.5">' + sm[1] + '</span>' : '';
-    if (/unknown|dropped/i.test(msg))
-      return {kind:'drop', html:'unrecognised voice — dropped' + sc};
-    if (/uncertain|anonymously/i.test(msg))
-      return {kind:'spk', html:'unidentified voice — passed' + sc};
     var nm = msg.match(/SpeakerID:\s*([^\(]+?)\s*\(/);
     return {kind:'spk', html:'<span class="fq">' + _esc(nm?nm[1]:'known') + '</span> recognised' + sc};
   }
@@ -1526,8 +1526,7 @@ function _parseDetect(level, msg) {
 
   // STT stream (level 'stt') — the [STT] prints
   if (level === 'stt') {
-    var cap = msg.match(/^Captured ([\d.]+)s/);
-    if (cap) return {kind:'drop', html:'heard <b>' + cap[1] + 's</b> of audio'};
+    if (/^Captured /.test(msg)) return null;   // raw audio-capture ticks — too noisy
 
     var eng = msg.match(/^(Apple|MLX):\s*(.*)$/);
     if (eng) {
