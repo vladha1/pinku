@@ -686,11 +686,11 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
 
 #q-text {
   width: 100%;
-  font-size: 4.2vmin;
+  font-size: 5vmin;
   font-weight: 200;
   font-style: italic;
-  color: rgba(226,232,248,0.42);
-  line-height: 1.45;
+  color: rgba(226,232,248,0.62);
+  line-height: 1.4;
   text-align: center;
   padding-bottom: 18px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -702,10 +702,10 @@ body.has-conv #conv-view  { opacity: 1; pointer-events: auto; }
   display: -webkit-flex; display: flex;
   -webkit-align-items: center; align-items: center;
   -webkit-justify-content: center; justify-content: center;
-  font-size: 4.8vmin;
+  font-size: 6.2vmin;
   font-weight: 200;
   color: #e2e8f8;
-  line-height: 1.6;
+  line-height: 1.55;
   text-align: center;
   white-space: pre-wrap;
   overflow-y: auto;
@@ -848,36 +848,50 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   50%       { box-shadow: 0 0 0 9px rgba(129,140,248,0.28); }
 }
 
-/* ── Thinking ring ── */
+/* ── Working view (processing): live transcript + action indicator ── */
 #think-view {
+  -webkit-flex-direction: column; flex-direction: column;
   -webkit-justify-content: center; justify-content: center;
   -webkit-align-items: center; align-items: center;
+  padding: 0 6vmin;
 }
 
-#think-ring {
-  width: 22vmin; height: 22vmin;
-  border-radius: 50%;
-  border-width: 0.6vmin;
-  border-style: solid;
-  border-color: rgba(245,158,11,0.12) rgba(245,158,11,0.12) rgba(245,158,11,0.12) rgba(245,158,11,0.85);
-  box-shadow: 0 0 8vmin rgba(245,158,11,0.06);
-  -webkit-animation: spin 1.1s linear infinite;
-  animation: spin 1.1s linear infinite;
-}
-
-@-webkit-keyframes spin { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
-@keyframes         spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-#think-label {
-  font-size: 5vmin;
+/* What Pinky heard — the star of the view, big and bright */
+#think-heard {
+  width: 100%;
+  font-size: 6.4vmin;
   font-weight: 200;
-  color: rgba(245,158,11,0.6);
-  letter-spacing: 0.1em;
-  margin-top: 6vmin;
+  color: #e2e8f8;
+  line-height: 1.38;
   text-align: center;
-  min-height: 7vmin;
-  -webkit-transition: opacity 0.3s;
-  transition: opacity 0.3s;
+  max-height: 56vh;
+  overflow-y: auto;
+}
+#think-heard:empty { display: none; }
+
+/* Action indicator row — pulsing dot + label ("Thinking…") */
+#think-status {
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  gap: 2.2vmin;
+  margin-top: 5.5vmin;
+}
+#think-dot {
+  width: 3vmin; height: 3vmin;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 3.4vmin rgba(245,158,11,0.7);
+  -webkit-animation: tpulse 1.1s ease-in-out infinite;
+  animation: tpulse 1.1s ease-in-out infinite;
+}
+@-webkit-keyframes tpulse { 0%,100% { opacity:1; -webkit-transform:scale(1); } 50% { opacity:0.3; -webkit-transform:scale(0.65); } }
+@keyframes         tpulse { 0%,100% { opacity:1; transform:scale(1); }         50% { opacity:0.3; transform:scale(0.65); } }
+#think-label {
+  font-size: 4.6vmin;
+  font-weight: 300;
+  color: rgba(245,158,11,0.92);
+  letter-spacing: 0.1em;
+  text-align: center;
 }
 
 /* controls */
@@ -1106,10 +1120,13 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   <div id="date-str">1 January, Mon</div>
 </div>
 
-<!-- thinking (amber spinner, shown during processing) -->
+<!-- working view (shown during processing) — live transcript + action indicator -->
 <div class="view" id="think-view">
-  <div id="think-ring"></div>
-  <div id="think-label"></div>
+  <div id="think-heard"></div>
+  <div id="think-status">
+    <span id="think-dot"></span>
+    <span id="think-label"></span>
+  </div>
 </div>
 
 <!-- conversation (crossfades over clock) -->
@@ -1228,12 +1245,21 @@ function setStatus(s) {
     if (s.spk_score !== undefined && s.spk_score > 0) _lastSpkScore = s.spk_score;
   }
 
-  // Update think label only on transition INTO processing to avoid phrase flicker
+  // Working view — show what Pinky heard live, plus a stable action label.
   var nowProcessing = (s.state === 'processing');
-  if (nowProcessing && !_prevProcessing) {
-    var phrase = _THINK_PHRASES[Math.floor(Math.random() * _THINK_PHRASES.length)];
-    var label = s.speaker ? (phrase + ', ' + s.speaker) : (phrase + '…');
-    document.getElementById('think-label').textContent = label;
+  if (nowProcessing) {
+    var heardEl = document.getElementById('think-heard');
+    if (heardEl) {
+      // Clear stale text on entry; fill as soon as the transcript arrives.
+      if (!_prevProcessing) heardEl.textContent = '';
+      if (s.last_transcript) heardEl.textContent = '“' + s.last_transcript + '”';
+    }
+    // Set the action label once per processing burst to avoid phrase flicker.
+    if (!_prevProcessing) {
+      var phrase = _THINK_PHRASES[Math.floor(Math.random() * _THINK_PHRASES.length)];
+      document.getElementById('think-label').textContent =
+        s.speaker ? (phrase + ', ' + s.speaker) : (phrase + '…');
+    }
   }
   _prevProcessing = nowProcessing;
 }

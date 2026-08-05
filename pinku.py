@@ -1089,7 +1089,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 if _current_speaker is None and _spk_score < config.SPEAKER_THRESHOLD_UNCERTAIN:
                     continue
 
-                dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
+                # last_transcript="" clears the previous exchange so the dashboard
+                # working-view starts blank, then fills the instant STT resolves.
+                dashboard.update_status(state="processing", last_transcript="",
+                                        speaker=_current_speaker, spk_score=_current_spk_score)
 
                 # ── Local STT: Apple STT → MLX Whisper large-v3 → Gemini text ──
                 # Apple STT (~0.2s, English) first — fast and free.
@@ -1106,6 +1109,9 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 if _fast_transcript:
                     _t_stt = time.time()
                     print(f"[STT] {_stt_label}: {_fast_transcript!r}  ({_t_stt-_t_spk:.2f}s)")
+                    # Live feedback: show what was heard on the dashboard immediately,
+                    # before the (slower) LLM routing + reply.
+                    dashboard.update_status(state="processing", last_transcript=_fast_transcript)
 
                     # Math shortcut — no LLM call at all
                     _math_answer = math_handler.detect_and_compute(_fast_transcript)
@@ -1165,7 +1171,8 @@ def _voice_loop(recorder: stt.AudioRecorder):
             # Known speaker in idle mode — local-first: Apple STT → MLX Whisper → Gemini text.
             # Wake word must be present; Gemini audio is only a last-resort fallback.
             if _current_speaker is not None:
-                dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
+                dashboard.update_status(state="processing", last_transcript="",
+                                        speaker=_current_speaker, spk_score=_current_spk_score)
 
                 # Apple STT (~0.2s) handles English wake words
                 _idle_tr     = apple_stt.transcribe(pcm)
@@ -1196,6 +1203,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
                         print("[STT] Idle — no speech — dropped")
                     dashboard.update_status(state="idle")
                     continue
+
+                # Wake word confirmed — show the command on the dashboard live
+                dashboard.update_status(state="processing",
+                                        last_transcript=(_idle_cmd or _idle_tr))
 
                 # Wake word confirmed — math shortcut
                 if _idle_cmd:
@@ -1253,7 +1264,11 @@ def _voice_loop(recorder: stt.AudioRecorder):
                     print(f'[STT] Idle — no wake word: "{_unc_fast}"')
                     continue
 
-            dashboard.update_status(state="processing", speaker=_current_speaker, spk_score=_current_spk_score)
+            # Show the heard command live (empty when Apple STT was unavailable
+            # and we're going straight to Gemini audio — transcript arrives later).
+            _unc_disp = (_unc_cmd or _unc_fast) if _unc_fast else ""
+            dashboard.update_status(state="processing", last_transcript=_unc_disp,
+                                    speaker=_current_speaker, spk_score=_current_spk_score)
             result = llm.transcribe_and_respond(
                 pcm, history=_session_hist,
                 session_active=False, speaker=_current_speaker)
