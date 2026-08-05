@@ -19,6 +19,10 @@ import numpy as np
 MODEL    = "mlx-community/whisper-large-v3-turbo"
 LANGUAGE = os.environ.get("MLX_STT_LANGUAGE", "auto")  # auto-detect; retries as Hindi if Spanish
 
+# Biases the decoder toward the wake word so "Pinky" isn't transcribed as
+# Vicky / Wilkie / Nicky etc.  Passed as initial_prompt on wake-detection calls.
+WAKE_PROMPT = os.environ.get("MLX_WAKE_PROMPT", "Talking to the assistant Pinky.")
+
 
 def _is_hallucination(text: str) -> bool:
     """Detect Whisper looping hallucinations (e.g. 'of the episode' repeated 50×)."""
@@ -73,9 +77,10 @@ def _worker() -> None:
         task = _q.get()
         if task is None:
             break
-        audio, lang, temperature, result_box, done = task
+        audio, lang, temperature, initial_prompt, result_box, done = task
         try:
-            result_box.append(_transcribe_once(mlx_whisper, audio, lang, temperature))
+            result_box.append(_transcribe_once(mlx_whisper, audio, lang,
+                                               temperature, initial_prompt))
         except Exception as e:
             print(f"[STT] worker error: {e}")
             result_box.append({"text": "", "language": ""})
@@ -84,13 +89,18 @@ def _worker() -> None:
 
 
 def _transcribe_once(mlx_whisper, audio: np.ndarray, lang: str | None,
-                     temperature: float = 0.0) -> dict:
-    """Single transcription call — must run on the worker thread."""
+                     temperature: float = 0.0, initial_prompt: str = "") -> dict:
+    """Single transcription call — must run on the worker thread.
+
+    initial_prompt biases the decoder toward those words — used to prime the
+    wake word ("Pinky") so it isn't mis-transcribed as Vicky/Wilkie/etc.
+    """
     return mlx_whisper.transcribe(
         audio,
         path_or_hf_repo=MODEL,
         language=lang,
         temperature=temperature,
+        initial_prompt=initial_prompt or None,
         verbose=False,
     )
 
@@ -114,23 +124,27 @@ def is_ready() -> bool:
     return _AVAILABLE and _ready.is_set()
 
 
-def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
+def transcribe(pcm: bytes, sample_rate: int = 16000,
+               initial_prompt: str = "") -> str:
     """
     Transcribe with auto language detection. Used in active sessions where
     the wake word is already confirmed — accuracy matters more than speed.
     Spanish/Urdu mis-detections are retried as Hindi.
+
+    Pass initial_prompt=mlx_stt.WAKE_PROMPT on idle wake-word detection to
+    bias the decoder toward "Pinky" (avoids Vicky/Wilkie mis-transcriptions).
     """
     if not _AVAILABLE or not _ready.is_set():
         return ""
     try:
         audio  = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        result = _send(audio, None)   # auto-detect
+        result = _send(audio, None, initial_prompt=initial_prompt)   # auto-detect
         detected = result.get("language", "")
         # Languages Whisper commonly confuses with Hindi (similar prosody / phonetics):
         # pl=Polish, ur=Urdu, es=Spanish, pt=Portuguese, tr=Turkish
         _HINDI_CONFUSED = {"es", "ur", "pl", "pt", "tr"}
         if detected in _HINDI_CONFUSED:
-            result = _send(audio, "hi", temperature=0.3)
+            result = _send(audio, "hi", temperature=0.3, initial_prompt=initial_prompt)
             print(f"[STT] re-ran as Hindi temp=0.3 (was {detected})")
             detected = result.get("language", "")
         # Hard drop: if still not English or Hindi, discard rather than hallucinate
@@ -198,10 +212,10 @@ def transcribe_with_fallback(
 
 
 def _send(audio: np.ndarray, lang: str | None, timeout: float = 15.0,
-          temperature: float = 0.0) -> dict:
+          temperature: float = 0.0, initial_prompt: str = "") -> dict:
     """Queue a transcription task to the worker and wait for the result."""
     result_box: list[dict] = []
     done = threading.Event()
-    _q.put((audio, lang, temperature, result_box, done))
+    _q.put((audio, lang, temperature, initial_prompt, result_box, done))
     done.wait(timeout=timeout)
     return result_box[0] if result_box else {"text": "", "language": ""}

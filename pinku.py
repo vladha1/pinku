@@ -539,7 +539,7 @@ _PINKU_RE_START = _re.compile(
     r'^[.\s]*'                                                      # strip leading dots/spaces
     r'(?:(?:hey|hi|ok|okay|hello|yo|अरे|हे|हाई|है|आई|ए|अरी|ओए|नमस्ते|हलो|हैलो)[,.\s]+)?'   # optional Hindi/English prefix
     r'(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
-    r'|becky|bicky|binky'                                           # MLX mishearings (b/p bilabial swap)
+    r'|becky|bicky|binky|vicky|wicky|wilkie|winky|nicky'            # STT mishearings (b/p, v/w, n swaps)
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[,\s।]*',   # Whisper mishearings
     _re.IGNORECASE,
@@ -547,7 +547,7 @@ _PINKU_RE_START = _re.compile(
 # Wake word anywhere in the utterance — "what's the time Pinky?" / "क्या हाल है पिकु?"
 _PINKU_RE_ANY = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
-    r'|becky|bicky|binky'
+    r'|becky|bicky|binky|vicky|wicky|wilkie|winky|nicky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)[\W]*$',
     _re.IGNORECASE,
@@ -557,7 +557,7 @@ _PINKU_RE_ANY = _re.compile(
 # never fires after them (both sides of boundary are \W → no boundary).
 _PINKU_RE_CONTAINS = _re.compile(
     r'\b(pinku|pinky|pinki|pinkie|pinko|pinco|pingo|pingu|pinkoo|pinkku|pinkky|pinkhu|pinkhy|penku|penko|pintu|pink|piku|piky'
-    r'|becky|bicky|binky'
+    r'|becky|bicky|binky|vicky|wicky|wilkie|winky|nicky'
     r'|पिंकू|पिंकु|पिंकि|पिंको|पिंकी|पिंक्व'
     r'|पिकु|पिकू|पिखु|पिखू|पिके|पिंका|पिका|पेंकू)(?!\w)',
     _re.IGNORECASE,
@@ -1184,9 +1184,10 @@ def _voice_loop(recorder: stt.AudioRecorder):
                 else:
                     print("[STT] Apple: empty")
 
-                # MLX Whisper for Hindi or if Apple STT returned nothing / no wake word
+                # MLX Whisper for Hindi or if Apple STT returned nothing / no wake word.
+                # Bias the decoder toward "Pinky" so the wake word isn't misheard.
                 if not _idle_tr or not _idle_trig:
-                    _mlx_tr = mlx_stt.transcribe(pcm)
+                    _mlx_tr = mlx_stt.transcribe(pcm, initial_prompt=mlx_stt.WAKE_PROMPT)
                     if _mlx_tr:
                         _mlx_trig, _mlx_cmd = _check_wake(_mlx_tr)
                         print(f"[STT] MLX: {_mlx_tr!r}{' (wake)' if _mlx_trig else ''}")
