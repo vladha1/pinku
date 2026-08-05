@@ -1075,33 +1075,46 @@ body.s-muted #status-pill { border-color: rgba(248,113,113,0.2); }
   position: fixed;
   left: 0; right: 0;
   /* Sit clear above the whole bottom bar (controls are 12vmin tall). */
-  bottom: calc(12vmin + 66px);
-  max-height: 92px;
+  bottom: calc(12vmin + 60px);
+  max-height: 30vh;
   z-index: 15;
   pointer-events: none;
-  padding: 0 16px;
+  padding: 0 5vmin;
   display: -webkit-flex; display: flex;
   -webkit-flex-direction: column; flex-direction: column;
   -webkit-justify-content: flex-end; justify-content: flex-end;
+  -webkit-align-items: center; align-items: center;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 30px);
-          mask-image: linear-gradient(to bottom, transparent 0, #000 30px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 48px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 48px);
 }
 .fd {
   font-family: 'SF Mono', 'Menlo', 'Monaco', Consolas, monospace;
-  font-size: 13px; line-height: 1.5;
-  padding: 3px 11px; margin-top: 4px;
-  border-radius: 7px;
+  font-size: 2.1vmin; line-height: 1.35;
+  padding: 4px 14px; margin-top: 6px;
+  border-radius: 9px;
   background: rgba(10,12,24,0.55);
-  border-left: 2px solid rgba(148,163,184,0.35);
+  border-left: 3px solid rgba(148,163,184,0.35);
   color: rgba(226,232,248,0.62);
+  max-width: 90vw;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: center;
   -webkit-animation: fdin 0.22s ease-out; animation: fdin 0.22s ease-out;
 }
-@-webkit-keyframes fdin { from { opacity: 0; -webkit-transform: translateY(6px);} to { opacity: 1; -webkit-transform: none;} }
-@keyframes fdin { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
-.fd .fq { color: rgba(226,232,248,0.92); }   /* the transcript text itself */
-.fd .fv { opacity: 0.75; }                    /* verdict / how-handled clause */
+/* Older lines: smaller + dimmer context above the current one */
+.fd:not(:last-child) { font-size: 1.9vmin; opacity: 0.5; }
+/* Newest line: big and bright — what Pinky just heard, live */
+.fd:last-child {
+  font-size: 3.4vmin; font-weight: 500;
+  padding: 8px 18px;
+  color: rgba(232,238,252,0.98);
+  background: rgba(14,17,32,0.7);
+  border-left-width: 5px;
+}
+@-webkit-keyframes fdin { from { opacity: 0; -webkit-transform: translateY(10px);} to { opacity: 1; -webkit-transform: none;} }
+@keyframes fdin { from { opacity: 0; transform: translateY(10px);} to { opacity: 1; transform: none;} }
+.fd .fq { color: rgba(232,238,252,0.99); }   /* the transcript text itself */
+.fd .fv { opacity: 0.72; }                    /* verdict / how-handled clause */
 /* verdict-coloured left border + accent */
 .fd-heard { border-left-color: rgba(147,197,253,0.75); }   /* transcript captured */
 .fd-wake  { border-left-color: #fbbf24; color: rgba(251,191,36,0.9); }
