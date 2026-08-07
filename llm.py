@@ -95,6 +95,9 @@ Actions:
 - "fishtank"    → change the wall / fish-tank / projector / screen scene; include a
                   "scene" field: fish, flowers, pacman, driving, paint, constellation,
                   next, or previous
+- "people"    → asking about a specific person, family member, relative, or contact
+- "events"    → asking about events, gatherings, parties, trips, family functions
+- "birthdays" → asking about birthdays, anniversaries, or upcoming milestones
 - "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
                   unintelligible speech, or speech not clearly addressed to Pinku
 
@@ -110,6 +113,12 @@ Examples:
 {"action":"scripture","topic":"gita","transcript":"what does the Gita say about fear","lang":"en"}
 {"action":"fishtank","scene":"paint","transcript":"switch the wall to paint","lang":"en"}
 {"action":"fishtank","scene":"next","transcript":"next scene on the fish tank","lang":"en"}
+{"action":"people","transcript":"who is Priya","lang":"en"}
+{"action":"people","transcript":"tell me about Vivek's sister","lang":"en"}
+{"action":"birthdays","transcript":"whose birthday is coming up","lang":"en"}
+{"action":"birthdays","transcript":"kisi ka birthday aa raha hai kya","lang":"hi"}
+{"action":"events","transcript":"any events this month","lang":"en"}
+{"action":"events","transcript":"what functions do we have planned","lang":"en"}
 {"action":"ignore","transcript":"","lang":"en"}
 {"action":"ignore","transcript":"give her to me give her to me","lang":"en"}
 {"action":"ignore","transcript":"yeh dil maange more","lang":"en"}
@@ -232,6 +241,10 @@ ACTION LIST (pick exactly one):
                Indian mythology, history, classical music, poetry, Sanskrit → reply REQUIRED
                NOTE: Panchang calendar queries (Ekadashi kab hai, aaj ki tithi, nakshatra, vrat, tyohar)
                → use "chat" action with a direct factual reply, NOT "scripture"
+"people"     → asking about a specific person, family member, relative, or friend → reply: ""
+               ALSO include "query": "<name or search term from the question>"
+"events"     → asking about events, gatherings, parties, trips, family functions → reply: ""
+"birthdays"  → asking about birthdays, anniversaries, or upcoming milestones → reply: ""
 "time"       → asked for current time or date → reply: "" (system inserts actual time)
 "weather"    → weather question, मौसम, मोसम, मोसन, barish, baarish, temperature, forecast → reply: ""
 "mute"       → told Pinky to stop / sleep / be quiet → reply: ""
