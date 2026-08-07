@@ -360,6 +360,84 @@ def _handle_scripture(action: dict):
 
 
 
+def _handle_ppd(action: dict):
+    """Handle people / events / birthdays queries via the PPD REST API."""
+    import ppd as _ppd
+    import json as _pjson
+    from datetime import datetime as _dt
+
+    act   = action.get("action", "")
+    lang  = action.get("lang", "en")
+    tr    = action.get("transcript", "")
+    is_hi = lang == "hi"
+
+    try:
+        if act == "people":
+            query    = action.get("query", "").strip() or tr
+            results  = _ppd.search_people(query)
+            if not results:
+                reply = f"I couldn't find anyone matching '{query}' in the directory."
+                _log("source", "PPD (no results)")
+            else:
+                data_str = _pjson.dumps(results[:5], ensure_ascii=False, indent=2)
+                system = (
+                    "You have access to a personal family/people directory. "
+                    "Answer the question using only the data below. "
+                    "Be warm and concise — this is spoken aloud, under 40 words. "
+                    "No markdown, no bullet points.\n\n"
+                    f"Directory data:\n{data_str}"
+                )
+                _log("source", f"PPD search '{query}' → {len(results)} result(s)")
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+
+        elif act == "birthdays":
+            data     = _ppd.get_upcoming_milestones(days=60)
+            bdays    = data.get("birthdays", [])
+            annivs   = data.get("anniversaries", [])
+            near     = [m for m in bdays + annivs if m.get("days_until", 99) <= 30]
+            if not near:
+                reply = "No birthdays or anniversaries in the next 30 days."
+                _log("source", "PPD milestones (none near)")
+            else:
+                data_str = _pjson.dumps(near, ensure_ascii=False, indent=2)
+                system = (
+                    "You have a list of upcoming birthdays and anniversaries from a family directory. "
+                    "Summarise them naturally for spoken voice — under 50 words. "
+                    "Mention names, event type, and days until. No markdown.\n\n"
+                    f"Upcoming milestones:\n{data_str}"
+                )
+                _log("source", f"PPD milestones → {len(near)} in next 30 days")
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+
+        elif act == "events":
+            events = _ppd.list_events()
+            if not events:
+                reply = "I don't see any events in the family calendar."
+                _log("source", "PPD events (none)")
+            else:
+                today    = _dt.now().strftime("%Y-%m-%d")
+                data_str = _pjson.dumps(events[:10], ensure_ascii=False, indent=2)
+                system = (
+                    f"Today is {today}. You have a list of family events from a personal calendar. "
+                    "Answer the question naturally for spoken voice — under 50 words. "
+                    "Mention event name, date, and location if available. No markdown.\n\n"
+                    f"Events:\n{data_str}"
+                )
+                _log("source", f"PPD events → {len(events)} total")
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+        else:
+            return
+
+    except Exception as e:
+        _log("error", f"PPD error ({act}): {e}")
+        reply = "Sorry, I couldn't reach the family directory right now."
+
+    reply = llm._trim_reply(reply, max_words=50)
+    dashboard.update_status(last_transcript=tr, last_reply=reply)
+    dashboard.record_conversation(tr, reply, lang=lang, source="PPD")
+    _speak_reply(reply, is_hi)
+
+
 def _handle_sleep():
     """End the active session and return to standby / sleep.
 
@@ -928,6 +1006,8 @@ def _dispatch_action(action: dict):
     elif act in ("lights_on", "lights_off"):
         _log("warn", f'Action "{act}" not yet implemented')
         tts.speak(f"Sorry, lights control isn't set up yet.")
+    elif act in ("people", "events", "birthdays"):
+        _handle_ppd(action)
     else:
         _handle_chat(action)
 
@@ -1044,6 +1124,7 @@ def _handle_gemini_result(result: dict):
     _PYTHON_ACTIONS = {
         "time", "weather", "mute", "unmute", "describe",
         "lights_on", "lights_off",
+        "people", "events", "birthdays",
     }
     # weather is handled by Python (_handle_weather fetches from wttr.in)
     # so force reply="" to always go through dispatch, not Gemini's reply
