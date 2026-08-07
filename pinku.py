@@ -436,7 +436,7 @@ def _handle_ppd(action: dict):
                     f"Directory data:\n{data_str}"
                 )
                 _log("source", f"PPD search '{query}' → {len(results)} result(s)")
-                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi, use_search=False)
 
         elif act == "birthdays":
             data     = _ppd.get_upcoming_milestones(days=60)
@@ -455,7 +455,7 @@ def _handle_ppd(action: dict):
                     f"Upcoming milestones:\n{data_str}"
                 )
                 _log("source", f"PPD milestones → {len(near)} in next 30 days")
-                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi, use_search=False)
 
         elif act == "events":
             events = _ppd.list_events()
@@ -472,7 +472,7 @@ def _handle_ppd(action: dict):
                     f"Events:\n{data_str}"
                 )
                 _log("source", f"PPD events → {len(events)} total")
-                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi)
+                reply = llm.chat(tr, system_extra=system, history=_session_hist, is_hi=is_hi, use_search=False)
         else:
             return
 

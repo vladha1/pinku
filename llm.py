@@ -720,7 +720,8 @@ def route(transcript: str) -> dict:
 def chat(transcript: str,
          history: list[dict] | None = None,
          system_extra: str = "",
-         is_hi: bool = False) -> str:
+         is_hi: bool = False,
+         use_search: bool = True) -> str:
     """
     Generate a reply via Gemini 2.5 Flash.
     Falls back to Ollama if Gemini is unavailable.
@@ -745,7 +746,7 @@ def chat(transcript: str,
 
     try:
         reply = _gemini_call(contents, temperature=0.9, max_tokens=500,
-                             system=system, use_search=True)
+                             system=system, use_search=use_search)
         reply = _trim_reply(reply, max_words=70)
         print(f"[LLM] Gemini reply: {reply[:80]!r}")
         return reply
