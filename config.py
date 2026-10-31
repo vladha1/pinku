@@ -7,7 +7,7 @@ import os
 
 # ── LLM (Ollama) ──────────────────────────────────────────────────────────────
 OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")   # fast on M4; swap to llama3.1:8b for depth
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral:7b")   # switched from llama3.2:3b (2026-08-21): mistral got basic arithmetic right consistently in testing for Maya's local-first flow, llama3.2:3b didn't, at either temperature tried
 
 # ── STT (faster-whisper) ──────────────────────────────────────────────────────
 WHISPER_MODEL     = os.getenv("WHISPER_MODEL", "small")  # "small" = better accuracy; "base" = faster but misses wake word

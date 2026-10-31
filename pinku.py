@@ -351,13 +351,13 @@ def _handle_fishtank(action: dict):
     scene = str(action.get("scene", "")).strip().lower()
 
     base  = "http://localhost:5050"
-    valid = ("fish", "flowers", "pacman", "driving", "paint", "constellation")
+    valid = ("fish", "flowers", "pacman", "paint", "constellation")
     # spoken variants people are likely to say -> real scene names
     aliases = {
         "fishes": "fish", "aquarium": "fish", "tank": "fish",
         "flower": "flowers", "garden": "flowers",
         "pac man": "pacman", "pac-man": "pacman", "game": "pacman",
-        "car": "driving", "drive": "driving", "cars": "driving",
+
         "painting": "paint", "graffiti": "paint", "draw": "paint", "drawing": "paint",
         "star": "constellation", "stars": "constellation", "constellations": "constellation",
     }

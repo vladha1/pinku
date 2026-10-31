@@ -89,13 +89,26 @@ Actions:
 - "unmute"      → user wants you to start listening again / wake up
 - "scripture"   → Gita, Ramayana, Mahabharata, yoga, Vedas, Upanishads, meditation,
                   Indian history, mythology, classical music, Sanskrit, Ayurveda, philosophy
-                  (NOT panchang/calendar queries like Ekadashi/tithi/nakshatra → those are "chat")
+                  (NOT panchang/calendar queries like Ekadashi/tithi/nakshatra → those are "chat").
+                  Include "topic" (e.g. "gita", "ramayana", "mahabharata", "yoga", "vedas",
+                  "upanishads", "general"). If a SPECIFIC chapter and verse number of the
+                  Gita is stated (e.g. "chapter 2 verse 47", "2.47", "second chapter,
+                  forty-seventh verse") AND you are CERTAIN of the exact numbers, also
+                  include integer "chapter" and "verse" fields. This came from speech-to-
+                  text and spoken numbers ("pehla", "second") are easy to mis-hear -- if
+                  there is ANY doubt about the exact chapter/verse, omit both fields rather
+                  than guess (a wrong verse number quoted as fact is worse than none).
+                  Omit both if no specific verse was given, or the topic isn't "gita".
 - "lights_on"   → turn lights on
 - "lights_off"  → turn lights off
 - "fishtank"    → change the wall / fish-tank / projector / screen scene; include a
-                  "scene" field: fish, flowers, pacman, driving, paint, constellation,
+                  "scene" field: fish, flowers, pacman, paint, constellation,
                   next, or previous
-- "people"    → asking about a specific person, family member, relative, or contact
+- "people"    → asking about a specific person, family member, relative, or contact;
+                  include a "query" field with ONLY the person's name/who they're
+                  asking about — strip filler words like "tell me about", "who is",
+                  "what's ... 's phone number" so it's a clean name to search a
+                  directory with, e.g. "query":"Ajay Baheti" (not the whole sentence)
 - "events"    → asking about events, gatherings, parties, trips, family functions
 - "birthdays" → asking about birthdays, anniversaries, or upcoming milestones
 - "ignore"      → background noise, TV/movie dialogue, song lyrics, music,
@@ -111,10 +124,13 @@ Examples:
 {"action":"chat","transcript":"what is the capital of France","lang":"en"}
 {"action":"time","transcript":"what time is it","lang":"en"}
 {"action":"scripture","topic":"gita","transcript":"what does the Gita say about fear","lang":"en"}
+{"action":"scripture","topic":"gita","chapter":2,"verse":47,"transcript":"what does gita chapter 2 verse 47 say","lang":"en"}
+{"action":"scripture","topic":"ramayana","transcript":"tell me about the Ramayana","lang":"en"}
 {"action":"fishtank","scene":"paint","transcript":"switch the wall to paint","lang":"en"}
 {"action":"fishtank","scene":"next","transcript":"next scene on the fish tank","lang":"en"}
-{"action":"people","transcript":"who is Priya","lang":"en"}
-{"action":"people","transcript":"tell me about Vivek's sister","lang":"en"}
+{"action":"people","query":"Priya","transcript":"who is Priya","lang":"en"}
+{"action":"people","query":"Vivek's sister","transcript":"tell me about Vivek's sister","lang":"en"}
+{"action":"people","query":"Ajay Baheti","transcript":"tell me about Ajay Baheti","lang":"en"}
 {"action":"birthdays","transcript":"whose birthday is coming up","lang":"en"}
 {"action":"birthdays","transcript":"kisi ka birthday aa raha hai kya","lang":"hi"}
 {"action":"events","transcript":"any events this month","lang":"en"}
@@ -251,7 +267,7 @@ ACTION LIST (pick exactly one):
 "unmute"     → told Pinky to wake / start / listen → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
-"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, driving, paint, constellation, next, or previous
+"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, paint, constellation, next, or previous
 
 RULES:
 - LANGUAGE (strict — overrides all other considerations):
@@ -481,7 +497,7 @@ ACTION LIST (pick exactly one):
 "unmute"     → told Pinky to wake / start / listen → reply: ""
 "lights_on"  → lights on → reply: ""
 "lights_off" → lights off → reply: ""
-"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, driving, paint, constellation, next, or previous
+"fishtank"   → change the wall/fish-tank/projector/screen scene → reply: "" ; include "scene": fish, flowers, pacman, paint, constellation, next, or previous
 
 RULES:
 - Reply in EXACTLY the language the person spoke. English dominant → English only. Hindi dominant → Hindi (Devanagari).
@@ -578,13 +594,44 @@ def text_route_and_respond(
 
 # ── Ollama (routing only — fallback) ──────────────────────────────────────────
 
+# Strips a leading <think>...</think> block some models (e.g. qwen3) emit
+# even with "think": False in the request -- belt and braces so a
+# reasoning trace never gets spoken aloud or shown as the actual reply.
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def _shared_model():
+    """Ask Scout (same Mac, http://127.0.0.1:4017/api/model) which model is warm right now, so Maya/Pinku
+    reuse that one loaded model instead of loading their own (2026-09-25: Scout is the single model manager;
+    it keeps qwen3:14b warm and drops to qwen3:8b while the fish-tank runs). Falls back to OLLAMA_MODEL
+    if Scout isn't reachable."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:4017/api/model", timeout=2) as r:
+            d = json.loads(r.read())
+        return d["model"], d.get("num_ctx"), d.get("keep_alive", "30m")
+    except Exception:
+        return OLLAMA_MODEL, None, "30m"
+
+
 def _ollama_call(messages: list[dict], temperature: float = 0.1,
                  max_tokens: int = 200) -> str:
+    model, num_ctx, keep = _shared_model()
+    options = {"temperature": temperature, "num_predict": max_tokens}
+    if num_ctx:  # same context as the loaded model — a different one would make Ollama reload it
+        options["num_ctx"] = num_ctx
     payload = json.dumps({
-        "model":    OLLAMA_MODEL,
+        "model":    model,
         "messages": messages,
         "stream":   False,
-        "options":  {"temperature": temperature, "num_predict": max_tokens},
+        "think":    False,
+        "options":  options,
+        # Ollama's own default (~5 min) was measured causing a real ~3s cold
+        # reload penalty (vs ~0.8s warm) on mistral:7b whenever a question
+        # came in after a few minutes' gap between "Hi Pinky" turns — an
+        # everyday gap for household use, not an edge case. Keeping it
+        # resident longer avoids paying that reload cost on most turns; the
+        # RAM held resident meanwhile is a fine trade on Apple Silicon.
+        "keep_alive": keep,
     }).encode()
     req = urllib.request.Request(
         f"{OLLAMA_URL}/api/chat",
@@ -592,8 +639,14 @@ def _ollama_call(messages: list[dict], temperature: float = 0.1,
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read())["message"]["content"].strip()
+        # 60s, not 15s: a thinking-capable model (qwen3:8b) can take well
+        # over 15s even with think=False, especially cold-loading after an
+        # idle gap -- 15s was tuned for mistral:7b (0.8-6s per the note
+        # above) and was hitting this timeout on qwen3:8b, which silently
+        # looked like "Ollama unreachable" and escalated every single turn.
+        with urllib.request.urlopen(req, timeout=60) as r:
+            content = json.loads(r.read())["message"]["content"]
+        return _THINK_RE.sub("", content).strip()
     except urllib.error.URLError as e:
         raise RuntimeError(f"Ollama not reachable ({e})") from e
 
@@ -698,7 +751,14 @@ def route(transcript: str) -> dict:
         {"role": "user",   "content": transcript},
     ]
     try:
-        raw = _ollama_call(messages, temperature=0.1, max_tokens=200)
+        # max_tokens capped well below 200: a real classification only
+        # ever needs ~20-30 tokens for one JSON object, and 200 was
+        # observed (via Maya's Pinku-route reuse of this function) letting
+        # the model run away generating a huge garbled list of fake
+        # example classifications instead of stopping — wasted ~8s doing
+        # that before falling back to the exception handler's default.
+        # 60 still leaves real headroom over what a clean response needs.
+        raw = _ollama_call(messages, temperature=0.1, max_tokens=60)
     except Exception as e:
         print(f"[LLM] route error: {e} — defaulting to chat")
         return {"action": "chat", "transcript": transcript, "lang": "en"}
