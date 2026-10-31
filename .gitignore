@@ -17,3 +17,8 @@ venv/
 models/
 music_library/
 *.task
+
+# Prod-only files: backups and family voice profiles (repo is public)
+*.bak.*
+*.bak-*
+profiles/

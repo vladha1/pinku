@@ -1,10 +1,7 @@
 name: Deploy to M4
 
+# Manual only. Deploys normally go through the `deploy pinku` command on dev.
 on:
-  push:
-    branches:
-      - claude/pinky-sensitivity-responsiveness-ywYNp
-      - main
   workflow_dispatch:
 
 jobs:
@@ -16,10 +13,15 @@ jobs:
       - name: Pull latest code
         run: |
           cd ~/pinku
+          # Refuse to deploy over uncommitted prod edits instead of wiping them.
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "Prod has uncommitted edits — commit them to git first." >&2
+            git status --short --untracked-files=no >&2
+            exit 1
+          fi
           git fetch origin
-          # Hard sync to the pushed branch — never aborts on stray local edits
-          # in ~/pinku (which would block a normal `git pull` and fail the deploy).
-          git reset --hard origin/${{ github.ref_name }}
+          git checkout ${{ github.ref_name }}
+          git merge --ff-only origin/${{ github.ref_name }}
 
       - name: Run wake word tests
         run: |
