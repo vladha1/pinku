@@ -30,7 +30,14 @@ import asyncio
 from config import SAY_VOICE_EN, SAY_VOICE_HI, SAY_RATE
 
 # ── Edge-TTS voices ───────────────────────────────────────────────────────────
-EDGE_VOICE_EN = os.getenv("EDGE_VOICE_EN", "hi-IN-SwaraNeural")
+# EDGE_VOICE_EN used to default to a hi-IN voice (copy-paste bug) -- a
+# Hindi-locale voice reads English WORDS phonetically well enough to pass,
+# but verbalises numbers using Hindi number-naming rules regardless of the
+# surrounding text's language, so every number in an English reply (times,
+# quantities, verse numbers, etc.) came out in Hindi. en-IN-NeerjaNeural is
+# a real, confirmed-available (edge_tts.list_voices()) Indian-accented
+# English female voice -- same regional feel, correct language for numbers.
+EDGE_VOICE_EN = os.getenv("EDGE_VOICE_EN", "en-IN-NeerjaNeural")
 EDGE_VOICE_HI = os.getenv("EDGE_VOICE_HI", "hi-IN-SwaraNeural")
 
 _speak_lock    = threading.Lock()
@@ -228,11 +235,13 @@ def is_speaking() -> bool:
     return _speaking
 
 
-def _speak_edge(text: str, voice: str) -> float:
+def _speak_edge(text: str, voice: str, rate: str = "+0%") -> float:
     """
     Generate MP3 via edge-tts, read exact duration with afinfo,
     then play. Returns known duration so the caller can set the
     unmute timer before/during playback rather than after.
+    rate: edge-tts percentage speed adjustment (e.g. "+20%"), default
+    unchanged from edge-tts's own pace.
     """
     global _current_proc, _speaking
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
@@ -240,7 +249,7 @@ def _speak_edge(text: str, voice: str) -> float:
     duration = 0.0
     try:
         async def _gen():
-            comm = _edge_tts.Communicate(text, voice)
+            comm = _edge_tts.Communicate(text, voice, rate=rate)
             await comm.save(tmp.name)
         asyncio.run(_gen())
         # Exact duration from file — known BEFORE playback starts
@@ -307,10 +316,14 @@ def _speak_say(text: str, voice: str) -> float:
     return duration
 
 
-def speak(text: str, prefer_hi: bool = False, block: bool = False) -> float:
+def speak(text: str, prefer_hi: bool = False, block: bool = False, rate: str = "+0%") -> float:
     """
     Speak text via edge-tts (neural) or macOS say (fallback).
     prefer_hi=True → Hindi voice.  block=True → wait until done.
+    rate: edge-tts percentage speed adjustment (e.g. "+20%" for faster),
+    default "+0%" leaves edge-tts's own pace unchanged. Not applied to the
+    say fallback, which has its own separate SAY_RATE (words-per-minute)
+    config in config.py.
     Returns measured playback duration in seconds (only meaningful when block=True).
     """
     if not text or not text.strip():
@@ -327,7 +340,7 @@ def speak(text: str, prefer_hi: bool = False, block: bool = False) -> float:
             try:
                 if _EDGE_AVAILABLE:
                     voice = EDGE_VOICE_HI if is_hi else EDGE_VOICE_EN
-                    duration[0] = _speak_edge(text, voice)
+                    duration[0] = _speak_edge(text, voice, rate=rate)
                 else:
                     voice = SAY_VOICE_HI if is_hi else SAY_VOICE_EN
                     duration[0] = _speak_say(text, voice)
