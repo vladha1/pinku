@@ -355,8 +355,6 @@ def api_restart():
             )
         except Exception as e:
             print(f"[Restart] git pull failed: {e}")
-        # Also kill music_app.py so start_pinku.command restarts it with new code
-        subprocess.run(["pkill", "-f", "music_app.py"], capture_output=True)
         os.kill(os.getpid(), 15)   # SIGTERM → triggers the finally block in main()
 
     threading.Thread(target=_do_restart, daemon=True).start()
